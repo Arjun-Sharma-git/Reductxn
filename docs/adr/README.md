@@ -16,4 +16,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P11 req
 | 0008 | Group as the shard key | accepted |
 | 0009 | Spring Modulith modular monolith | accepted |
 | 0010 | Crypto-shredding for erasure | accepted |
-| 0011 | Netting must not increase the settlement tax | **proposed** |
+| 0011 | Netting must not increase the settlement tax | accepted |

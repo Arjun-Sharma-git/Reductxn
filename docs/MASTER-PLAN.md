@@ -746,13 +746,13 @@ Found while compiling and executing the pure core, and recorded here rather than
 
 ## Appendix B - Verified state
 
-**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 27 tests, none failing:
+**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 29 tests, none failing:
 
 | Suite | Tests | What it proves |
 |---|---|---|
 | `MoneyTest` | 7 | Exact integer money: arithmetic beyond 2^53, overflow throws, currencies never mix |
-| `GreedyNettingTest` | 5 | Worked example, flat members, empty group, and the sparse-set defect |
-| `GreedyNettingPropertyTest` | 7 | N1, N2, N3, N4, N6, N7, N8 over generated inputs |
+| `GreedyNettingTest` | 6 | Worked example, flat members, empty group, zero-amount obligations, and the sparse case that must settle directly |
+| `GreedyNettingPropertyTest` | 8 | N1, N2, N3, N4, N6, N7, N8, N9 over generated inputs |
 | `ModuleBoundaryTest` | 8 | RULEs B1, B2, B5, B8, B10 - verified non-vacuous: 30 classes imported |
 
 Toolchain constraints discovered by actually running the build. All are now pinned with reasons:
@@ -767,8 +767,10 @@ Toolchain constraints discovered by actually running the build. All are now pinn
 The pure core also still compiles standalone with plain `javac` (no Gradle, no Spring), which is the
 property that lets an auditor reproduce a settlement in isolation (principle P4).
 
-**Outstanding, tracked elsewhere:** ADR 0011 is `proposed` and unimplemented. Until the pairwise
-baseline lands, `taxSaved` can be negative and must not be presented to a group as a saving.
+ADR 0011 is implemented. The engine builds both the netted plan and the direct one, returns
+whichever costs less, and reports a saving that cannot go negative. That changed the wire contract:
+`contracts/openapi/reductxn-api.yaml` gained `pairwise` in the algorithm enum, edited before the code
+(RULE C1).
 
 **Not yet verified:** `apps/api`, `workers/settlement` and `apps/web` have no sources.
 `platform/persistence`, `platform/observability` and `platform/security` are not yet included in

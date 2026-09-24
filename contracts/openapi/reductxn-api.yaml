@@ -627,7 +627,7 @@ components:
         status:
           type: string
           enum: [pending, computing, awaiting_approval, executing, done, failed, rejected]
-        algorithm: { type: string, enum: [greedy, subset_partition, mip] }
+        algorithm: { type: string, enum: [greedy, subset_partition, mip, pairwise] }
         gross: { $ref: '#/components/schemas/Money' }
         net: { $ref: '#/components/schemas/Money' }
         tax: { $ref: '#/components/schemas/Money' }

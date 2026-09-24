@@ -43,11 +43,22 @@ public record NettingResult(
         Objects.requireNonNull(algorithm, "algorithm");
     }
 
-    /** Which tier of the two-tier engine (ADR 0005) produced this result. */
+    /** Which plan produced this result. */
     public enum Algorithm {
 
-        /** Tier 1: always correct, at most N-1 transfers. */
+        /** Tier 1 netting: always correct, at most N-1 transfers. */
         GREEDY,
+
+        /**
+         * Settling the obligations directly, one transfer each.
+         *
+         * <p>Chosen when netting would cost more than simply paying what is owed. Under a flat
+         * per-transfer tax that happens whenever the obligation set is sparse, because there is
+         * nothing for netting to remove and re-matching unrelated members can invent transfers
+         * (ADR 0011). A result with this algorithm means the group pays no more than it would have
+         * without reductxn, and {@code taxSaved} is zero.
+         */
+        PAIRWISE,
 
         /** Tier 2: zero-sum subset partitioning on top of Tier 1. */
         SUBSET_PARTITION,

@@ -97,13 +97,21 @@ class GreedyNettingPropertyTest {
     }
 
     @Property
-    void n4_transferCountRespectsTheMembersMinusOneBound(@ForAll("obligations") List<Obligation> obligations) {
+    void n4_nettedTransferCountRespectsTheMembersMinusOneBound(@ForAll("obligations") List<Obligation> obligations) {
         NettingResult result = ENGINE.net(NettingRequest.untaxed(INR, obligations));
 
         long nonZeroPositions = result.positions().stream()
                 .filter(position -> !position.net().isZero())
                 .count();
         long bound = Math.max(0L, nonZeroPositions - 1L);
+
+        if (result.algorithm() == NettingResult.Algorithm.PAIRWISE) {
+            // The direct plan is one transfer per obligation, so the N-1 bound does not describe it.
+            assertThat((long) result.transfers().size())
+                    .as("N4: the direct plan never exceeds one transfer per obligation")
+                    .isLessThanOrEqualTo((long) obligations.size());
+            return;
+        }
 
         assertThat((long) result.transfers().size())
                 .as("N4: N-1 bound for N members with a non-zero position")
@@ -133,28 +141,43 @@ class GreedyNettingPropertyTest {
     }
 
     @Property
-    void n8_taxIsNonNegativeAndSavedIsExactlyTheDifference(@ForAll("obligations") List<Obligation> obligations) {
+    void n8_taxAndTheReportedSavingAreNeverNegative(@ForAll("obligations") List<Obligation> obligations) {
         Money perTransfer = Money.of(50L, INR);
         TaxRule rule = TaxRules.flatPerTransfer(perTransfer);
 
         NettingResult result = ENGINE.net(new NettingRequest(INR, obligations, rule));
 
-        long pairwiseTax = perTransfer.amountMinor() * obligations.size();
+        long pairwiseUpperBound = perTransfer.amountMinor() * obligations.size();
 
         assertThat(result.tax().amountMinor())
                 .as("N8: tax is never negative")
                 .isGreaterThanOrEqualTo(0L);
         assertThat(result.taxSaved().amountMinor())
-                .as("N8: taxSaved is exactly pairwise tax minus netted tax")
-                .isEqualTo(pairwiseTax - result.tax().amountMinor());
+                .as("N8: the saving reported to a group is never negative (ADR 0011)")
+                .isGreaterThanOrEqualTo(0L);
+        assertThat(result.tax().amountMinor())
+                .as("N8: the chosen plan never costs more than settling the obligations directly")
+                .isLessThanOrEqualTo(pairwiseUpperBound);
+    }
 
-        // Deliberately NOT asserted here: that netted tax is always <= pairwise tax.
-        //
-        // It is false, and this suite proved it. When the obligation set is sparse relative to the
-        // member count, greedy netting can require MORE transfers than simply settling the
-        // obligations directly, which under a flat per-transfer tax costs MORE. See ADR 0011, and
-        // GreedyNettingTest.nettedPlanCanCostMoreThanPairwiseForSparseObligations which pins the
-        // exact counterexample. Until the pairwise-baseline guard is implemented, taxSaved may be
-        // negative and must not be presented to a group as a saving.
+    /**
+     * The property that makes the product's claim true rather than aspirational: using reductxn can
+     * never leave a group worse off than simply paying what it owes. This is the invariant ADR 0011
+     * exists to enforce, and the one that was false before it.
+     */
+    @Property
+    void n9_neverCostsMoreThanSettlingDirectly(@ForAll("obligations") List<Obligation> obligations) {
+        Money perTransfer = Money.of(50L, INR);
+
+        NettingResult result = ENGINE.net(new NettingRequest(
+                INR, obligations, TaxRules.flatPerTransfer(perTransfer)));
+
+        long directCost = obligations.stream()
+                .filter(obligation -> !obligation.amount().isZero())
+                .count() * perTransfer.amountMinor();
+
+        assertThat(result.tax().amountMinor())
+                .as("N9: the engine must never be worse than not using it")
+                .isLessThanOrEqualTo(directCost);
     }
 }
