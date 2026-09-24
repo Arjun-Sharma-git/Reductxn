@@ -36,7 +36,13 @@ val forbidFloatingPointMoney by tasks.registering {
     description = "RULE P1: no floating-point type in src/main/java of a domain module"
 
     val sourceDir = layout.projectDirectory.dir("src/main/java")
-    inputs.dir(sourceDir).withPropertyName("domainSources").optional()
+
+    // Declared as a file collection rather than inputs.dir(...) on purpose: inputs.dir asserts that
+    // the directory exists, which fails for modules that have test sources only
+    // (platform/testing). A file tree tolerates an absent root and simply contributes nothing.
+    inputs.files(fileTree(sourceDir) { include("**/*.java") })
+        .withPropertyName("domainSourceFiles")
+
     outputs.upToDateWhen { false }
 
     doLast {

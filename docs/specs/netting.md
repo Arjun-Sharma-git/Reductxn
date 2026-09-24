@@ -63,3 +63,32 @@ as the delta between the pairwise-tax and netted-tax figures.
 - Whether to expose transfer-size constraints (some rails cap a single transfer).
 - Whether optimality should be proven and stored per run, as an audit artefact.
 - Multi-currency groups: net per currency, no FX in v1.
+
+---
+
+## 7. Known defect: netting can cost more than pairwise (ADR 0011)
+
+The first full build of the property suite disproved a core assumption. Greedy netting is **not**
+always cheaper than settling the obligations directly.
+
+Measured counterexample, reproduced directly against the compiled engine:
+
+```
+3 obligations across 5 members:  A -> B 300,  A -> C 100,  D -> E 200
+pairwise settlement : 3 transfers, 150 tax
+greedy netting      : 4 transfers, 200 tax
+taxSaved            : -50
+```
+
+Netting removes transfers only when the obligation set is dense relative to the member count. A
+sparse set has nothing to remove, and re-matching unrelated members can invent transfers, so under a
+flat per-transfer tax the group is charged more.
+
+The bound in N4 (`transfers <= members - 1`) still holds. It is simply not the binding constraint.
+The relevant comparison is against the number of obligations, for which no bound exists.
+
+**Consequence for this spec:** properties N1-N7 remain valid. `taxSaved >= 0` is **not** valid today
+and must not be asserted or displayed until the pairwise baseline in ADR 0011 is implemented.
+
+**Required behaviour once fixed:** compute the pairwise plan and the netted plan, return the cheaper
+one, and report `taxSaved = max(0, pairwiseTax - chosenTax)`.

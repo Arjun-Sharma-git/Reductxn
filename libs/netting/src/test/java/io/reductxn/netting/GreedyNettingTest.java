@@ -110,6 +110,43 @@ class GreedyNettingTest {
         assertThat(result.taxSaved().amountMinor()).isZero();
     }
 
+    /**
+     * Pins a real defect that the property suite found, so it stays visible and so this test flips
+     * when the fix lands (ADR 0011).
+     *
+     * <p>Three obligations across five members. Settling them directly needs 3 transfers and 150 of
+     * flat tax. Greedy netting needs 4 transfers and 200 of tax: it makes the group 50 worse off.
+     *
+     * <p>Greedy reduces the transfer count only when the obligation set is dense relative to the
+     * member count. When it is sparse, the obligations are already the cheapest plan, so netting
+     * has nothing to remove and can invent extra transfers by re-matching unrelated members.
+     *
+     * <p>The fix is a pairwise baseline: compute both plans, keep the cheaper one, and never report
+     * a negative saving. Until that lands, this test asserts the current, incorrect behaviour
+     * deliberately - if it starts failing, that is good news.
+     */
+    @Test
+    void nettedPlanCanCostMoreThanPairwiseForSparseObligations() {
+        UUID e = new UUID(0L, 5L);
+        List<Obligation> obligations = List.of(
+                owes(A, B, 300L),
+                owes(A, C, 100L),
+                owes(D, e, 200L));
+
+        NettingResult result = ENGINE.net(new NettingRequest(
+                INR, obligations, TaxRules.flatPerTransfer(PER_TRANSFER_TAX)));
+
+        assertThat(result.grossTransferCount()).isEqualTo(3);
+        assertThat(result.netTransferCount()).isEqualTo(4);
+        assertThat(result.tax().amountMinor()).isEqualTo(200L);
+        assertThat(result.taxSaved().amountMinor()).isEqualTo(-50L);
+
+        // The netted plan is still internally sound: it does settle every member exactly.
+        // The defect is that it costs more than the simpler plan, not that it is wrong.
+        assertThat(result.positions().stream().mapToLong(position -> position.net().amountMinor()).sum())
+                .isZero();
+    }
+
     private static long netOf(NettingResult result, UUID userId) {
         return result.positions().stream()
                 .filter(position -> position.userId().equals(userId))

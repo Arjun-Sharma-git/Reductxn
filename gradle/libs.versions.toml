@@ -2,6 +2,10 @@
 # Every dependency used anywhere in reductxn is declared here exactly once.
 
 [versions]
+# Toolchain constraints, established by actually running the build (see MASTER-PLAN Appendix B).
+# They are pins with reasons, not preferences:
+#   - Gradle >= 9.1 is required to RUN on Java 25. Gradle 8.14.x tops out at Java 24.
+#     This project uses 9.7.1 via gradle/wrapper/gradle-wrapper.properties.
 java = "25"
 springBoot = "4.1.1"
 springFramework = "7.0.9"
@@ -9,7 +13,10 @@ jooq = "3.20.0"
 flyway = "11.0.0"
 postgresql = "42.7.5"
 testcontainers = "1.20.5"
-archunit = "1.4.0"
+# Must be >= 1.5.0. Earlier 1.x releases cannot read Java 25 bytecode (class file major version 69):
+# they import zero classes, and every architecture rule then fails as "emptyShould" - or, if
+# failOnEmptyShould is ever disabled, passes silently while enforcing nothing at all.
+archunit = "1.5.0"
 jqwik = "1.9.3"
 assertj = "3.27.0"
 mockito = "5.15.2"
@@ -21,6 +28,9 @@ kafka = "3.9.0"
 timefold = "1.26.0"
 
 # --- LTS track note: keep this aligned with the Spring Boot line we target (ADR 0002) ---
+
+junit = "5.11.4"
+junitPlatform = "1.11.4"
 
 [libraries]
 spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot" }

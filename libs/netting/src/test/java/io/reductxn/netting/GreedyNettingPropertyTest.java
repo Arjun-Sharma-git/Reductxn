@@ -141,12 +141,20 @@ class GreedyNettingPropertyTest {
 
         long pairwiseTax = perTransfer.amountMinor() * obligations.size();
 
-        assertThat(result.tax().amountMinor()).as("N8: tax is never negative").isGreaterThanOrEqualTo(0L);
+        assertThat(result.tax().amountMinor())
+                .as("N8: tax is never negative")
+                .isGreaterThanOrEqualTo(0L);
         assertThat(result.taxSaved().amountMinor())
                 .as("N8: taxSaved is exactly pairwise tax minus netted tax")
                 .isEqualTo(pairwiseTax - result.tax().amountMinor());
-        assertThat(result.tax().amountMinor())
-                .as("N8: netted tax can never exceed pairwise tax")
-                .isLessThanOrEqualTo(pairwiseTax);
+
+        // Deliberately NOT asserted here: that netted tax is always <= pairwise tax.
+        //
+        // It is false, and this suite proved it. When the obligation set is sparse relative to the
+        // member count, greedy netting can require MORE transfers than simply settling the
+        // obligations directly, which under a flat per-transfer tax costs MORE. See ADR 0011, and
+        // GreedyNettingTest.nettedPlanCanCostMoreThanPairwiseForSparseObligations which pins the
+        // exact counterexample. Until the pairwise-baseline guard is implemented, taxSaved may be
+        // negative and must not be presented to a group as a saving.
     }
 }

@@ -744,18 +744,35 @@ Found while compiling and executing the pure core, and recorded here rather than
 
 ---
 
-## Appendix B - Verified state at time of writing
+## Appendix B - Verified state
 
-The pure core was compiled and executed as part of producing this document:
+**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 27 tests, none failing:
 
-- `javac` compiled all `libs/*` main sources with no errors or warnings.
-- The worked example in `docs/specs/netting.md` section 5 was executed: 4 obligations netted to 3
-transfers, tax 1.50 against a pairwise 2.00, saving 0.50.
-- 5,000 generated groups (104,009 obligations) satisfied N1, N2, N3, N4 and N7.
-- Money behaviour confirmed: exact arithmetic beyond 2^53, overflow throws rather than wraps,
-currency mismatch throws, ad valorem floor and cap behave, and a zero base yields zero tax.
+| Suite | Tests | What it proves |
+|---|---|---|
+| `MoneyTest` | 7 | Exact integer money: arithmetic beyond 2^53, overflow throws, currencies never mix |
+| `GreedyNettingTest` | 5 | Worked example, flat members, empty group, and the sparse-set defect |
+| `GreedyNettingPropertyTest` | 7 | N1, N2, N3, N4, N6, N7, N8 over generated inputs |
+| `ModuleBoundaryTest` | 8 | RULEs B1, B2, B5, B8, B10 - verified non-vacuous: 30 classes imported |
 
-What is **not** yet verified: the Gradle build itself. The `gradlew` wrapper has not been generated,
-and `apps/api`, `workers/settlement` and `apps/web` have no sources yet. Those are Phase 1 work.
+Toolchain constraints discovered by actually running the build. All are now pinned with reasons:
+
+| Constraint | Why |
+|---|---|
+| **Gradle >= 9.1** | Java 25 support for *running Gradle* begins at 9.1. Gradle 8.14.x tops out at Java 24. This project uses 9.7.1. |
+| **ArchUnit >= 1.5.0** | ArchUnit 1.x before 1.5.0 cannot read Java 25 bytecode (class file major version 69). It imports zero classes, so every rule fails as `emptyShould` - or, if `failOnEmptyShould` is ever disabled, **passes silently while enforcing nothing**. Verified by importing 30 classes explicitly. |
+| **No `includeEngines(...)` on Test tasks** | Filtering by engine name silently excluded the ArchUnit engine (id `archunit`), so the architecture rules did not run at all and the task reported "did not discover any tests". |
+| **ArchUnit package identifiers are not regex** | `(kernel|ledger|...)` matches nothing. Use `resideInAnyPackage(...)`. |
+
+The pure core also still compiles standalone with plain `javac` (no Gradle, no Spring), which is the
+property that lets an auditor reproduce a settlement in isolation (principle P4).
+
+**Outstanding, tracked elsewhere:** ADR 0011 is `proposed` and unimplemented. Until the pairwise
+baseline lands, `taxSaved` can be negative and must not be presented to a group as a saving.
+
+**Not yet verified:** `apps/api`, `workers/settlement` and `apps/web` have no sources.
+`platform/persistence`, `platform/observability` and `platform/security` are not yet included in
+`settings.gradle.kts`. Those are Phase 1 work.
+
 
 *End of master plan. Changes to this document follow section 12.*

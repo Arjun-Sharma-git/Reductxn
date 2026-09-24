@@ -18,8 +18,14 @@ dependencies {
 }
 
 tasks.withType<Test>().configureEach {
-    useJUnitPlatform {
-        // jqwik supplies the property-based engine; junit-jupiter the example-based one.
-        includeEngines("junit-jupiter", "jqwik")
-    }
+    // Deliberately NOT filtering with includeEngines(...).
+    //
+    // Filtering by engine name silently skips any engine not listed. The first full build proved
+    // the cost: the ArchUnit engine (id "archunit") was omitted, so platform/testing reported
+    // "did not discover any tests" and the architecture rules never ran - the most valuable tests
+    // in the repository, quietly absent.
+    //
+    // The stack provides three engines: junit-jupiter (examples), jqwik (properties) and archunit
+    // (architecture rules). Let the platform discover all of them.
+    useJUnitPlatform()
 }

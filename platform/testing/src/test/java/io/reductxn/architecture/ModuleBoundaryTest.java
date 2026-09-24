@@ -21,18 +21,31 @@ import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.sli
 @AnalyzeClasses(packages = "io.reductxn", importOptions = ImportOption.DoNotIncludeTests.class)
 class ModuleBoundaryTest {
 
-    private static final String LIBS = "io.reductxn.(kernel|ledger|netting|rails)..";
+    /**
+     * The pure core, as separate package identifiers.
+     *
+     * <p>Deliberately NOT one pattern with alternation. ArchUnit package identifiers support only
+     * {@code *} and {@code ..}, not regular-expression groups. An alternation pattern matches
+     * nothing at all, which turns the rule vacuous instead of failing loudly - the exact opposite
+     * of what an architecture rule is for.
+     */
+    private static final String[] LIBS = {
+            "io.reductxn.kernel..",
+            "io.reductxn.ledger..",
+            "io.reductxn.netting..",
+            "io.reductxn.rails.."
+    };
 
     @ArchTest
     static final ArchRule b5_libs_are_framework_free =
-            noClasses().that().resideInAPackage(LIBS)
+            noClasses().that().resideInAnyPackage(LIBS)
                     .should().dependOnClassesThat().resideInAPackage("org.springframework..")
                     .because("RULE B5 / P4: libs/* must stay framework-free so an auditor can run "
                             + "the domain core without a container");
 
     @ArchTest
     static final ArchRule b5_libs_do_not_depend_on_deployables =
-            noClasses().that().resideInAPackage(LIBS)
+            noClasses().that().resideInAnyPackage(LIBS)
                     .should().dependOnClassesThat().resideInAPackage("io.reductxn.api..")
                     .because("RULE B5: the pure core must never depend on a deployable");
 
