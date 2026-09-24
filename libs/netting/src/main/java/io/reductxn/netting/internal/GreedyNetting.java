@@ -38,17 +38,24 @@ public final class GreedyNetting implements NettingEngine {
         TaxRule taxRule = request.taxRule();
 
         List<NetPosition> positions = computePositions(request);
-        List<TransferInstruction> transfers = computeTransfers(positions, taxRule, currency);
+        List<TransferInstruction> netted = computeTransfers(positions, taxRule, currency);
+        List<TransferInstruction> pairwise = computePairwiseTransfers(request.obligations(), taxRule);
 
-        List<Money> obligationAmounts = request.obligations().stream().map(Obligation::amount).toList();
-        List<Money> transferAmounts = transfers.stream().map(TransferInstruction::amount).toList();
-        List<Money> transferTaxes = transfers.stream().map(TransferInstruction::tax).toList();
-        List<Money> pairwiseTaxes = obligationAmounts.stream().map(taxRule::assess).toList();
+        Money nettedTax = taxOf(netted, currency);
+        Money pairwiseTax = taxOf(pairwise, currency);
 
-        Money gross = sum(obligationAmounts, currency);
-        Money net = sum(transferAmounts, currency);
-        Money tax = sum(transferTaxes, currency);
-        Money taxSaved = sum(pairwiseTaxes, currency).minus(tax);
+        // ADR 0011: never hand back a plan that costs the group more than paying what it owes.
+        boolean usePairwise = pairwiseIsCheaper(pairwiseTax, pairwise.size(), nettedTax, netted.size());
+
+        List<TransferInstruction> transfers = usePairwise ? pairwise : netted;
+        Money tax = usePairwise ? pairwiseTax : nettedTax;
+
+        Money gross = sum(request.obligations().stream().map(Obligation::amount).toList(), currency);
+        Money net = sum(transfers.stream().map(TransferInstruction::amount).toList(), currency);
+
+        // Zero whenever the direct plan was chosen, so this can never be reported as a negative
+        // saving.
+        Money taxSaved = pairwiseTax.minus(tax);
 
         return new NettingResult(
                 gross,
@@ -58,8 +65,50 @@ public final class GreedyNetting implements NettingEngine {
                 request.obligations().size(),
                 positions,
                 transfers,
-                NettingResult.Algorithm.GREEDY,
+                usePairwise ? NettingResult.Algorithm.PAIRWISE : NettingResult.Algorithm.GREEDY,
                 false);
+    }
+
+    /**
+     * Settles every obligation directly: one transfer per obligation, which is exactly what the
+     * group would do without reductxn. This is the baseline the netted plan has to beat (ADR 0011).
+     *
+     * <p>Zero-amount obligations are skipped: nothing needs to move, so there is nothing to tax.
+     */
+    static List<TransferInstruction> computePairwiseTransfers(List<Obligation> obligations, TaxRule taxRule) {
+        List<TransferInstruction> transfers = new ArrayList<>(obligations.size());
+        for (Obligation obligation : obligations) {
+            Money amount = obligation.amount();
+            if (amount.isZero()) {
+                continue;
+            }
+            transfers.add(new TransferInstruction(
+                    obligation.debtorId(),
+                    obligation.creditorId(),
+                    amount,
+                    taxRule.assess(amount)));
+        }
+        return List.copyOf(transfers);
+    }
+
+    /**
+     * True when the direct plan should be preferred over the netted one.
+     *
+     * <p>Lower tax wins outright. On equal tax the plan with fewer transfers wins, because fewer
+     * moves is less operational risk for the same money. A genuine tie keeps the netted plan, since
+     * that is the plan the product exists to produce (ADR 0011).
+     */
+    private static boolean pairwiseIsCheaper(
+            Money pairwiseTax, int pairwiseCount, Money nettedTax, int nettedCount) {
+        int byTax = pairwiseTax.compareTo(nettedTax);
+        if (byTax != 0) {
+            return byTax < 0;
+        }
+        return pairwiseCount < nettedCount;
+    }
+
+    private static Money taxOf(List<TransferInstruction> transfers, Currency currency) {
+        return sum(transfers.stream().map(TransferInstruction::tax).toList(), currency);
     }
 
     /**

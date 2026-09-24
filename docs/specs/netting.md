@@ -66,29 +66,30 @@ as the delta between the pairwise-tax and netted-tax figures.
 
 ---
 
-## 7. Known defect: netting can cost more than pairwise (ADR 0011)
+## 7. The pairwise baseline (ADR 0011)
 
-The first full build of the property suite disproved a core assumption. Greedy netting is **not**
-always cheaper than settling the obligations directly.
-
-Measured counterexample, reproduced directly against the compiled engine:
-
-```
-3 obligations across 5 members:  A -> B 300,  A -> C 100,  D -> E 200
-pairwise settlement : 3 transfers, 150 tax
-greedy netting      : 4 transfers, 200 tax
-taxSaved            : -50
-```
+Greedy netting is **not** always cheaper than settling the obligations directly. The property suite
+found this on the first full build: three obligations across five members needed 4 transfers when
+netted against 3 when settled directly, so a flat per-transfer tax rose from 150 to 200.
 
 Netting removes transfers only when the obligation set is dense relative to the member count. A
-sparse set has nothing to remove, and re-matching unrelated members can invent transfers, so under a
-flat per-transfer tax the group is charged more.
+sparse set has nothing to remove, and re-matching unrelated members can invent transfers.
 
-The bound in N4 (`transfers <= members - 1`) still holds. It is simply not the binding constraint.
-The relevant comparison is against the number of obligations, for which no bound exists.
+The N4 bound (`transfers <= members - 1`) still holds for the netted plan; it never was the binding
+constraint here. The relevant comparison is against the number of obligations, for which no bound
+exists.
 
-**Consequence for this spec:** properties N1-N7 remain valid. `taxSaved >= 0` is **not** valid today
-and must not be asserted or displayed until the pairwise baseline in ADR 0011 is implemented.
+**Required behaviour, now implemented:** build both plans, return the cheaper one, and report
+`taxSaved = pairwiseTax - chosenTax`, which therefore cannot be negative. Tie-breaking is by tax
+first, then by transfer count, then the netted plan wins. A result carrying
+`Algorithm.PAIRWISE` means no saving was available and `taxSaved` is zero.
 
-**Required behaviour once fixed:** compute the pairwise plan and the netted plan, return the cheaper
-one, and report `taxSaved = max(0, pairwiseTax - chosenTax)`.
+Measured on the compiled engine:
+
+```
+dense  (4 obligations, 4 members):  GREEDY    chosen, 3 transfers, tax 150, saved 50
+sparse (3 obligations, 5 members):  PAIRWISE  chosen, 3 transfers, tax 150, saved  0
+```
+
+Properties N8 (`taxSaved >= 0`) and N9 (the engine never costs more than settling directly) assert
+this. N9 is what makes the product's central claim true rather than aspirational.

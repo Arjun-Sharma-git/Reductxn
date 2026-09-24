@@ -1,8 +1,9 @@
 # ADR 0011 - Netting must not increase the settlement tax
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-09-24
-- **Related:** principles P10; ADR 0005, ADR 0006; RULEs B3, B10
+- **Implemented:** `GreedyNetting`, branch `fix/netting-pairwise-baseline`
+- **Related:** principles P10; ADR 0005, ADR 0006; RULEs B3, B10, C1
 
 ## Context
 
@@ -44,8 +45,8 @@ The relevant comparison is against the number of obligations, and no such bound 
 
 ## Decision
 
-**Proposed.** Not yet implemented. The engine must guarantee that the plan it returns is never more
-expensive than settling the obligations directly:
+The engine must guarantee that the plan it returns is never more expensive than settling the
+obligations directly:
 
 1. Compute the **pairwise baseline** - one transfer per obligation, with its tax.
 2. Compute the **netted plan** - greedy, and any optimiser tier available.
@@ -55,6 +56,36 @@ expensive than settling the obligations directly:
 5. `NettingResult.Algorithm` gains a value for the baseline case, so a run records which plan was
    chosen and why. This is a contract change: `contracts/openapi/reductxn-api.yaml` must be updated
    **first** (RULE C1), then the client regenerated (RULE C3).
+
+### As implemented
+
+- `contracts/openapi/reductxn-api.yaml` was updated first, adding `pairwise` to the algorithm enum
+  (RULE C1). Client regeneration follows when a client exists to regenerate.
+- `NettingResult.Algorithm.PAIRWISE` records that the direct plan was chosen.
+- **Tie-breaking:** lower tax wins; on equal tax the plan with fewer transfers wins, because fewer
+  moves is less operational risk for the same money; a genuine tie keeps the netted plan.
+- **Zero-amount obligations** produce no transfer in either plan, because nothing needs to move and
+  there is nothing to tax. Without this the direct plan would emit a zero transfer, which the
+  instruction record rejects.
+- Measured against the compiled engine after the change:
+
+  ```
+  dense  (4 obligations, 4 members):  GREEDY    chosen, 3 transfers, tax 150, saved 50
+  sparse (3 obligations, 5 members):  PAIRWISE  chosen, 3 transfers, tax 150, saved  0
+  ```
+
+  The sparse case previously chose the netted plan and reported minus 50.
+- Properties N8 (tax and the reported saving are never negative) and N9 (the engine never costs more
+  than settling directly) now hold and are asserted by the property suite. N9 is the invariant that
+  makes the product's claim true rather than aspirational.
+
+### On ad valorem
+
+The guard is expressed through the active rule's own `assess` function, not a transfer count, so it
+is correct for every rule shape. Under pure ad valorem the direct plan carries higher volume by
+construction, so the netted plan normally wins and this guard rarely fires. It still earns its place:
+a per-transfer minimum charge makes the direct plan's tax scale with the transfer count, and that is
+exactly the regime where netting has to prove it is better.
 
 ## Consequences
 
@@ -78,9 +109,8 @@ expensive than settling the obligations directly:
 - **Only allow netting when obligations outnumber members.** Rejected: too crude. A dense group can
   still contain a sparse subset worth settling directly.
 
-## Open question
+## Effect on the property suite
 
-For **ad valorem** tax the objective is volume, not count, and the pairwise baseline has higher
-volume by construction, so the defect may not arise there. The guard should be expressed in terms of
-the active tax rule's own `assess` function rather than a transfer count, so it is correct for every
-rule shape. Verify before implementing.
+N1-N7 are unaffected. N8 changed meaning: it previously asserted that `taxSaved` was exactly the
+difference between the two plans, and it now also asserts that neither the tax nor the reported
+saving can be negative. N9 is new, and it is the property that holds this decision in place.
