@@ -1,0 +1,60 @@
+# Single dependency version catalogue (RULE B9).
+# Every dependency used anywhere in reductxn is declared here exactly once.
+
+[versions]
+java = "25"
+springBoot = "4.1.1"
+springFramework = "7.0.9"
+jooq = "3.20.0"
+flyway = "11.0.0"
+postgresql = "42.7.5"
+testcontainers = "1.20.5"
+archunit = "1.4.0"
+jqwik = "1.9.3"
+assertj = "3.27.0"
+mockito = "5.15.2"
+resilience4j = "2.3.0"
+micrometer = "1.15.0"
+otel = "2.16.0"
+caffeine = "3.2.0"
+kafka = "3.9.0"
+timefold = "1.26.0"
+
+# --- LTS track note: keep this aligned with the Spring Boot line we target (ADR 0002) ---
+
+[libraries]
+spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot" }
+spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web" }
+spring-boot-starter-validation = { module = "org.springframework.boot:spring-boot-starter-validation" }
+spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
+spring-boot-starter-security = { module = "org.springframework.boot:spring-boot-starter-security" }
+spring-boot-starter-data-redis = { module = "org.springframework.boot:spring-boot-starter-data-redis" }
+spring-boot-starter-batch = { module = "org.springframework.boot:spring-boot-starter-batch" }
+spring-boot-starter-jooq = { module = "org.springframework.boot:spring-boot-starter-jooq" }
+spring-modulith-core = { module = "org.springframework.modulith:spring-modulith-starter-core" }
+spring-modulith-test = { module = "org.springframework.modulith:spring-modulith-starter-test" }
+flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
+flyway-postgres = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+resilience4j-circuitbreaker = { module = "io.github.resilience4j:resilience4j-circuitbreaker", version.ref = "resilience4j" }
+resilience4j-ratelimiter = { module = "io.github.resilience4j:resilience4j-ratelimiter", version.ref = "resilience4j" }
+caffeine = { module = "com.github.ben-manes.caffeine:caffeine", version.ref = "caffeine" }
+micrometer-core = { module = "io.micrometer:micrometer-core", version.ref = "micrometer" }
+spring-kafka = { module = "org.springframework.kafka:spring-kafka", version.ref = "kafka" }
+timefold-solver = { module = "ai.timefold.solver:timefold-solver-core", version.ref = "timefold" }
+
+# --- Testing ---
+archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
+jqwik = { module = "net.jqwik:jqwik", version.ref = "jqwik" }
+assertj = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+mockito-core = { module = "org.mockito:mockito-core", version.ref = "mockito" }
+testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
+testcontainers-junit = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
+
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junitPlatform" }
+
+[plugins]
+spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }
+spring-dependency-management = { id = "io.spring.dependency-management", version = "1.1.7" }
+jooq-codegen = { id = "org.jooq.jooq-codegen-gradle", version.ref = "jooq" }

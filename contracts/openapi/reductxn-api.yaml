@@ -1,0 +1,649 @@
+openapi: 3.1.0
+
+info:
+  title: reductxn API
+  version: 1.0.0
+  description: |
+    Non-custodial group commitment ledger with tax-optimised CBDC settlement.
+
+    This file is the SOURCE OF TRUTH (RULE C1). Do not edit generated clients.
+    All amounts are integer minor units. There are no floating-point amounts anywhere.
+
+servers:
+  - url: https://api.reductxn.example/v1
+    description: Production
+  - url: http://localhost:8080/v1
+    description: Local
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+  - name: me
+  - name: groups
+  - name: obligations
+  - name: netting
+  - name: settlement
+  - name: tax
+  - name: webhooks
+
+paths:
+  /auth/otp/request:
+    post:
+      tags: [auth]
+      summary: Request an OTP for a phone number
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phoneNumber]
+              properties:
+                phoneNumber: { type: string }
+      responses:
+        '202': { description: Accepted }
+        '429': { description: Rate limited }
+
+  /auth/otp/verify:
+    post:
+      tags: [auth]
+      summary: Verify an OTP and receive tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phoneNumber, code, deviceId]
+              properties:
+                phoneNumber: { type: string }
+                code: { type: string }
+                deviceId: { type: string }
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate the refresh token
+      security: []
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /me:
+    get:
+      tags: [me]
+      summary: Current user profile and KYC tier
+      responses:
+        '200':
+          description: Profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+
+  /groups:
+    get:
+      tags: [groups]
+      summary: List groups the caller belongs to
+      responses:
+        '200':
+          description: Groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Group' }
+    post:
+      tags: [groups]
+      summary: Create a group
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, currency]
+              properties:
+                name: { type: string, maxLength: 120 }
+                currency: { $ref: '#/components/schemas/Currency' }
+                maxMembers: { type: integer, default: 200, maximum: 200 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '409': { description: Group already exists }
+
+  /groups/{groupId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [groups]
+      summary: Group detail
+      responses:
+        '200':
+          description: Group
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /groups/{groupId}/members:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [groups]
+      summary: List members with their roles and credit limits
+      responses:
+        '200':
+          description: Members
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Member' }
+    post:
+      tags: [groups]
+      summary: Add a member directly (admin only)
+      responses:
+        '201': { description: Member added }
+
+  /groups/{groupId}/invites:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    post:
+      tags: [groups]
+      summary: Create an invite code
+      responses:
+        '201':
+          description: Invite created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invite' }
+
+  /invites/{code}/accept:
+    post:
+      tags: [groups]
+      summary: Accept an invite and join the group
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Joined }
+        '410': { description: Invite expired or exhausted }
+
+  /groups/{groupId}/balances:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [netting]
+      summary: Current net position per member over open obligations
+      responses:
+        '200':
+          description: Balances
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/NetPosition' }
+
+  /groups/{groupId}/activity:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [groups]
+      summary: Group activity feed
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        '200': { description: Activity page }
+
+  /obligations:
+    get:
+      tags: [obligations]
+      summary: List obligations, filterable by group, member, status and date
+      parameters:
+        - name: groupId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, netted, settled, voided]
+        - name: memberId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: sort
+          in: query
+          schema: { type: string, example: '-occurredAt' }
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Obligations
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Obligation' }
+    post:
+      tags: [obligations]
+      summary: Record an obligation (a commitment, not a money movement)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [groupId, debtorId, creditorId, amount, memo]
+              properties:
+                groupId: { type: string, format: uuid }
+                debtorId: { type: string, format: uuid }
+                creditorId: { type: string, format: uuid }
+                amount: { $ref: '#/components/schemas/Money' }
+                memo: { type: string, maxLength: 280 }
+                occurredAt: { type: string, format: date-time }
+      responses:
+        '201':
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Obligation' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { description: Group ingestion rate limit exceeded }
+
+  /obligations/{obligationId}/void:
+    post:
+      tags: [obligations]
+      summary: Void an obligation (compensating entry, never a delete)
+      parameters:
+        - name: obligationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': { description: Voided }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /groups/{groupId}/netting/preview:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [netting]
+      summary: What-if netting over currently open obligations
+      parameters:
+        - name: asOf
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Preview result, including the tax saving versus pairwise settlement
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NettingPreview' }
+
+  /groups/{groupId}/cycles:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    post:
+      tags: [settlement]
+      summary: Open or close a settlement cycle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [open, close] }
+                periodStart: { type: string, format: date }
+                periodEnd: { type: string, format: date }
+      responses:
+        '201': { description: Cycle state changed }
+
+  /cycles/{cycleId}/runs:
+    post:
+      tags: [settlement]
+      summary: Compute a settlement run for a closed cycle (asynchronous)
+      parameters:
+        - name: cycleId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '202':
+          description: Accepted - poll the run for status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettlementRun' }
+
+  /runs/{runId}:
+    get:
+      tags: [settlement]
+      summary: Settlement run status and headline numbers
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettlementRun' }
+
+  /runs/{runId}/approve:
+    post:
+      tags: [settlement]
+      summary: Approve a computed run (quorum enforced server-side)
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Approval recorded }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /runs/{runId}/execute:
+    post:
+      tags: [settlement]
+      summary: Submit the approved run to the payment rail (idempotent)
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202': { description: Execution started }
+        '409': { description: Quorum not reached, or already executing }
+
+  /runs/{runId}/transfers:
+    get:
+      tags: [settlement]
+      summary: The who-pays-whom instruction list
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Transfer instructions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TransferInstruction' }
+
+  /tax/reports:
+    get:
+      tags: [tax]
+      summary: Tax report for a period, including savings versus pairwise settlement
+      parameters:
+        - name: groupId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: periodStart
+          in: query
+          schema: { type: string, format: date }
+        - name: periodEnd
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200': { description: Tax report }
+
+  /tax/rules:
+    get:
+      tags: [tax]
+      summary: Active tax rules (reference data, no PII)
+      responses:
+        '200':
+          description: Rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TaxRule' }
+
+  /webhooks/rails/{provider}:
+    post:
+      tags: [webhooks]
+      summary: Rail status callback (signature-verified, idempotent)
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '202': { description: Accepted }
+        '401': { description: Invalid signature }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, maxLength: 128 }
+
+  responses:
+    Problem:
+      description: RFC 9457 problem+json
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Currency:
+      type: string
+      description: ISO 4217 code, or the CBDC ledger code for the jurisdiction
+      example: INR
+
+    Money:
+      type: object
+      description: Integer minor units. Never a floating-point value.
+      required: [amountMinor, currency]
+      properties:
+        amountMinor:
+          type: integer
+          format: int64
+          description: Amount in the currency's minor unit
+          example: 400000
+        currency: { $ref: '#/components/schemas/Currency' }
+
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string, description: Stable machine-readable error code }
+
+    TokenPair:
+      type: object
+      required: [accessToken, refreshToken, expiresIn]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresIn: { type: integer, description: Seconds }
+
+    User:
+      type: object
+      required: [id, displayName, kycTier]
+      properties:
+        id: { type: string, format: uuid }
+        displayName: { type: string }
+        kycTier: { type: string, enum: [none, basic, full] }
+
+    Group:
+      type: object
+      required: [id, name, currency, memberCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        currency: { $ref: '#/components/schemas/Currency' }
+        memberCount: { type: integer }
+        maxMembers: { type: integer }
+        nettingPolicy: { type: string, description: Summary of the group's netting and default policy }
+        createdAt: { type: string, format: date-time }
+
+    Member:
+      type: object
+      required: [userId, displayName, role]
+      properties:
+        userId: { type: string, format: uuid }
+        displayName: { type: string }
+        role: { type: string, enum: [admin, member] }
+        creditLimit: { $ref: '#/components/schemas/Money' }
+
+    Invite:
+      type: object
+      required: [code, expiresAt]
+      properties:
+        code: { type: string }
+        expiresAt: { type: string, format: date-time }
+        maxUses: { type: integer }
+
+    Obligation:
+      type: object
+      required: [id, groupId, debtorId, creditorId, amount, status, occurredAt]
+      properties:
+        id: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        debtorId: { type: string, format: uuid }
+        creditorId: { type: string, format: uuid }
+        amount: { $ref: '#/components/schemas/Money' }
+        memo: { type: string }
+        status: { type: string, enum: [open, netted, settled, voided] }
+        occurredAt: { type: string, format: date-time }
+
+    NetPosition:
+      type: object
+      required: [userId, direction, net]
+      properties:
+        userId: { type: string, format: uuid }
+        direction: { type: string, enum: [pay, receive, flat] }
+        net: { $ref: '#/components/schemas/Money' }
+
+    TransferInstruction:
+      type: object
+      required: [fromUserId, toUserId, amount, tax, status]
+      properties:
+        fromUserId: { type: string, format: uuid }
+        toUserId: { type: string, format: uuid }
+        amount: { $ref: '#/components/schemas/Money' }
+        tax: { $ref: '#/components/schemas/Money' }
+        status:
+          type: string
+          enum: [pending, authorized, submitted, confirmed, failed]
+        railRef: { type: string, nullable: true }
+        failureReason: { type: string, nullable: true }
+
+    NettingPreview:
+      type: object
+      required: [bestCase, taxSaved]
+      properties:
+        grossTransferCount: { type: integer }
+        netTransferCount: { type: integer }
+        grossTax: { $ref: '#/components/schemas/Money' }
+        netTax: { $ref: '#/components/schemas/Money' }
+        taxSaved: { $ref: '#/components/schemas/Money' }
+        provablyOptimal: { type: boolean }
+        bestCase:
+          type: object
+          properties:
+            positions:
+              type: array
+              items: { $ref: '#/components/schemas/NetPosition' }
+            transfers:
+              type: array
+              items: { $ref: '#/components/schemas/TransferInstruction' }
+
+    SettlementRun:
+      type: object
+      required: [id, cycleId, groupId, status]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [pending, computing, awaiting_approval, executing, done, failed, rejected]
+        algorithm: { type: string, enum: [greedy, subset_partition, mip] }
+        gross: { $ref: '#/components/schemas/Money' }
+        net: { $ref: '#/components/schemas/Money' }
+        tax: { $ref: '#/components/schemas/Money' }
+        taxSaved: { $ref: '#/components/schemas/Money' }
+        transferCount: { type: integer }
+        computedAt: { type: string, format: date-time, nullable: true }
+        executedAt: { type: string, format: date-time, nullable: true }
+
+    TaxRule:
+      type: object
+      required: [id, jurisdiction, currency, kind, effectiveFrom]
+      properties:
+        id: { type: string, format: uuid }
+        jurisdiction: { type: string }
+        currency: { $ref: '#/components/schemas/Currency' }
+        kind: { type: string, enum: [flat, advalorem, threshold] }
+        description: { type: string }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date, nullable: true }

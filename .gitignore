@@ -1,0 +1,34 @@
+# --- Gradle ---
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# --- Java ---
+*.class
+out/
+
+# --- Node / web ---
+node_modules/
+dist/
+.turbo/
+coverage/
+
+# --- IDE ---
+.idea/
+.vscode/
+*.iml
+
+# --- Secrets. Never commit these; see ADR 0010 for the key-management posture. ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.p12
+*.jks
+
+# --- OS ---
+.DS_Store
+
+# NOTE: generated API clients are deliberately NOT ignored.
+# RULE C2 requires them committed so builds are reproducible; CI (RULE C3) fails
+# if regeneration produces a diff. Do not add them to this file.
