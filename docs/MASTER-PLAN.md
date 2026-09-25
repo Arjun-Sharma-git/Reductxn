@@ -666,6 +666,7 @@ Modularity that is not checked is not real. Every pull request runs:
 | Import boundaries | `eslint-plugin-boundaries` | RULE F1-F12 violated |
 | Money discipline | lint ban on `double`/`float` in domain + ESLint ban on division by 100 | P1 violated. **Live**: the `forbidFloatingPointMoney` task in `build-logic` |
 | Import style | `forbidWildcardImports` task - **live** | A wildcard import appears (RULE N1) |
+| Tracked source | `forbidIgnoredSources` task - **live** | A source file that `.gitignore` excludes, so it compiles and tests green locally and is absent from every clone |
 | FX exactness | jqwik X1-X7 - **live** | A conversion is non-deterministic, the residual is not booked, or the round trip drifts |
 | FX isolation | ArchUnit - **live** | A rate is multiplied anywhere outside `libs/fx` (B18, B19). Non-vacuous, and guarded against becoming vacuous |
 | Error-code convention | `DomainErrorCodeTest` - **live** | A code is malformed, namespaced by the wrong module, duplicated, or not declared as a constant |
@@ -971,10 +972,16 @@ down from 17 when the journal entry types landed and five of ledger's nine invar
 map is checked in the other direction too: a deferral whose property a test now labels fails the build as
 stale, which is how the five were found rather than remembered.
 
-**Two guards here are not ArchUnit rules, and both matter as much:** `forbidFloatingPointMoney` and
-`forbidWildcardImports` are Gradle verification tasks in `build-logic`, so they run for every module
-rather than only for the one with architecture tests. RULE N1 had been recorded as "not yet gated"
-since it was written; it is gated now.
+**Three guards here are not ArchUnit rules, and all three matter as much:** `forbidFloatingPointMoney`,
+`forbidWildcardImports` and `forbidIgnoredSources` are Gradle verification tasks in `build-logic`, so they
+run for every module rather than only for the one with architecture tests. RULE N1 had been recorded as
+"not yet gated" since it was written; it is gated now.
+
+The third guard came from a real miss rather than from a principle. A bare `out/` in `.gitignore` - the
+usual Java idiom for an IDE's build directory - matched `port/out`, which section 5.4 prescribes by name,
+so two source files were never committed. `git add -A` does not warn about ignored paths, the local build
+was green, and only a fresh clone failed. A guard that cannot be run locally would not have been worth
+adding; this one runs on every `check`.
 
 **What is designed versus what exists.** This distinction matters more than usual after a design-heavy
 change, so it is stated explicitly:
@@ -1027,6 +1034,7 @@ Toolchain constraints discovered by actually running the build. All are now pinn
 | **Spring Boot 4 manages JUnit 6, and the catalogue pinned JUnit 5** | `spring-boot-starter-test` brings platform 6 while the pure modules pinned 5.11.4, so the launcher resolved to 6.0.3 against an engine at 1.11.4 and the engine refused to discover any tests: `OutputDirectoryCreator not available`. Not a version preference - two platform majors on one classpath is a broken test run. The repository is on one stack now, at the versions Boot manages, which jqwik 1.9.3 accepts. |
 | **`@ExceptionHandler` cannot target an interface** | It requires a `Class<? extends Throwable>`, so "handle every exception that implements `DomainError`" - which is precisely what "every domain failure carries a code" means - is not expressible as a controller advice. `apps/api` uses a `HandlerExceptionResolver` instead, which has a second advantage: it can decline, so a framework error keeps the status it deserves rather than becoming a 500. |
 | **Spring Boot 4 no longer ships `@AutoConfigureMockMvc`** | No artifact in the module exposes it. MockMvc is built from the framework directly (`MockMvcBuilders.webAppContextSetup`), which is one less Boot test dependency for a module that needs none of the rest of them. |
+| **A green local build says nothing about the commit** | A bare `out/` in `.gitignore` matched `port/out`, which section 5.4 prescribes by name. Two source files were never committed: they existed locally, so everything compiled and every test passed, and a fresh clone failed to compile. `git add -A` does not warn about ignored paths. The signal is now `forbidIgnoredSources` on every `check`, and the lesson generalises - the artefact a green build proves nothing about was the commit itself. |
 
 The pure core also still compiles standalone with plain `javac` (no Gradle, no Spring), which is the
 property that lets an auditor reproduce a settlement in isolation (principle P4).
