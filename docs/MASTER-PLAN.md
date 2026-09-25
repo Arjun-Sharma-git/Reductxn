@@ -631,7 +631,8 @@ Modularity that is not checked is not real. Every pull request runs:
 | Gate | Tool | Fails when |
 |---|---|---|
 | Module graph | ArchUnit + Spring Modulith | RULE B1-B21 violated. **Live**: 16 rules, all verified non-vacuous |
-| Rule coverage | `RuleCoverageTest` - **live** | A RULE is declared in this plan and is neither enforced nor explicitly deferred, a coverage entry is stale, or a claimed enforcement does not resolve to something that runs |
+| Rule coverage | `RuleCoverageTest` - **live** | A RULE declared in this plan *or in `docs/specs`* is neither enforced nor explicitly deferred, a coverage entry is stale, or a claimed enforcement does not resolve to something that runs |
+| Property coverage | `PropertyCoverageTest` - **live** | A property declared in a spec has no assertion labelled with its id and no recorded reason, or a test labels a property that no spec defines |
 | Import boundaries | `eslint-plugin-boundaries` | RULE F1-F12 violated |
 | Money discipline | lint ban on `double`/`float` in domain + ESLint ban on division by 100 | P1 violated. **Live**: the `forbidFloatingPointMoney` task in `build-logic` |
 | Import style | `forbidWildcardImports` task - **live** | A wildcard import appears (RULE N1) |
@@ -892,13 +893,13 @@ lives in a document is no longer the situation for either.
 
 ## Appendix B - Verified state
 
-**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 96 tests, none failing:
+**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 99 tests, none failing:
 
 | Suite | Tests | What it proves |
 |---|---|---|
 | `MoneyTest` | 7 | Exact integer money: arithmetic beyond 2^53, overflow throws, currencies never mix |
 | `GreedyNettingTest` | 6 | Worked example, flat members, empty group, zero-amount obligations, and the sparse case that must settle directly |
-| `GreedyNettingPropertyTest` | 8 | N1, N2, N3, N4, N6, N7, N8, N9 over generated inputs |
+| `GreedyNettingPropertyTest` | 8 | N1, N2, N3, N4, N6, N7, N8, N9 over generated inputs. Every assertion is labelled with its property id. N5 is *not* here: it compares an optimizer against the baseline and no optimizer exists (netting.md section 4) |
 | `FxRateTest` | 8 | A rate cannot exist malformed: no self-rate, no non-positive numerator, bounded scale, expiry after quote |
 | `FxConverterTest` | 18 | The spec's worked examples, both signs of the residual, the zero-rounding refusal, the overflow boundary, quote locking and quote magnitudes |
 | `FxConverterPropertyTest` | 9 | X1-X6 over generated inputs. X2 checked against an independent `BigInteger` oracle |
@@ -907,10 +908,22 @@ lives in a document is no longer the situation for either.
 | `ModuleBoundaryTest` | 16 | RULEs B1-B5, B8, B10, B11, B18, B19, B21 |
 | `ArchUnitVisibilityTest` | 1 | That the architecture rules above are not vacuous |
 | `DomainErrorCodeTest` | 1 | That every error code is well formed, namespaced by its own module, unique, and declared as a constant |
-| `RuleCoverageTest` | 2 | That every RULE in this plan is enforced or explicitly deferred, and that every claimed enforcement resolves to something that actually runs |
+| `RuleCoverageTest` | 2 | That every RULE in the plan *or the specs* is enforced or explicitly deferred, and that every claimed enforcement resolves to something that actually runs |
+| `PropertyCoverageTest` | 3 | That every property in the specs is labelled by a test assertion or explicitly deferred, and that no test labels a property no spec defines |
 
 All 16 architecture rules are verified non-vacuous, and that verification is automated rather than
 something a reviewer has to notice. See the constraint table below.
+
+**Coverage is checked for behaviour as well as structure.** `S1-S5` - quorum, idempotency, partial
+application and the FX funding rule - are declared in `docs/specs/settlement.md` rather than in this
+plan, and the first version of `RuleCoverageTest` read only this file and reported full coverage while
+five rules had no decision at all. It reads the specs now.
+
+Properties are held to the same standard by `PropertyCoverageTest`, which detects coverage rather than
+declaring it: a property counts as covered when a test labels an assertion with its id
+(`.as("X7: ...")`), a convention the property tests already followed. Nothing has to be maintained for a
+covered property, so only the exceptions need an entry - and `N5`, all of ledger's `L1-L9` and all of
+i18n's `I1-I7` have one, with reasons. That is 17 decisions that were previously invisible.
 
 **Two guards here are not ArchUnit rules, and both matter as much:** `forbidFloatingPointMoney` and
 `forbidWildcardImports` are Gradle verification tasks in `build-logic`, so they run for every module
