@@ -16,6 +16,7 @@ include(":libs:kernel")
 include(":libs:ledger")
 include(":libs:netting")
 include(":libs:fx")
+include(":libs:settlement")
 include(":libs:rails")
 
 // --- Deployables ---
