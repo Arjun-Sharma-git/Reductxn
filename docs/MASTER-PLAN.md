@@ -224,27 +224,32 @@ another module's `api` dependencies, and a cycle is impossible by construction.
 ### 5.1 Module graph and dependency rules
 
 ```
-                         +-----------+
-                         |  kernel   |
-                         +-----+-----+
-                               ^
-              +----------------+----------------+
-              |                |                |
-         +---------+      +----------+    +----------+    +----------+
-         | ledger  |      | netting  |    |    fx    |    |  rails   |
-         +----+----+      +-----+----+    +-----+----+    +-----+----+
-              ^                 ^               ^               ^
-              +--------+--------+---------------+---------------+
-                       |
-         +-------------+---------------+     +---------------------+
-         |         apps/api            |     |  workers/settlement |
-         +-------------+---------------+     +----------+----------+
-                       ^                                ^
-                       +-------------+------------------+
-                                     |
-                             +-------+--------+
-                             |   platform     |
-                             +----------------+
+                          +-----------+
+                          |  kernel   |
+                          +-----+-----+
+                                ^
+              +-----------------+-----------------+
+              |                 |                 |
+         +---------+       +----------+      +----------+      +----------+
+         | ledger  |       | netting  |      |    fx    |      |  rails   |
+         +----+----+       +-----+----+      +-----+----+      +-----+----+
+              ^                  ^ ^               ^ ^               ^
+              |                  | |               | |               |
+              |                  | +------+--------+ |               |
+              |                  |        |          |               |
+              |                  +--------+----------+               |
+              |                           |                           |
+              |                    +------v------+                    |
+              |                    | settlement  |                    |
+              |                    +------+------+                    |
+              |                           |                           |
+              +-------------+-------------+---------------------------+
+                            |
+          +-----------------+------------------+
+          |                                    |
+  +-------v--------+                  +--------v-----------+
+  |   apps/api     |                  | workers/settlement |
+  +----------------+                  +--------------------+
 ```
 
 **RULE B1** - `libs/kernel` depends on nothing.
@@ -263,10 +268,29 @@ rate, and no other module may read `fx_rates` or `fx_quotes`. Everything else se
 that has already been computed, or nothing at all.
 **RULE B20** - the API never returns localized prose. Problem responses carry a stable `code` plus
 structured `params`; localization happens in the client (P13, ADR 0014).
+**RULE B21** - `libs/settlement` depends only on `libs/kernel`, `libs/ledger`, `libs/netting` and
+`libs/fx`. It is the only module permitted to compose per-currency plans, and the only place
+`fx_clearing` is modelled. It is pure: no I/O, no clock, no provider.
 
 **NOTE:** RULE B6 is the one people fight. When settlement needs "the same" logic as the API, the
 answer is never a `common` module containing everything - it is to extract the actual concept into
 `libs/*` under a name that describes it.
+
+**`libs/settlement` is the first working example of that rule**, so the reasoning is recorded rather
+than left in a commit message. Partitioning a multicurrency cycle is needed by two modules that may
+not see each other (B6): `apps/api`, to preview what a cycle would cost, and `workers/settlement`, to
+build the run. Leaving it in the worker would have forced the API to reimplement it, which is two
+implementations of the same financial arithmetic drifting apart. And it could not go in
+`libs/netting`, which may only depend on kernel and ledger (B3) - giving the netting engine FX
+awareness is exactly what ADR 0012 forbids, because its properties depend on one currency at a time.
+So it moved *down* into a pure module that both deployables consume.
+
+The naming split is deliberate and worth stating, because both modules contain the word:
+
+| Module | Owns |
+|---|---|
+| `libs/settlement` | **What** must be settled: the per-currency plan, the partitions, the `fx_clearing` position, the external FX requirement. Pure and deterministic |
+| `workers/settlement` | **Executing** it: the run lifecycle, quorum, idempotency, rail submission, funding state |
 
 ### 5.2 Gradle module template
 

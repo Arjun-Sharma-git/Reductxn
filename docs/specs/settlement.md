@@ -53,9 +53,22 @@ group as a credit-risk event. There is no silent rollback of confirmed money mov
 
 ## 5. Cross-currency runs and FX funding (ADR 0012)
 
+**Ownership split.** The *plan* - partitions, per-currency positions and transfers, the `fx_clearing`
+position and the external requirement - is computed by `libs/settlement` (MASTER-PLAN rule B21),
+because both this worker and `apps/api` need it and they may not depend on each other (B6). This
+worker owns the *run*: lifecycle, quorum, idempotency, rail submission and funding state. Nothing in
+`libs/settlement` reads a clock or a provider, so the same cycle always produces the same plan.
+
 Each currency partition is netted independently, so the run carries **per-currency** net positions,
 transfers, tax and transfer counts. There is no single global total, because adding yen to rupees is
 not addition.
+
+**`fx_clearing` is a participant, not a footnote.** A cross-currency obligation is planned as two legs
+(ADR 0012 point 3), one in each book, with `fx_clearing` as the counterparty. It is netted like any
+other participant so the transfers come out correct, then reported separately: transfers between two
+members are member transfers, and any transfer touching `fx_clearing` is part of the group's external
+requirement. Lumping the two together would present a group's FX exposure as if it were a member's
+debt.
 
 **RULE S4** - a run may not execute while any currency's `fx_clearing` position is non-zero and
 unfunded. The engine cannot produce currency it does not hold (P2), so when a partition leaves a
