@@ -253,7 +253,36 @@ postings (`docs/MASTER-PLAN.md` section 13, phase 2.5).
 satisfied by the rail and the entries are marked `rail_performed_fx = true`, with the rate the rail
 used recorded for reconciliation. When it does not, the group must fund the requirement.
 
-## 10. Open questions
+## 10. Implementation status
+
+**Implemented in `libs/fx`** (34 tests green): the scaled-integer rate with validating construction,
+the exact conversion with both cancellation points, the fractional residual, and `FxQuote.lock` with
+its fail-closed freshness check. Properties X1-X6 hold over generated inputs.
+
+**Not implemented, and each for a stated reason:**
+
+| Missing | Why it is not here |
+|---|---|
+| X7, per-currency zero-sum | A property of the ledger and the partitioner, not of this module |
+| X2's second half, "the cycle sum of residuals equals the `fx_clearing` delta" | Needs postings to sum over |
+| The per-currency partitioner | Needs `workers/settlement` |
+| The `fx_clearing` account and its postings | Needs the ledger write path in `apps/api` |
+| `awaiting_fx_funding` and the funding state | Needs the settlement run lifecycle |
+| A rate provider adapter | Needs `apps/api/adapter/rate`; the port (`FxRateProvider`) is ready |
+
+**Measured against the compiled engine.** Every one of these reproduces the hand-computed value in the
+sections above, which is the check that the spec and the code agree rather than merely coexisting:
+
+```
+JPY  50,000  ->  2,795,200 INR minor units       INR 27,952.00      residual 0
+JPY  50,001  ->  2,795,256 INR minor units       residual -0.096
+JPY  50,006  ->  2,795,535 INR minor units       residual +0.424    (rounds down)
+RUB 100,000  ->    102,410 USD minor units       USD 1,024.10       residual 0
+INR  27,952  ->     50,000 JPY minor units       (round trip, within one minor unit)
+INR       1  ->  refused: fx.amount_too_small_to_convert
+```
+
+## 11. Open questions
 
 - Rate provider selection, and the failover provider when the primary is stale.
 - Whether the residual should ever be allocated pro rata to members, rather than accumulating.
