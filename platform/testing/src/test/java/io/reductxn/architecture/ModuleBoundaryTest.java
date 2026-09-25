@@ -166,6 +166,13 @@ class ModuleBoundaryTest {
      *
      * <p>It may not reach sideways into a deployable, nor into rails: it composes a plan, it does not
      * execute one.
+     *
+     * <p><strong>Two of these four exclusions cannot fire yet, and saying so is the point.</strong>
+     * {@code apps/api} and {@code workers/settlement} have no sources, so ArchUnit has no classes to
+     * match against and a violation would go unnoticed even though the rule is not vacuous - its
+     * subject resolves, so it is genuinely evaluated. The {@code rails} exclusion is live today, since
+     * that module does have classes. The remaining two become real when the deployables do, and they
+     * are listed now so the boundary is stated before anything can cross it.
      */
     @ArchTest
     static final ArchRule b21_settlement_depends_only_on_kernel_ledger_netting_and_fx =
