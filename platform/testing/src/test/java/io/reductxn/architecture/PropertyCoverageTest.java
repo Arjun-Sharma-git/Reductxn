@@ -23,8 +23,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>{@link RuleCoverageTest} covers structure. This covers behaviour, and it exists because the two
  * halves had different amounts of discipline: the RULEs at least had a table claiming what was
  * enforced, while a property could be written into a spec, never tested, and nothing anywhere would
- * say so. {@code N5} sat in that state, and so do all of ledger's {@code L1-L9} and i18n's
- * {@code I1-I7}.
+ * say so. {@code N5} sat in that state, ledger's {@code L1-L9} and i18n's {@code I1-I7} were listed
+ * with it, and ledger's list has since fallen from nine to four as the types that verify it landed.
  *
  * <p><strong>Coverage is detected, not declared.</strong> A property counts as covered when a test
  * labels an assertion with its id:
@@ -75,24 +75,29 @@ class PropertyCoverageTest {
             Map.entry("N5", "the optimizer is never worse than the baseline. Tier 2 (ADR 0005) does not "
                     + "exist, so there is nothing to compare against. Testable the day one lands"),
 
-            Map.entry("L1", "per entry, debits equal credits per currency. No journal entry type exists; "
-                    + "libs/ledger is Money and Currency only"),
-            Map.entry("L2", "amount_minor is strictly positive. Needs the posting type to constrain"),
-            Map.entry("L3", "entries are immutable and corrections are compensating entries. Needs "
-                    + "persistence, and the DB grants the spec names as the enforcement mechanism"),
-            Map.entry("L4", "the entry hash chain. Needs the canonical encoding and the verifier job"),
-            Map.entry("L5", "a balance is a projection, never stored truth. An architecture property "
-                    + "over persistence that does not exist yet"),
-            Map.entry("L6", "one currency per entry. Needs the entry type. Worth noting it is preserved "
-                    + "unchanged by ADR 0012 rather than newly required"),
+            // Ledger. Five of the nine gained tests when the entry, posting and hash-chain types landed;
+            // the four below are what remains, and each names the mechanism the spec relies on rather
+            // than merely the work. That distinction is the point of this map: L3 and L5 are waiting on
+            // a schema, L7 and L8 on a write path, and none of them is waiting on more domain types.
+            Map.entry("L3", "entries are immutable and corrections are compensating entries. The model "
+                    + "half is done - an entry is an immutable record over an unmodifiable posting list, "
+                    + "and a compensating entry returns an account to zero - but the spec names the "
+                    + "enforcement as the database grants, so the tests carry no L3 label rather than "
+                    + "claiming an invariant the model cannot make true on its own"),
+            Map.entry("L5", "a balance is a projection, never stored truth. The projection is built: "
+                    + "Balances.netDebitOf sums signed postings, order-independently, and a compensated "
+                    + "entry returns zero. The 'never stored' half claims that no balance column exists "
+                    + "anywhere, which is a property of a schema rather than of this module"),
             Map.entry("L7", "the rounding residual is booked to fx_clearing, never dropped. The "
-                    + "conversion half is X2 and passes; the booking half needs journal entries, so the "
-                    + "invariant is half-met and the missing half is the accounting one"),
-            Map.entry("L8", "fx_clearing is zero per currency at the end of every cycle. The plan "
-                    + "exposes the position and the settlement properties assert it nets correctly, but "
-                    + "'at the end of a cycle' needs a cycle"),
-            Map.entry("L9", "FX linkage: every base entry has exactly one quote partner. Needs the two "
-                    + "linked entries and the cross-chain verifier"),
+                    + "conversion half is X2 and passes. The booking half needs the write path: the "
+                    + "residual is sub-minor and accumulates, so booking it is the cycle sum of "
+                    + "residuals against the fx_clearing delta - the check docs/specs/fx.md already "
+                    + "lists as landing with the ledger write path - and no code writes postings yet"),
+            Map.entry("L8", "fx_clearing is zero per currency at the end of every cycle, or the run is "
+                    + "flagged externally_funded. The measurement is built: Balances.netDebitOf over the "
+                    + "clearing account reports a non-zero position per currency, and BalancesTest does "
+                    + "exactly that on ADR 0012's example. The gate is what is missing - the run "
+                    + "transitioning to awaiting_fx_funding still needs workers/settlement"),
 
             Map.entry("I1", "every en key exists in every shipped locale. There is no catalog and no "
                     + "second locale yet; ADR 0014 scaffolding is unstarted"),

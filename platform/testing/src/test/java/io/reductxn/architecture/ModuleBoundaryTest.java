@@ -133,6 +133,23 @@ class ModuleBoundaryTest {
                     .should().dependOnClassesThat().resideInAPackage("io.reductxn.rails.internal..")
                     .because("RULE B10: rail implementations are reached only through the port");
 
+    /**
+     * RULE B10 for ledger, which had no subject to check until {@code io.reductxn.ledger.internal}
+     * existed.
+     *
+     * <p>Worth stating, because this rule reported green for as long as that package was empty: its
+     * subject resolved, so {@code emptyShould} never fired, and it checked nothing. The entry hash
+     * encoding is what activated it. Verified by sabotage - a call into the package from
+     * {@code libs/netting} fails the rule, and that reference compiles, so the rule is the only thing
+     * standing in the way.
+     *
+     * <p><strong>Found while doing that: a dependency rule cannot see an inlined constant.</strong> A
+     * reference to a {@code public static final} compile-time constant leaves no trace in the bytecode,
+     * because the compiler substitutes the value. A field reference passed this rule; a method call to
+     * the same class failed it. That is a limit of checking compiled dependencies rather than a fault -
+     * a copied constant creates no coupling - but it means B10 cannot keep outsiders out of a constant,
+     * so {@code EntryHash.hexLength()} is a method. Recorded in MASTER-PLAN section 15.
+     */
     @ArchTest
     static final ArchRule b10_ledger_internal_is_private =
             noClasses().that().resideOutsideOfPackage("io.reductxn.ledger..")
