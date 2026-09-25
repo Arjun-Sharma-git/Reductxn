@@ -8,7 +8,11 @@ build/
 
 # --- Java ---
 *.class
-out/
+# Anchored to the repository root on purpose. A bare `out/` matches a directory named `out` at ANY
+# depth, including `port/out` - which MASTER-PLAN section 5.4 prescribes by name. It excluded two
+# source files from a commit with no warning at all: `git add -A` skips ignored paths silently, the
+# local build was green, and only a fresh clone failed. `forbidIgnoredSources` now catches it.
+/out/
 
 # --- Node / web ---
 node_modules/

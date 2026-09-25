@@ -137,7 +137,77 @@ val forbidWildcardImports by tasks.registering {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Guard: no source file may be excluded by .gitignore.
+//
+// A local checkout has every file, ignored or not, so a source directory excluded
+// by a stray .gitignore pattern compiles, tests and builds green - and is simply
+// absent from every clone. That is not hypothetical: it happened while adding
+// apps/api. A bare `out/` (the usual Java idiom, meant for an IDE's build
+// directory) matches a directory named `out` at ANY depth, including `port/out`,
+// which MASTER-PLAN section 5.4 prescribes by name. Two source files were left
+// out of a commit, `git add -A` reported nothing, and the local build passed.
+// The only signal was a fresh clone failing to compile.
+//
+// This task is that signal, moved to where everyone sees it on every build.
+// Skips when git cannot answer (no repository, no git) rather than failing,
+// because a source tarball has no index to consult and is not a broken repository.
+// ---------------------------------------------------------------------------
+val forbidIgnoredSources by tasks.registering {
+    group = "verification"
+    description = "No src/**/*.java may be excluded by .gitignore"
+
+    val projectRoot = layout.projectDirectory.asFile
+    val javaRoots = listOf(
+        layout.projectDirectory.dir("src/main/java"),
+        layout.projectDirectory.dir("src/test/java")
+    )
+
+    inputs.files(javaRoots.map { fileTree(it) { include("**/*.java") } })
+        .withPropertyName("javaSourcesForIgnoreCheck")
+    // The rules are an input too: editing .gitignore changes the answer, and a docs-only edit to it
+    // must re-run this rather than leaving the task UP-TO-DATE.
+    inputs.files(rootProject.layout.projectDirectory.file(".gitignore"))
+        .withPropertyName("gitignoreReadByTheIgnoreCheck")
+    outputs.upToDateWhen { false }
+
+    doLast {
+        val sources = javaRoots
+            .map { it.asFile }
+            .filter { root -> root.exists() }
+            .flatMap { root ->
+                root.walkTopDown().filter { file -> file.isFile && file.extension == "java" }.toList()
+            }
+
+        if (sources.isEmpty()) return@doLast
+
+        val git = ProcessBuilder(listOf("git", "check-ignore", "--stdin"))
+            .directory(rootProject.projectDir)
+            .redirectErrorStream(true)
+            .start()
+
+        git.outputStream.bufferedWriter().use { stdin ->
+            sources.forEach { stdin.write("${it.relativeTo(rootProject.projectDir).path}\n") }
+        }
+
+        val ignored = git.inputStream.bufferedReader().readLines().filter { it.isNotBlank() }
+        val exit = git.waitFor()
+
+        // 1 means nothing matched, which is the good case. 128 means git could not answer.
+        if (exit == 0 && ignored.isNotEmpty()) {
+            throw GradleException(
+                "These source files are excluded by .gitignore, so they are absent from every clone " +
+                    "while a local build passes:\n" +
+                    ignored.joinToString("\n") { "  $it" } +
+                    "\nAnchor an over-broad pattern (a bare `out/` matches `port/out`), or remove it. " +
+                    "`git add -A` does not warn about ignored paths."
+            )
+        }
+    }
+}
+
 tasks.named("check") {
     dependsOn(forbidFloatingPointMoney)
     dependsOn(forbidWildcardImports)
+    dependsOn(forbidIgnoredSources)
 }
