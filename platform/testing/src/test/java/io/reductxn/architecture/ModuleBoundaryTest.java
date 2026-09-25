@@ -33,6 +33,7 @@ class ModuleBoundaryTest {
             "io.reductxn.kernel..",
             "io.reductxn.ledger..",
             "io.reductxn.netting..",
+            "io.reductxn.fx..",
             "io.reductxn.rails.."
     };
 
@@ -55,6 +56,7 @@ class ModuleBoundaryTest {
                     .should().dependOnClassesThat().resideInAnyPackage(
                             "io.reductxn.ledger..",
                             "io.reductxn.netting..",
+                            "io.reductxn.fx..",
                             "io.reductxn.rails..")
                     .because("RULE B1: kernel is the root of the module graph");
 
@@ -63,8 +65,9 @@ class ModuleBoundaryTest {
             noClasses().that().resideInAPackage("io.reductxn.ledger..")
                     .should().dependOnClassesThat().resideInAnyPackage(
                             "io.reductxn.netting..",
+                            "io.reductxn.fx..",
                             "io.reductxn.rails..")
-                    .because("RULE B2: ledger must not depend on netting or rails");
+                    .because("RULE B2: ledger must not depend on netting, fx or rails");
 
     @ArchTest
     static final ArchRule b10_netting_internal_is_private =
@@ -84,6 +87,44 @@ class ModuleBoundaryTest {
             noClasses().that().resideOutsideOfPackage("io.reductxn.ledger..")
                     .should().dependOnClassesThat().resideInAPackage("io.reductxn.ledger.internal..")
                     .because("RULE B10: ledger internals are not another module's business");
+
+    @ArchTest
+    static final ArchRule b10_fx_internal_is_private =
+            noClasses().that().resideOutsideOfPackage("io.reductxn.fx..")
+                    .should().dependOnClassesThat().resideInAPackage("io.reductxn.fx.internal..")
+                    .because("RULE B10: the conversion and its power-of-ten table are reached only "
+                            + "through FxConverters and FxQuote");
+
+    @ArchTest
+    static final ArchRule b18_fx_depends_only_on_kernel_and_ledger =
+            noClasses().that().resideInAPackage("io.reductxn.fx..")
+                    .should().dependOnClassesThat().resideInAnyPackage(
+                            "io.reductxn.netting..",
+                            "io.reductxn.rails..",
+                            "io.reductxn.api..",
+                            "io.reductxn.settlement..")
+                    .because("RULE B18: fx may not depend on netting, so rate logic can never hide "
+                            + "inside the engine whose proofs assume one currency at a time");
+
+    /**
+     * RULE B19, the half that is expressible today.
+     *
+     * <p>States that no other pure module may see FX at all. That is stronger than "do not multiply
+     * by a rate" and easier to check: a class that cannot see {@code FxRate} cannot multiply by one.
+     *
+     * <p>The other half of B19 - that only {@code libs/fx} may read {@code fx_rates} and
+     * {@code fx_quotes} - is a table-ownership rule and needs {@code apps/api} on the classpath
+     * before it can be asserted. It is listed in MASTER-PLAN section 8 as a gate for that reason.
+     */
+    @ArchTest
+    static final ArchRule b19_no_other_domain_module_knows_about_fx =
+            noClasses().that().resideInAnyPackage(
+                            "io.reductxn.kernel..",
+                            "io.reductxn.ledger..",
+                            "io.reductxn.netting..",
+                            "io.reductxn.rails..")
+                    .should().dependOnClassesThat().resideInAPackage("io.reductxn.fx..")
+                    .because("RULE B19: conversion happens only in libs/fx");
 
     @ArchTest
     static final ArchRule b8_no_cycles_between_modules =
