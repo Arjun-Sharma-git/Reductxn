@@ -16,12 +16,15 @@ public final class InvalidRateException extends FxException {
 
     private static final long serialVersionUID = 1L;
 
+    /** The stable code for this failure. See {@code DomainCodes}. */
+    public static final String CODE = "fx.invalid_rate";
+
     private final String amountCurrencyCode;
     private final String rateBaseCode;
     private final String detail;
 
     public InvalidRateException(Currency amountCurrency, Currency rateBase) {
-        super("fx.invalid_rate",
+        super(CODE,
                 "rate base " + rateBase.code() + " does not match the amount's currency "
                         + amountCurrency.code());
         this.amountCurrencyCode = amountCurrency.code();
@@ -31,7 +34,7 @@ public final class InvalidRateException extends FxException {
 
     /** A malformed rate definition, for example a zero or negative rate. */
     public InvalidRateException(String detail) {
-        super("fx.invalid_rate", detail);
+        super(CODE, detail);
         this.amountCurrencyCode = null;
         this.rateBaseCode = null;
         this.detail = detail;

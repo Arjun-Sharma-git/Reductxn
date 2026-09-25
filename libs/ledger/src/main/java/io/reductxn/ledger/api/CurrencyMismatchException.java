@@ -7,10 +7,24 @@ import io.reductxn.kernel.api.DomainError;
  *
  * <p>This is a programming fault rather than an expected failure, so it throws. An implementation
  * that silently coerced currencies would corrupt the ledger.
+ *
+ * <p>Its code is namespaced like every other: {@link #CODE} is {@code ledger.currency_mismatch}. It
+ * used to return the bare {@code CURRENCY_MISMATCH}, which was not off by a style rule - an unnamespaced
+ * code cannot be attributed to a module, cannot be checked for collision, and cannot be enumerated by
+ * the error-code parity gate (I3). See {@link io.reductxn.kernel.api.DomainCodes}.
  */
 public final class CurrencyMismatchException extends RuntimeException implements DomainError {
 
     private static final long serialVersionUID = 1L;
+
+    /**
+     * The stable code for this failure.
+     *
+     * <p>A constant rather than a literal inside {@link #code()} so it can be referenced without
+     * constructing an exception and enumerated reflectively, which is what lets
+     * {@code DomainErrorCodeTest} check that the convention holds.
+     */
+    public static final String CODE = "ledger.currency_mismatch";
 
     private final String left;
     private final String right;
@@ -23,7 +37,7 @@ public final class CurrencyMismatchException extends RuntimeException implements
 
     @Override
     public String code() {
-        return "CURRENCY_MISMATCH";
+        return CODE;
     }
 
     @Override

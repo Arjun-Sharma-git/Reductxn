@@ -19,6 +19,9 @@ public final class StaleRateException extends FxException {
 
     private static final long serialVersionUID = 1L;
 
+    /** The stable code for this failure. See {@code DomainCodes}. */
+    public static final String CODE = "fx.rate_stale";
+
     private final String baseCode;
     private final String quoteCode;
     private final Instant quotedAt;
@@ -27,7 +30,7 @@ public final class StaleRateException extends FxException {
 
     public StaleRateException(
             Currency base, Currency quote, Instant quotedAt, Instant expiresAt, Instant asOf) {
-        super("fx.rate_stale",
+        super(CODE,
                 "rate " + base.code() + "/" + quote.code() + " quoted at " + quotedAt
                         + " and valid until " + expiresAt + " is not usable at " + asOf);
         this.baseCode = base.code();

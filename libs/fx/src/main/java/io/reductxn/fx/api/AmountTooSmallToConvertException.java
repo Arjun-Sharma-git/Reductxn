@@ -16,6 +16,9 @@ public final class AmountTooSmallToConvertException extends FxException {
 
     private static final long serialVersionUID = 1L;
 
+    /** The stable code for this failure. See {@code DomainCodes}. */
+    public static final String CODE = "fx.amount_too_small_to_convert";
+
     private final long amountMinor;
     private final String amountCurrencyCode;
     private final String quoteCurrencyCode;
@@ -23,7 +26,7 @@ public final class AmountTooSmallToConvertException extends FxException {
     private final int rateScale;
 
     public AmountTooSmallToConvertException(Money amount, FxRate rate) {
-        super("fx.amount_too_small_to_convert",
+        super(CODE,
                 "amount " + amount.amountMinor() + " minor units of "
                         + amount.currency().code() + " converts to zero "
                         + rate.quote().code() + " at " + rate.rateScaled() + "e-" + rate.rateScale()
