@@ -666,7 +666,7 @@ Modularity that is not checked is not real. Every pull request runs:
 | Error-code parity | codegen check | A server error `code` has no catalog entry, or vice versa (I3). **Not built.** Its server half now exists: every code is an enumerable constant, which is what a catalog check needs |
 | Locale money safety | Vitest property tests | Formatting changes the digits, or a `float` enters the format/parse path (F11, F12, I5) |
 | Spec sync | codegen diff check | RULE C3 violated |
-| Ledger invariants | jqwik property tests | A journal entry does not balance, or an FX link is unpaired (L9) |
+| Ledger invariants | jqwik property tests - **live for L1, L2, L4, L6, L9**, the rest deferred with reasons | A journal entry does not balance, or an FX link is unpaired (L9) |
 | Netting correctness | jqwik + golden fixtures | Sum of nets != 0 per currency, or a member ends negative |
 | Settlement idempotency | Testcontainers replay test | Double execution changes state |
 | Coverage | JaCoCo - `libs/*` **95%**, overall **75%** | Below threshold |
@@ -947,8 +947,11 @@ five rules had no decision at all. It reads the specs now.
 Properties are held to the same standard by `PropertyCoverageTest`, which detects coverage rather than
 declaring it: a property counts as covered when a test labels an assertion with its id
 (`.as("X7: ...")`), a convention the property tests already followed. Nothing has to be maintained for a
-covered property, so only the exceptions need an entry - and `N5`, all of ledger's `L1-L9` and all of
-i18n's `I1-I7` have one, with reasons. That is 17 decisions that were previously invisible.
+covered property, so only the exceptions need an entry - and `N5`, ledger's `L3`, `L5`, `L7` and `L8`,
+and all of i18n's `I1-I7` have one, with reasons. That is 12 decisions that were previously invisible,
+down from 17 when the journal entry types landed and five of ledger's nine invariants gained tests. The
+map is checked in the other direction too: a deferral whose property a test now labels fails the build as
+stale, which is how the five were found rather than remembered.
 
 **Two guards here are not ArchUnit rules, and both matter as much:** `forbidFloatingPointMoney` and
 `forbidWildcardImports` are Gradle verification tasks in `build-logic`, so they run for every module
@@ -960,28 +963,30 @@ change, so it is stated explicitly:
 
 | Area | Decision | Code | Notes |
 |---|---|---|---|
-| Netting, tax, ledger, money | ADR 0004, 0005, 0006, 0011 | **Implemented, tested** | 21 tests green |
+| Netting, tax, money | ADR 0005, 0006, 0011 | **Implemented, tested** | 21 tests green |
+| Journal entries and the hash chain | ADR 0004, 0012 | **Model implemented and tested; no write path** | 48 tests green. `JournalEntry` and `Posting` enforce L1, L2 and L6 on construction; the hash is derived rather than stored, so an entry whose hash disagrees with its content cannot be constructed at all; `EntryChain` and `FxLinkage` verify a chain and its FX pairing as pure functions an offline job can run. Five of the nine ledger invariants are asserted, and the four that are not name the mechanism they wait on |
 | FX rates and the residual | ADR 0013 | **Implemented, tested** | 35 tests green. `libs/fx` owns the rate type, the exact conversion and `FxQuote` |
 | Per-currency composition | ADR 0012 | **Implemented, tested** | 20 tests green. `libs/planning` partitions a cycle, composes the per-currency plans, and derives the external FX requirement |
 | RULEs B3, B4, B5, B10, B11, B18, B19, B21 | ADR 0012, 0013 | **Enforced** | 16 ArchUnit rules, all verified non-vacuous. B3 and B4 had been stated in section 5.1 and never enforced; B11 was described as enforced and did not exist |
-| `fx_clearing` postings | ADR 0012 | **Not implemented** | Nothing books the entry pair to the ledger. The plan computes the clearing position; the ledger never hears about it |
+| `fx_clearing` postings | ADR 0012 | **Not implemented** | Nothing books the entry pair to the ledger. The plan computes the clearing position and the ledger can now express, balance and verify the entries, but no code writes one - that is `apps/api`'s record-obligation use case |
 | Funding state, per-currency runs | ADR 0012 | **Not implemented** | Needs `workers/settlement`, which has no sources |
 | Localization | ADR 0014 | **Not implemented** | No catalogs, no `shared/i18n`, no locale resolution |
 | RULEs B20, F10-F12 | ADR 0014 | **Not enforced** | Listed in section 8 as gates, not yet written |
 
-So the honest position is narrower than "multicurrency is done", and it has moved: **the plan is done
-and proven; the postings are not.** A cycle can be partitioned, netted per currency, and reported with
-its external FX requirement quantified per currency, and X7 is asserted against generated cycles.
+So the honest position is narrower than "multicurrency is done": **the plan is done and proven, the
+ledger can now express and verify its entries, and nothing writes one.** A cycle can be partitioned,
+netted per currency, and reported with its external FX requirement quantified per currency, with X7
+asserted against generated cycles. A linked entry pair is expressible, balances, chains, and is caught
+by the cross-chain verifier when its partner is missing.
 
-What remains is the ledger side. `SettlementPlan` says what must move and what the group must find from
-outside; nothing yet writes the two linked journal entries, nothing consumes the residual fraction, and
-no run can be gated on funding. Those need `apps/api` and `workers/settlement` to have sources, which
-they do not.
+What is missing is the write path rather than the model. `SettlementPlan` says what must move; no code
+turns it into `JournalEntry` rows, nothing consumes the residual fraction across a cycle, and no run can
+be gated on funding. Those need `apps/api` and `workers/settlement` to have sources, which they do not.
 
-The next implementation step is the ledger side: booking the two linked entries per cross-currency
-obligation, booking the residual fraction to `fx_clearing`, and gating a run on its funding. All three
-need `apps/api` and `workers/settlement` to exist. For localization it is the Phase 1 scaffolding,
-before the first screen exists to retrofit.
+The next implementation step is therefore the write path: booking the two linked entries per
+cross-currency obligation, booking the cycle's residual to `fx_clearing`, and gating a run on its
+funding. All three need `apps/api` and `workers/settlement` to exist. For localization it is the Phase 1
+scaffolding, before the first screen exists to retrofit.
 
 
 Toolchain constraints discovered by actually running the build. All are now pinned with reasons:
@@ -994,6 +999,7 @@ Toolchain constraints discovered by actually running the build. All are now pinn
 | **ArchUnit package identifiers are not regex** | `(kernel|ledger|...)` matches nothing. Use `resideInAnyPackage(...)`. |
 | **Every module a rule mentions must be on `platform/testing`'s classpath** | Otherwise ArchUnit imports none of its classes and the rule checks nothing. This is the *silent* form of the bug above: the subject set stays non-empty, so `emptyShould` never fires, while the `should` clause names a package ArchUnit has never seen. It produced a completely bogus green result for `b19` - a rule asserting no module depends on FX, while FX was invisible. Now caught by `ArchUnitVisibilityTest`, which was itself verified by making it fail on purpose. |
 | **A rule can only forbid what it can see** | `b21` lists `apps/api` and `workers/settlement` as forbidden dependencies, but those have no sources, so ArchUnit has no classes to match and a violation would pass unnoticed. The rule is not vacuous - its subject resolves and is evaluated - but two of its exclusions are inert until the deployables exist. Stated in the rule itself so nobody reads a green tick as more than it is. |
+| **A dependency rule cannot see an inlined constant** | `javac` substitutes a `public static final` compile-time constant at the use site, so a reference to one from another module leaves no trace in the bytecode - and a dependency rule reads bytecode. Found by activating `b10` for `libs/ledger`: a field reference passed the rule while a call to a method on the same class failed it. Not a fault in the rule, since a copied constant creates no coupling, but B10 cannot keep outsiders out of a constant, so `EntryHash.hexLength()` is a method rather than a constant. `PowersOfTen.MAX_EXPONENT` is the remaining instance, and it is referenced only inside its own file. |
 
 The pure core also still compiles standalone with plain `javac` (no Gradle, no Spring), which is the
 property that lets an auditor reproduce a settlement in isolation (principle P4).
