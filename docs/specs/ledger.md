@@ -40,6 +40,11 @@ constraints (ADR 0012).
 L9 exists because a valid hash chain in one currency does **not** prove that its partner entry exists
 or matches. The linkage has to be verified across chains, not within one.
 
+**The `Verified by` column names where verification belongs, not what is built.** Status lives in
+MASTER-PLAN section 15, and each invariant that is not yet asserted is listed in the deferral map in
+`PropertyCoverageTest` with the mechanism it waits on. Keeping status out of this table is deliberate: a
+spec that reports progress stops being a specification, and the two then disagree.
+
 ## 3. Hash chain
 
 Entries are chained per `(group_id, currency)`. Chain verification is an offline job that can run

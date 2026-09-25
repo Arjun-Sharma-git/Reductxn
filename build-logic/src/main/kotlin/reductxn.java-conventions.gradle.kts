@@ -67,7 +67,11 @@ val forbidFloatingPointMoney by tasks.registering {
             throw GradleException(
                 "RULE P1 violated - floating-point money in domain code:\n" +
                     offenders.joinToString("\n") +
-                    "\nUse long minor units (see libs/ledger Money) instead."
+                    "\nUse long minor units (see libs/ledger Money) instead." +
+                    "\nThis is a text match over every non-comment line on purpose, so it cannot miss a" +
+                    "\nreal type - which means the same words are also flagged inside a message string." +
+                    "\nIt fired once on \"not double entry\" in an exception message. If the flagged line" +
+                    "\nhas no floating-point type on it, reword the line rather than removing the check."
             )
         }
     }
