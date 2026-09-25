@@ -39,20 +39,26 @@ import static org.assertj.core.api.Assertions.assertThat;
  * those survived so long. So this test requires a decision per rule, and then checks the decision:
  *
  * <ol>
- *   <li>Every {@code RULE Xn} in {@code docs/MASTER-PLAN.md} must appear in {@link #ENFORCED_RULES},
- *       {@link #DEFERRED_RULES}, or a family in {@link #OUT_OF_SCOPE_FAMILIES}. A newly declared rule
- *       with no decision fails the build.</li>
- *   <li>Nothing may appear in those maps that the plan no longer declares, because a stale entry reads
- *       as coverage.</li>
+ *   <li>Every {@code RULE Xn} in {@code docs/MASTER-PLAN.md} <em>or</em> {@code docs/specs/*.md} must
+ *       appear in {@link #ENFORCED_RULES}, {@link #DEFERRED_RULES}, or a family in
+ *       {@link #OUT_OF_SCOPE_FAMILIES}. A newly declared rule with no decision fails the build.</li>
+ *   <li>Nothing may appear in those maps that the documents no longer declare, because a stale entry
+ *       reads as coverage.</li>
  *   <li><strong>Each "enforced by" reference must resolve.</strong> An {@code ArchTest} field must exist
  *       <em>and carry the annotation</em>, so a rule that exists but is never evaluated is caught; a
  *       Gradle guard must be declared in {@code build-logic}. This is the part that would have caught
  *       B11 on the day it was written.</li>
  * </ol>
  *
- * <p>Scope is the RULEs declared in the plan. The properties in {@code docs/specs/*} (N1-N9, X1-X7,
- * L1-L9, S1-S5) are a different kind of claim, checked by jqwik and golden fixtures beside the code
- * they govern, and each spec already carries its own coverage table.
+ * <p><strong>Reading the specs matters as much as reading the plan.</strong> The first version of this
+ * test scanned {@code MASTER-PLAN.md} alone and reported full coverage while {@code S1-S5} - declared
+ * as {@code RULE S1} in {@code docs/specs/settlement.md}, and the whole quorum, idempotency, partial
+ * application and FX funding story - had no decision at all. Five rules invisible for the same reason a
+ * rule whose subject is never imported is invisible: the check looked somewhere they were not.
+ *
+ * <p>Scope is the RULEs. The property families in {@code docs/specs/*} - netting N1-N9, fx X1-X7,
+ * ledger L1-L9, i18n I1-I7 - are a different kind of claim, about behaviour rather than structure, and
+ * they are covered by {@link PropertyCoverageTest} rather than here.
  */
 class RuleCoverageTest {
 
@@ -108,7 +114,21 @@ class RuleCoverageTest {
                     + "the assertion belongs beside the problem-response mapping, not in this module"),
             Map.entry("R1", "the fixed top-level layout. Enforceable and deliberately not enforced: the "
                     + "check would fail the build for adding a directory, and an ADR is already the "
-                    + "documented barrier. Judged to be friction without a matching benefit"));
+                    + "documented barrier. Judged to be friction without a matching benefit"),
+            Map.entry("S1", "quorum before a run executes. Needs the run lifecycle and per-member "
+                    + "confirmations, which belong to workers/settlement - no sources yet"),
+            Map.entry("S2", "idempotent execution end to end. Needs rail adapters, persisted state and "
+                    + "the Testcontainers replay test the spec itself names"),
+            Map.entry("S3", "partial application is a first-class outcome, not a rollback. Needs the run "
+                    + "state machine; a spec that says 'no silent rollback' can only be tested against "
+                    + "something that can fail midway, which means a real rail"),
+            Map.entry("S4", "the funding gate: no run while a currency's fx_clearing position is "
+                    + "non-zero and unfunded. libs/settlement already reports each currency's clearing "
+                    + "position, which is this rule's input, so half of it is built. The other half is "
+                    + "the run transitioning to awaiting_fx_funding, which needs workers/settlement"),
+            Map.entry("S5", "the FX requirement is a reported number, never a hidden one. The plan "
+                    + "already reports the clearing leg separately from member transfers, so the data "
+                    + "exists; the 'who pays whom' report needs apps/api"));
 
     /**
      * Families whose gates are not this build's to run.
@@ -127,12 +147,12 @@ class RuleCoverageTest {
             "build-logic/src/main/kotlin/reductxn.java-conventions.gradle.kts";
 
     @Test
-    void everyRuleDeclaredInThePlanHasADecision() throws IOException {
-        Set<String> declared = rulesDeclaredInThePlan();
+    void everyRuleDeclaredInTheDocsHasADecision() throws IOException {
+        Set<String> declared = rulesDeclaredInTheDocs();
 
         assertThat(declared)
-                .as("no RULE was found in docs/MASTER-PLAN.md, so this test checks nothing - either "
-                        + "the plan moved or it stopped writing rule ids as 'RULE X'")
+                .as("no RULE was found in docs/, so this test checks nothing - either the documents "
+                        + "moved or they stopped writing rule ids as 'RULE X'")
                 .isNotEmpty();
 
         List<String> undecided = new ArrayList<>();
@@ -217,15 +237,28 @@ class RuleCoverageTest {
         }
     }
 
-    private static Set<String> rulesDeclaredInThePlan() throws IOException {
-        String plan = Files.readString(repositoryRoot().resolve("docs/MASTER-PLAN.md"));
-
-        Matcher matcher = Pattern.compile("\\bRULE\\s+([A-Z]+\\d+)\\b").matcher(plan);
+    private static Set<String> rulesDeclaredInTheDocs() throws IOException {
         Set<String> declared = new TreeSet<>();
-        while (matcher.find()) {
-            declared.add(matcher.group(1));
+
+        collectRuleIds(repositoryRoot().resolve("docs/MASTER-PLAN.md"), declared);
+
+        // Specs as well as the plan. S1-S5 live only in docs/specs/settlement.md, and reading the plan
+        // alone made this test report full coverage while five declared rules had no decision at all -
+        // the same shape of blindness as a rule whose subject was never imported.
+        try (var specs = Files.list(repositoryRoot().resolve("docs/specs"))) {
+            for (Path spec : specs.filter(path -> path.toString().endsWith(".md")).toList()) {
+                collectRuleIds(spec, declared);
+            }
         }
         return declared;
+    }
+
+    private static void collectRuleIds(Path document, Set<String> into) throws IOException {
+        Matcher matcher = Pattern.compile("\\bRULE\\s+([A-Z]+\\d+)\\b")
+                .matcher(Files.readString(document));
+        while (matcher.find()) {
+            into.add(matcher.group(1));
+        }
     }
 
     private static String familyOf(String rule) {
@@ -233,23 +266,9 @@ class RuleCoverageTest {
     }
 
     /**
-     * The repository root, found by searching upwards for the build settings.
-     *
-     * <p>Searching rather than assuming {@code ../..} so the test keeps working if the module moves,
-     * and so a failure says where it looked from rather than throwing a null path.
+     * The repository root, shared with the other coverage tests.
      */
     private static Path repositoryRoot() {
-        Path candidate = Paths.get("").toAbsolutePath();
-        while (candidate != null) {
-            if (Files.exists(candidate.resolve("settings.gradle.kts"))
-                    && Files.exists(candidate.resolve("docs/MASTER-PLAN.md"))) {
-                return candidate;
-            }
-            candidate = candidate.getParent();
-        }
-        throw new IllegalStateException(
-                "could not find the repository root above " + Paths.get("").toAbsolutePath()
-                        + ". This test reads docs/MASTER-PLAN.md and needs to run from inside the "
-                        + "repository");
+        return Repository.root();
     }
 }
