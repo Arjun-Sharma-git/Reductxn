@@ -14,13 +14,16 @@ public final class UnavailableRateException extends FxException {
 
     private static final long serialVersionUID = 1L;
 
+    /** The stable code for this failure. See {@code DomainCodes}. */
+    public static final String CODE = "fx.rate_unavailable";
+
     private final String baseCode;
     private final String quoteCode;
     private final Instant asOf;
     private final String reason;
 
     public UnavailableRateException(Currency base, Currency quote, Instant asOf, String reason) {
-        super("fx.rate_unavailable",
+        super(CODE,
                 "no rate for " + base.code() + "/" + quote.code() + " at " + asOf + ": " + reason);
         this.baseCode = base.code();
         this.quoteCode = quote.code();

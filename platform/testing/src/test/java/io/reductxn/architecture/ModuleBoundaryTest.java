@@ -1,10 +1,22 @@
 package io.reductxn.architecture;
 
+import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.JavaConstructor;
+import com.tngtech.archunit.core.domain.JavaField;
+import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
+import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ArchRule;
+import com.tngtech.archunit.lang.ConditionEvents;
+import com.tngtech.archunit.lang.SimpleConditionEvent;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
@@ -36,6 +48,16 @@ class ModuleBoundaryTest {
             "io.reductxn.fx..",
             "io.reductxn.settlement..",
             "io.reductxn.rails.."
+    };
+
+    /** The public surface of each pure module: everything else in it is reachable but not promised. */
+    private static final String[] API_PACKAGES = {
+            "io.reductxn.kernel.api..",
+            "io.reductxn.ledger.api..",
+            "io.reductxn.netting.api..",
+            "io.reductxn.fx.api..",
+            "io.reductxn.settlement.api..",
+            "io.reductxn.rails.api.."
     };
 
     @ArchTest
@@ -160,6 +182,100 @@ class ModuleBoundaryTest {
             noClasses().that().resideOutsideOfPackage("io.reductxn.settlement..")
                     .should().dependOnClassesThat().resideInAPackage("io.reductxn.settlement.internal..")
                     .because("RULE B10: the partitioner is reached only through SettlementPlans");
+
+    /**
+     * RULE B11: an {@code internal} type never appears in an {@code api} signature.
+     *
+     * <p>Section 5.4 has claimed since it was written that "these two rules [B10 and B11] are enforced
+     * by ArchUnit". B10 was. B11 was not, and went unnoticed for as long as nobody checked - which is
+     * the exact failure mode these rules exist to prevent. It is a real gap rather than a technicality:
+     * B10 stops another module <em>reaching into</em> internals, and B11 stops there being anything
+     * there to reach for once a return type changes.
+     *
+     * <p>Note what is deliberately allowed: an {@code api} class may <em>depend on</em> an internal one
+     * in order to construct it. {@code TaxRules}, {@code NettingEngines} and {@code FxConverters} do
+     * exactly that, which is the sanctioned factory pattern - the public surface stays in the {@code api}
+     * package while the implementation is hidden. A rule written as a plain dependency check would
+     * forbid the pattern that makes B10 usable in the first place. Only <em>signatures</em> are checked.
+     *
+     * <p>Implemented as a custom condition over a <em>positive</em> rule rather than
+     * {@code noClasses()}. The first attempt used {@code noClasses().should(customCondition)} and
+     * passed against a deliberate sabotage - a return type changed to an internal one - because
+     * negation does not compose the way it does for built-in conditions. A custom condition reports the
+     * violations it finds, so it belongs on a positive rule where nothing has to be inverted. Verified
+     * by breaking it: with this form, returning {@code GreedyNetting} from
+     * {@code NettingEngines.greedy()} fails the rule.
+     */
+    @ArchTest
+    static final ArchRule b11_api_never_exposes_an_internal_type =
+            classes().that().resideInAnyPackage(API_PACKAGES)
+                    .should(neverExposeAnInternalType())
+                    .because("RULE B11: an internal type must never appear in a public signature");
+
+    private static ArchCondition<JavaClass> neverExposeAnInternalType() {
+        return new ArchCondition<>("never expose a type from an internal package in a signature") {
+
+            @Override
+            public void check(JavaClass apiClass, ConditionEvents events) {
+                List<String> leaks = new ArrayList<>();
+
+                for (JavaMethod method : apiClass.getMethods()) {
+                    if (method.getOwner().equals(apiClass)) {
+                        collectLeaks(leaks, method.getFullName(), method.getRawReturnType(),
+                                method.getRawParameterTypes(), method.getThrowsClause().getTypes());
+                    }
+                }
+
+                for (JavaConstructor constructor : apiClass.getConstructors()) {
+                    if (constructor.getOwner().equals(apiClass)) {
+                        collectLeaks(leaks, apiClass.getSimpleName() + "(..)", null,
+                                constructor.getRawParameterTypes(), List.of());
+                    }
+                }
+
+                for (JavaField field : apiClass.getFields()) {
+                    if (field.getOwner().equals(apiClass) && isInternal(field.getRawType())) {
+                        leaks.add(field.getFullName() + " is of internal type "
+                                + field.getRawType().getName());
+                    }
+                }
+
+                leaks.forEach(leak -> events.add(SimpleConditionEvent.violated(apiClass, leak)));
+            }
+        };
+    }
+
+    private static void collectLeaks(
+            List<String> leaks,
+            String where,
+            JavaClass returnType,
+            List<JavaClass> parameterTypes,
+            List<JavaClass> thrownTypes) {
+
+        if (returnType != null && isInternal(returnType)) {
+            leaks.add(where + " returns internal type " + returnType.getName());
+        }
+        for (JavaClass parameterType : parameterTypes) {
+            if (isInternal(parameterType)) {
+                leaks.add(where + " accepts internal type " + parameterType.getName());
+            }
+        }
+        for (JavaClass thrownType : thrownTypes) {
+            if (isInternal(thrownType)) {
+                leaks.add(where + " declares internal exception " + thrownType.getName());
+            }
+        }
+    }
+
+    /**
+     * Whether the type lives in a package with a segment named exactly {@code internal}.
+     *
+     * <p>Checked segment by segment rather than with a substring test, so a package called
+     * {@code internalish} or {@code internals} is not mistaken for an internal package.
+     */
+    private static boolean isInternal(JavaClass type) {
+        return Arrays.asList(type.getPackageName().split("\\.")).contains("internal");
+    }
 
     /**
      * RULE B21: the new module's own boundary.

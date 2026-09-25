@@ -711,9 +711,13 @@ components:
         code:
           type: string
           description: |
-            Stable error code, namespaced by feature, never translated. Examples:
-            `obligation.currency_mismatch`, `fx.rate_stale`, `fx.amount_too_small_to_convert`,
-            `settlement.fx_unfunded`.
+            Stable error code, namespaced by the owning module, never translated. Lower case,
+            dot-separated, at least one dot; first segment is the module. Examples:
+            `ledger.currency_mismatch`, `fx.rate_stale`, `fx.amount_too_small_to_convert`,
+            `settlement.fx_unfunded`. The namespace is what makes a collision impossible rather than
+            unlikely, and what makes a code attributable in a log. Every code the server can emit is
+            declared as a `public static final String CODE` on its exception, so the set is
+            enumerable rather than a list somebody maintains by hand.
           example: fx.rate_stale
         params:
           type: object
