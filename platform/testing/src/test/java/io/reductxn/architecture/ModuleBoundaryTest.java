@@ -12,11 +12,15 @@ import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 
+import org.springframework.context.MessageSource;
+import org.springframework.transaction.annotation.Transactional;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
@@ -295,17 +299,18 @@ class ModuleBoundaryTest {
     }
 
     /**
-     * RULE B21: the new module's own boundary.
+     * RULE B21: the planning module's own boundary.
      *
      * <p>It may not reach sideways into a deployable, nor into rails: it composes a plan, it does not
-     * execute one.
+     * execute one. {@code apps/api} and {@code platform/*} are real exclusions now that the API has
+     * sources, so two of the four fire.
      *
-     * <p><strong>Two of these four exclusions cannot fire yet, and saying so is the point.</strong>
-     * {@code apps/api} and {@code workers/settlement} have no sources, so ArchUnit has no classes to
-     * match against and a violation would go unnoticed even though the rule is not vacuous - its
-     * subject resolves, so it is genuinely evaluated. The {@code rails} exclusion is live today, since
-     * that module does have classes. The remaining two become real when the deployables do, and they
-     * are listed now so the boundary is stated before anything can cross it.
+     * <p>{@code io.reductxn.settlement} remains inert and stays listed, so the boundary is stated before
+     * anything can cross it. Note the name: this exclusion said {@code io.reductxn.worker..} until the
+     * naming decision in ADR 0015 established that the worker's package root is its last path segment,
+     * {@code io.reductxn.settlement} - the same rule that renamed the library to {@code libs/planning}.
+     * The old pattern could never have matched anything, so the exclusion was inert for a second reason
+     * on top of the obvious one.
      */
     @ArchTest
     static final ArchRule b21_planning_depends_only_on_kernel_ledger_netting_and_fx =
@@ -313,9 +318,118 @@ class ModuleBoundaryTest {
                     .should().dependOnClassesThat().resideInAnyPackage(
                             "io.reductxn.rails..",
                             "io.reductxn.api..",
-                            "io.reductxn.worker..",
+                            "io.reductxn.settlement..",
                             "io.reductxn.platform..")
                     .because("RULE B21: settlement owns what must be settled, not how it moves");
+
+    // --- apps/api: the hexagonal layers (B12-B15) and the localization boundary (B20) ---------------
+    //
+    // B12-B16 had no subject at all until apps/api had sources, so five rules waited rather than
+    // pretending. B16 still waits: it names jOOQ row types, and no row types exist until there is a
+    // persistence adapter. Each rule below is verified by sabotage, not by the green tick.
+
+    /**
+     * RULE B12, first half: {@code web} never reaches an adapter.
+     *
+     * <p>MASTER-PLAN names the failure this catches - "a controller injecting a repository is the most
+     * common way this architecture dies" - and it is worth a rule of its own rather than a clause in a
+     * combined one, because the failure message then says which of the two was broken.
+     */
+    @ArchTest
+    static final ArchRule b12_web_never_touches_adapters =
+            noClasses().that().resideInAPackage("io.reductxn.api.web..")
+                    .should().dependOnClassesThat().resideInAPackage("io.reductxn.api.adapter..")
+                    .because("RULE B12: a controller injecting a repository is the most common way this "
+                            + "architecture dies");
+
+    /**
+     * RULE B12, second half: {@code web} calls the application through {@code port/in}, not through
+     * {@code port/out}.
+     *
+     * <p>The subtler version of the same mistake. A controller that injects an outbound port still does
+     * not name an adapter, so the first rule stays green while the use case - and its transaction
+     * boundary - is skipped entirely.
+     */
+    @ArchTest
+    static final ArchRule b12_web_reaches_application_only_through_port_in =
+            noClasses().that().resideInAPackage("io.reductxn.api.web..")
+                    .should().dependOnClassesThat().resideInAPackage("io.reductxn.api.port.out..")
+                    .because("RULE B12: port/out is the application's business; an inbound adapter that "
+                            + "reaches for it bypasses the use case and its transaction boundary");
+
+    /**
+     * RULE B13: {@code application} reaches the outside through {@code port/out}, never a concrete
+     * adapter, and never {@code web}, because the layers point one way.
+     *
+     * <p>The {@code web} clause is not in MASTER-PLAN's wording and is implied by the layer diagram: a
+     * use case that names a controller has its caller inside it, which is a cycle the module-level rule
+     * cannot see, since {@code io.reductxn.api} is one slice.
+     */
+    @ArchTest
+    static final ArchRule b13_application_calls_ports_not_implementations =
+            noClasses().that().resideInAPackage("io.reductxn.api.application..")
+                    .should().dependOnClassesThat().resideInAnyPackage(
+                            "io.reductxn.api.adapter..",
+                            "io.reductxn.api.web..")
+                    .because("RULE B13: a use case that names an adapter cannot be tested without one, "
+                            + "and one that names a controller has its caller inside it");
+
+    /**
+     * RULE B14: an adapter implements a port; it does not know what called it.
+     */
+    @ArchTest
+    static final ArchRule b14_adapters_never_touch_application_or_web =
+            noClasses().that().resideInAPackage("io.reductxn.api.adapter..")
+                    .should().dependOnClassesThat().resideInAnyPackage(
+                            "io.reductxn.api.application..",
+                            "io.reductxn.api.web..")
+                    .because("RULE B14: an adapter that calls a use case is a use case with two entry "
+                            + "points and no transaction boundary");
+
+    /**
+     * RULE B15: transaction boundaries live in one layer.
+     *
+     * <p>Written as a positive rule rather than the double negation in MASTER-PLAN's snippet. The negated
+     * form is correct but harder to read, and B11's history is a lesson in what happens when a rule's
+     * <em>form</em> is chosen for brevity: there, the negated custom-condition version did not compose and
+     * passed against a deliberate sabotage.
+     *
+     * <p>It also fails when nothing in {@code application} is transactional, because ArchUnit refuses to
+     * check an empty subject. That is a useful question rather than a technicality - it asks whether any
+     * transaction boundary exists at all - which is why the rule could not be written before the first
+     * use case arrived.
+     */
+    @ArchTest
+    static final ArchRule b15_transactional_only_in_application =
+            methods().that().areAnnotatedWith(Transactional.class)
+                    .should().beDeclaredInClassesThat().resideInAPackage("io.reductxn.api.application..")
+                    .because("RULE B15: a commit in an unexpected layer is a commit nobody reviewed");
+
+    /**
+     * RULE B20: the API never returns localized prose, so it has no apparatus for composing any.
+     *
+     * <p><strong>This is a proxy, and saying so matters.</strong> What it forbids is the machinery of
+     * localization - a message source to resolve text from, a locale to resolve it <em>in</em>, a resource
+     * bundle to hold it - none of which has a legitimate use in a module whose responses are codes and
+     * parameters. What it cannot catch is a determined violation: someone reading {@code Accept-Language}
+     * and hardcoding a table of translations touches none of these types. No dependency rule can see that,
+     * so the honest thing is a rule that states its own limit rather than one that reads as a proof.
+     *
+     * <p>It was non-vacuous on arrival. The response mapper lower-cased enum names with
+     * {@code Locale.ROOT} - locale-<em>safe</em>, and still a locale. The wire values are now written out
+     * in exhaustive switches, which is a better mapping regardless: a rename inside {@code libs/netting}
+     * breaks the build instead of silently changing a field a client reads.
+     */
+    @ArchTest
+    static final ArchRule b20_api_has_no_way_to_localise =
+            noClasses().that().resideInAPackage("io.reductxn.api..")
+                    .should().dependOnClassesThat().areAssignableTo(MessageSource.class)
+                    .orShould().dependOnClassesThat().haveFullyQualifiedName("java.util.Locale")
+                    .orShould().dependOnClassesThat().haveFullyQualifiedName("java.util.ResourceBundle")
+                    .orShould().dependOnClassesThat()
+                    .resideInAPackage("org.springframework.context.i18n..")
+                    .because("RULE B20: localization happens in the client (ADR 0014), and a server that "
+                            + "cannot see a locale cannot render one");
 
     @ArchTest
     static final ArchRule b8_no_cycles_between_modules =

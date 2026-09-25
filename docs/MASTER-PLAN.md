@@ -423,6 +423,13 @@ io.reductxn.api
 +-- config/               # @Configuration classes only
 ```
 
+**Status:** the layout exists and the rules below are enforced over it, but what sits in each layer is
+deliberately partial. `web` holds one controller plus the error mapping, `application` holds one use case,
+`port` holds three interfaces, and `adapter` holds development doubles rather than a persistence adapter.
+The controllers this tree names - identity, groups, obligations, settlement, tax - are the plan, not an
+inventory.
+
+
 **RULE B12** - `web` may only call `application` (through `port/in`). `web` never touches `adapter`.
 **RULE B13** - `application` may only call `port/out`, never concrete `adapter/*` classes.
 **RULE B14** - `adapter` may not call `application` or `web`.
@@ -653,7 +660,7 @@ Modularity that is not checked is not real. Every pull request runs:
 
 | Gate | Tool | Fails when |
 |---|---|---|
-| Module graph | ArchUnit + Spring Modulith | RULE B1-B21 violated. **Live**: 16 rules, all verified non-vacuous |
+| Module graph | ArchUnit + Spring Modulith | RULE B1-B21 violated. **Live**: 22 rules, all verified non-vacuous. Spring Modulith is not wired: ArchUnit covers the module graph, but the living documentation it would generate does not exist |
 | Rule coverage | `RuleCoverageTest` - **live** | A RULE declared in this plan *or in `docs/specs`* is neither enforced nor explicitly deferred, a coverage entry is stale, or a claimed enforcement does not resolve to something that runs |
 | Property coverage | `PropertyCoverageTest` - **live** | A property declared in a spec has no assertion labelled with its id and no recorded reason, or a test labels a property that no spec defines |
 | Import boundaries | `eslint-plugin-boundaries` | RULE F1-F12 violated |
@@ -918,11 +925,17 @@ lives in a document is no longer the situation for either.
 
 ## Appendix B - Verified state
 
-**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 99 tests, none failing:
+**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 158 tests, none failing:
 
 | Suite | Tests | What it proves |
 |---|---|---|
 | `MoneyTest` | 7 | Exact integer money: arithmetic beyond 2^53, overflow throws, currencies never mix |
+| `PostingTest` | 4 | L2: an amount is a magnitude and the direction carries the sign |
+| `JournalEntryTest` | 12 | L1, L6 and the FX linkage pairing, refused on construction; the hash's shape, and a versioned encoding that length-prefixes every free-form value |
+| `JournalEntryPropertyTest` | 6 | L1, L2, L4 and L6 over generated entries, including that any single-field change changes the hash |
+| `EntryChainTest` | 6 | L4: an untouched chain verifies, and a rewritten entry is caught by the entry after it |
+| `FxLinkageTest` | 7 | L9: pairing across chains, in both directions, within a group |
+| `BalancesTest` | 6 | L5's positive half - positions projected from postings, order-independently - and the measurement L8 needs |
 | `GreedyNettingTest` | 6 | Worked example, flat members, empty group, zero-amount obligations, and the sparse case that must settle directly |
 | `GreedyNettingPropertyTest` | 8 | N1, N2, N3, N4, N6, N7, N8, N9 over generated inputs. Every assertion is labelled with its property id. N5 is *not* here: it compares an optimizer against the baseline and no optimizer exists (netting.md section 4) |
 | `FxRateTest` | 8 | A rate cannot exist malformed: no self-rate, no non-positive numerator, bounded scale, expiry after quote |
@@ -930,13 +943,18 @@ lives in a document is no longer the situation for either.
 | `FxConverterPropertyTest` | 9 | X1-X6 over generated inputs. X2 checked against an independent `BigInteger` oracle |
 | `SettlementPlannerTest` | 14 | ADR 0012's worked example, the clearing split, per-currency tax, order independence, refused input |
 | `SettlementPlannerPropertyTest` | 6 | **X7** and the composition properties: zero-sum including `fx_clearing`, partition completeness, the two legs netting to the clearing position, reproducibility |
-| `ModuleBoundaryTest` | 16 | RULEs B1-B5, B8, B10, B11, B18, B19, B21 |
+| `ReductxnApplicationTest` | 1 | That the API's context starts, with the `dev` profile |
+| `MissingStoreFailsClosedTest` | 2 | That the default profile has no store bean and therefore refuses to start, so a development double cannot reach an environment |
+| `NettingPreviewApiTest` | 4 | The contract's preview through every layer: the single-currency shape, a multicurrency group reported as partitions rather than collapsed into one, an empty plan, and framework errors as problem+json |
+| `ProblemTranslatorTest` | 2 | B20: the response carries the domain's code and nothing a client should render, and an un-namespaced code cannot reach a client |
+| `DomainErrorResolverTest` | 2 | That the resolver claims domain failures and declines everything else, so a bad request keeps its own status |
+| `ModuleBoundaryTest` | 22 | RULEs B1-B5, B8, B10-B15, B18-B21 |
 | `ArchUnitVisibilityTest` | 1 | That the architecture rules above are not vacuous |
 | `DomainErrorCodeTest` | 1 | That every error code is well formed, namespaced by its own module, unique, and declared as a constant |
-| `RuleCoverageTest` | 2 | That every RULE in the plan *or the specs* is enforced or explicitly deferred, and that every claimed enforcement resolves to something that actually runs |
+| `RuleCoverageTest` | 3 | That every RULE in the plan *or the specs* is enforced or explicitly deferred, that every claimed enforcement resolves to something that runs, and that no rule is both |
 | `PropertyCoverageTest` | 3 | That every property in the specs is labelled by a test assertion or explicitly deferred, and that no test labels a property no spec defines |
 
-All 16 architecture rules are verified non-vacuous, and that verification is automated rather than
+All 22 architecture rules are verified non-vacuous, and that verification is automated rather than
 something a reviewer has to notice. See the constraint table below.
 
 **Coverage is checked for behaviour as well as structure.** `S1-S5` - quorum, idempotency, partial
@@ -967,26 +985,30 @@ change, so it is stated explicitly:
 | Journal entries and the hash chain | ADR 0004, 0012 | **Model implemented and tested; no write path** | 41 tests green, plus the 7 for `Money` counted above. `JournalEntry` and `Posting` enforce L1, L2 and L6 on construction; the hash is derived rather than stored, so an entry whose hash disagrees with its content cannot be constructed at all; `EntryChain` and `FxLinkage` verify a chain and its FX pairing as pure functions an offline job can run. Five of the nine ledger invariants are asserted, and the four that are not name the mechanism they wait on |
 | FX rates and the residual | ADR 0013 | **Implemented, tested** | 35 tests green. `libs/fx` owns the rate type, the exact conversion and `FxQuote` |
 | Per-currency composition | ADR 0012 | **Implemented, tested** | 20 tests green. `libs/planning` partitions a cycle, composes the per-currency plans, and derives the external FX requirement |
-| RULEs B3, B4, B5, B10, B11, B18, B19, B21 | ADR 0012, 0013 | **Enforced** | 16 ArchUnit rules, all verified non-vacuous. B3 and B4 had been stated in section 5.1 and never enforced; B11 was described as enforced and did not exist |
+| RULEs B3, B4, B5, B10-B15, B18-B21 | ADR 0012, 0013 | **Enforced** | 22 ArchUnit rules, all verified non-vacuous. B3 and B4 had been stated in section 5.1 and never enforced; B11 was described as enforced and did not exist; B12-B15 had no subject until `apps/api` had sources |
+| `apps/api` skeleton and the preview | ADR 0009 | **Implemented over development doubles; no persistence** | 11 tests green. The hexagonal layers, the RFC 9457 error mapping and the contract's preview endpoint are real; the two stores behind them are `dev`-profile doubles, and the default profile refuses to start without a store, so a double cannot be deployed |
 | `fx_clearing` postings | ADR 0012 | **Not implemented** | Nothing books the entry pair to the ledger. The plan computes the clearing position and the ledger can now express, balance and verify the entries, but no code writes one - that is `apps/api`'s record-obligation use case |
 | Funding state, per-currency runs | ADR 0012 | **Not implemented** | Needs `workers/settlement`, which has no sources |
 | Localization | ADR 0014 | **Not implemented** | No catalogs, no `shared/i18n`, no locale resolution |
-| RULEs B20, F10-F12 | ADR 0014 | **Not enforced** | Listed in section 8 as gates, not yet written |
+| RULEs F10-F12 | ADR 0014 | **Not enforced** | Listed in section 8 as gates, not yet written. B20 was in this row and is enforced now |
 
 So the honest position is narrower than "multicurrency is done": **the plan is done and proven, the
-ledger can now express and verify its entries, and nothing writes one.** A cycle can be partitioned,
-netted per currency, and reported with its external FX requirement quantified per currency, with X7
-asserted against generated cycles. A linked entry pair is expressible, balances, chains, and is caught
-by the cross-chain verifier when its partner is missing.
+ledger can express and verify its entries, the API can serve a preview of them, and nothing writes one.**
+A cycle can be partitioned, netted per currency and reported with its external FX requirement quantified
+per currency, with X7 asserted against generated cycles. A linked entry pair is expressible, balances and
+chains, and `apps/api` maps a plan onto the contract's response shape through layers the rules now police.
 
-What is missing is the write path rather than the model. `SettlementPlan` says what must move; no code
-turns it into `JournalEntry` rows, nothing consumes the residual fraction across a cycle, and no run can
-be gated on funding. Those need `apps/api` and `workers/settlement` to have sources, which they do not.
+What is missing is the write path, and behind it a database. `SettlementPlan` says what must move; no code
+turns it into `JournalEntry` rows, nothing consumes the residual fraction across a cycle, and no run can be
+gated on funding. `apps/api` cannot store or read anything either: its two stores are development doubles
+and the default profile refuses to start without them, which is the honest signal rather than a gap in the
+wiring.
 
-The next implementation step is therefore the write path: booking the two linked entries per
-cross-currency obligation, booking the cycle's residual to `fx_clearing`, and gating a run on its
-funding. All three need `apps/api` and `workers/settlement` to exist. For localization it is the Phase 1
-scaffolding, before the first screen exists to retrofit.
+The next implementation step is therefore `platform/persistence` and a schema - DataSource, jOOQ, Flyway
+and the `obligations` table - which replaces the doubles with a real adapter and makes the preview an
+answer about stored data rather than about one process's memory. After that the write path: the two linked
+entries per cross-currency obligation, the cycle's residual booked to `fx_clearing`, and a run gated on its
+funding. For localization it is the Phase 1 scaffolding, before the first screen exists to retrofit.
 
 
 Toolchain constraints discovered by actually running the build. All are now pinned with reasons:
@@ -1000,6 +1022,11 @@ Toolchain constraints discovered by actually running the build. All are now pinn
 | **Every module a rule mentions must be on `platform/testing`'s classpath** | Otherwise ArchUnit imports none of its classes and the rule checks nothing. This is the *silent* form of the bug above: the subject set stays non-empty, so `emptyShould` never fires, while the `should` clause names a package ArchUnit has never seen. It produced a completely bogus green result for `b19` - a rule asserting no module depends on FX, while FX was invisible. Now caught by `ArchUnitVisibilityTest`, which was itself verified by making it fail on purpose. |
 | **A rule can only forbid what it can see** | `b21` lists `apps/api` and `workers/settlement` as forbidden dependencies, but those have no sources, so ArchUnit has no classes to match and a violation would pass unnoticed. The rule is not vacuous - its subject resolves and is evaluated - but two of its exclusions are inert until the deployables exist. Stated in the rule itself so nobody reads a green tick as more than it is. |
 | **A dependency rule cannot see an inlined constant** | `javac` substitutes a `public static final` compile-time constant at the use site, so a reference to one from another module leaves no trace in the bytecode - and a dependency rule reads bytecode. Found by activating `b10` for `libs/ledger`: a field reference passed the rule while a call to a method on the same class failed it. Not a fault in the rule, since a copied constant creates no coupling, but B10 cannot keep outsiders out of a constant, so `EntryHash.hexLength()` is a method rather than a constant. `PowersOfTen.MAX_EXPONENT` is the remaining instance, and it is referenced only inside its own file. |
+| **A rule can only name types it can see, too** | The same lesson one level down from the row above, and it bit again: `platform/testing` did not depend on Spring, so `b15` could not name `@Transactional` and `b20` could not name `MessageSource`. A rule that cannot see the type it forbids is a rule that checks nothing. Spring is a test dependency there for exactly this reason. |
+| **Spring Boot 4 is Jackson 3** | The databind package is `tools.jackson.databind`, not `com.fasterxml.jackson.databind`; only the annotations stayed at `com.fasterxml.jackson.annotation`. Found by compiling rather than by reading release notes, which is the cheaper of the two ways. |
+| **Spring Boot 4 manages JUnit 6, and the catalogue pinned JUnit 5** | `spring-boot-starter-test` brings platform 6 while the pure modules pinned 5.11.4, so the launcher resolved to 6.0.3 against an engine at 1.11.4 and the engine refused to discover any tests: `OutputDirectoryCreator not available`. Not a version preference - two platform majors on one classpath is a broken test run. The repository is on one stack now, at the versions Boot manages, which jqwik 1.9.3 accepts. |
+| **`@ExceptionHandler` cannot target an interface** | It requires a `Class<? extends Throwable>`, so "handle every exception that implements `DomainError`" - which is precisely what "every domain failure carries a code" means - is not expressible as a controller advice. `apps/api` uses a `HandlerExceptionResolver` instead, which has a second advantage: it can decline, so a framework error keeps the status it deserves rather than becoming a 500. |
+| **Spring Boot 4 no longer ships `@AutoConfigureMockMvc`** | No artifact in the module exposes it. MockMvc is built from the framework directly (`MockMvcBuilders.webAppContextSetup`), which is one less Boot test dependency for a module that needs none of the rest of them. |
 
 The pure core also still compiles standalone with plain `javac` (no Gradle, no Spring), which is the
 property that lets an auditor reproduce a settlement in isolation (principle P4).

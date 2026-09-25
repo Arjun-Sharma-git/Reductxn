@@ -28,7 +28,7 @@ class ArchUnitVisibilityTest {
 
     /** Every module the architecture rules in {@link ModuleBoundaryTest} make claims about. */
     private static final List<String> RULE_SUBJECTS =
-            List.of("kernel", "ledger", "netting", "fx", "planning", "rails");
+            List.of("kernel", "ledger", "netting", "fx", "planning", "rails", "api");
 
     @Test
     void archUnitCanSeeEveryModuleTheRulesTalkAbout() {
@@ -45,8 +45,9 @@ class ArchUnitVisibilityTest {
 
             assertThat(visible)
                     .as("ArchUnit cannot see %s, so every rule mentioning it passes without "
-                            + "checking anything. Add testImplementation(project(\":libs:%s\")) to "
-                            + "platform/testing/build.gradle.kts.", packageName, module)
+                            + "checking anything. Add the module that owns %s to "
+                            + "platform/testing/build.gradle.kts as a testImplementation dependency.",
+                            packageName, packageName)
                     .isPositive();
         }
     }

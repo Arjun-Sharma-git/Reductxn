@@ -29,8 +29,8 @@ timefold = "1.26.0"
 
 # --- LTS track note: keep this aligned with the Spring Boot line we target (ADR 0002) ---
 
-junit = "5.11.4"
-junitPlatform = "1.11.4"
+junit = "6.0.3"
+junitPlatform = "6.0.3"
 
 [libraries]
 spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot" }
@@ -41,6 +41,16 @@ spring-boot-starter-security = { module = "org.springframework.boot:spring-boot-
 spring-boot-starter-data-redis = { module = "org.springframework.boot:spring-boot-starter-data-redis" }
 spring-boot-starter-batch = { module = "org.springframework.boot:spring-boot-starter-batch" }
 spring-boot-starter-jooq = { module = "org.springframework.boot:spring-boot-starter-jooq" }
+spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
+# The Spring Framework libraries a module needs without a starter. `spring-tx` carries @Transactional -
+# the library, not the starter, because a starter would pull a DataSource in, and RULE B15 needs the
+# annotation long before it needs the machinery. `spring-context` is here so the architecture tests can
+# name MessageSource in order to forbid it: a rule can only police types it can see.
+#
+# Pinned to `springFramework` rather than left to the Boot BOM, because platform/testing does not import
+# the BOM and a versionless dependency there would not resolve at all.
+spring-tx = { module = "org.springframework:spring-tx", version.ref = "springFramework" }
+spring-context = { module = "org.springframework:spring-context", version.ref = "springFramework" }
 spring-modulith-core = { module = "org.springframework.modulith:spring-modulith-starter-core" }
 spring-modulith-test = { module = "org.springframework.modulith:spring-modulith-starter-test" }
 flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
