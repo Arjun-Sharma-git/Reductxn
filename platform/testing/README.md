@@ -47,9 +47,22 @@ That has happened once already, which is why `ArchUnitVisibilityTest` exists to 
 | `ArchUnitVisibilityTest` | That every module those rules name is actually visible to ArchUnit |
 | `DomainErrorCodeTest` | That every `DomainError` has a well-formed, module-namespaced, unique code |
 
-`RuleCoverageTest` is the fourth and is about the rules themselves rather than the code: every RULE
-declared in MASTER-PLAN must be enforced by something named, or explicitly deferred with a reason.
-Adding a rule to the plan without deciding how it is checked fails the build.
+Two more are about the documents rather than the code, and they are the pair that keeps this repository
+honest about itself:
+
+- **`RuleCoverageTest`** - every RULE declared in MASTER-PLAN *or in `docs/specs`* is enforced by
+  something named or explicitly deferred with a reason, and every claim of enforcement resolves to
+  something that actually runs (an `@ArchTest` field that exists and is annotated, or a Gradle guard
+  that exists).
+- **`PropertyCoverageTest`** - every property in the specs is either labelled by a test assertion or
+  explicitly deferred. Coverage is *detected*, not declared: a property counts as covered when a test
+  labels an assertion `.as("X7: ...")`, so only the exceptions need maintaining.
+
+`Repository` is the small shared helper they use to find the repository root from a test.
+
+Both fail the build when a rule or property is added without a decision about how it is checked, and
+both were verified by breaking them: undeciding `S1-S5`, removing a property label, labelling a
+property no spec defines, and leaving a stale deferral each fail with the id named.
 
 ## What this module does not do
 

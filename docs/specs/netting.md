@@ -57,6 +57,17 @@ The optimizer is an upgrade, never a dependency. Timeout or failure degrades sil
 | N7 | Determinism: identical input yields identical output |
 | N8 | Tax is non-negative, and zero base implies zero tax |
 
+Every property above except **N5** is asserted by `GreedyNettingPropertyTest`, and each assertion is
+labelled with its own id (`.as("N4: ...")`) so the coverage is machine-checkable rather than a claim in
+a document. `PropertyCoverageTest` fails the build if a property here has neither a labelled assertion
+nor a recorded reason.
+
+**N5 is recorded as deferred, and the reason is that there is nothing to compare against.** It compares
+the optimizer's result to the baseline, and Tier 2 (section 3) does not exist yet. It said nothing
+before, which is the problem: an untested property and an obeyed one look exactly alike, so N5 sat
+unasserted through every build while the table implied otherwise. The day an optimizer lands, N5 becomes
+the first thing to test rather than a line nobody re-reads.
+
 ## 5. Worked example
 
 10 members, 23 obligations, total gross 100,000 minor units. Tier 1 produces 7 transfers.
