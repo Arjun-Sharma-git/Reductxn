@@ -600,8 +600,8 @@ Modularity that is not checked is not real. Every pull request runs:
 | Module graph | ArchUnit + Spring Modulith | RULE B1-B20 violated |
 | Import boundaries | `eslint-plugin-boundaries` | RULE F1-F12 violated |
 | Money discipline | lint ban on `double`/`float` in domain + ESLint ban on division by 100 | P1 violated |
-| FX exactness | jqwik X1-X7 | A conversion is non-deterministic, or the residual is not booked |
-| FX isolation | ArchUnit | A rate is multiplied anywhere outside `libs/fx` (B18, B19) |
+| FX exactness | jqwik X1-X6 - **live** | A conversion is non-deterministic, the residual is not booked, or the round trip drifts. X7 needs the ledger and lands in phase 2.5 |
+| FX isolation | ArchUnit - **live** | A rate is multiplied anywhere outside `libs/fx` (B18, B19). Non-vacuous, and guarded against becoming vacuous |
 | Locale coverage | catalog check | A key is missing versus `en`, unused, or a literal appears in a component (F10, I1-I3) |
 | Error-code parity | codegen check | A server error `code` has no catalog entry, or vice versa (I3) |
 | Locale money safety | Vitest property tests | Formatting changes the digits, or a `float` enters the format/parse path (F11, F12, I5) |
@@ -853,31 +853,44 @@ Found while compiling and executing the pure core, and recorded here rather than
 
 ## Appendix B - Verified state
 
-**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 29 tests, none failing:
+**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 67 tests, none failing:
 
 | Suite | Tests | What it proves |
 |---|---|---|
 | `MoneyTest` | 7 | Exact integer money: arithmetic beyond 2^53, overflow throws, currencies never mix |
 | `GreedyNettingTest` | 6 | Worked example, flat members, empty group, zero-amount obligations, and the sparse case that must settle directly |
 | `GreedyNettingPropertyTest` | 8 | N1, N2, N3, N4, N6, N7, N8, N9 over generated inputs |
-| `ModuleBoundaryTest` | 8 | RULEs B1, B2, B5, B8, B10 - verified non-vacuous: 30 classes imported |
+| `FxRateTest` | 8 | A rate cannot exist malformed: no self-rate, no non-positive numerator, bounded scale, expiry after quote |
+| `FxConverterTest` | 17 | The spec's worked examples, both signs of the residual, the zero-rounding refusal, the overflow boundary, quote locking |
+| `FxConverterPropertyTest` | 9 | X1, X2, X3, X4, X5, X6 over generated inputs. X2 checked against an independent `BigInteger` oracle |
+| `ModuleBoundaryTest` | 11 | RULEs B1, B2, B5, B8, B10, B18, B19 |
+| `ArchUnitVisibilityTest` | 1 | That the architecture rules above are not vacuous |
+
+All 12 architecture rules are verified non-vacuous, and that verification is now automated rather than
+something a reviewer has to notice. See the constraint table below.
 
 **What is designed versus what exists.** This distinction matters more than usual after a design-heavy
 change, so it is stated explicitly:
 
 | Area | Decision | Code | Notes |
 |---|---|---|---|
-| Netting, tax, ledger, money | ADR 0004, 0005, 0006, 0011 | **Implemented, tested** | 29 tests green |
-| Module boundaries | RULEs B1-B17 | **Implemented, enforced** | 8 ArchUnit rules, verified non-vacuous |
-| Multicurrency | ADR 0012 | **Not implemented** | `libs/fx` does not exist yet. `NettingRequest` still rejects a second currency, correctly. |
-| FX rates and the residual | ADR 0013 | **Not implemented** | Rate representation, conversion, `fx_clearing`: design only |
+| Netting, tax, ledger, money | ADR 0004, 0005, 0006, 0011 | **Implemented, tested** | 21 tests green |
+| FX rates and the residual | ADR 0013 | **Implemented, tested** | 34 tests green. `libs/fx` owns the rate type, the exact conversion and `FxQuote` |
+| RULEs B10, B18, B19 | ADR 0013 | **Enforced** | 3 new ArchUnit rules, each verified non-vacuous |
+| Multicurrency composition | ADR 0012 | **Not implemented** | Nothing partitions a cycle by currency, nothing writes `fx_clearing`, and nothing consumes the residual. `NettingRequest` still rejects a second currency, which is correct today |
+| `fx_clearing`, per-currency runs | ADR 0012 | **Not implemented** | Needs `workers/settlement`, which has no sources |
 | Localization | ADR 0014 | **Not implemented** | No catalogs, no `shared/i18n`, no locale resolution |
-| RULEs B18-B20, F10-F12 | ADR 0012, 0013, 0014 | **Not enforced** | Listed in section 8 as gates, but the gates do not exist yet |
+| RULEs B20, F10-F12 | ADR 0014 | **Not enforced** | Listed in section 8 as gates, not yet written |
 
-So the counts above are unchanged from before this design work, and that is the honest position: three
-ADRs were accepted and the contract and specs were updated, but **no behavioural code changed**. The
-next implementation step for multicurrency is `libs/fx` plus a per-currency partitioner; for
+So the honest position is narrower than "multicurrency is done". **The arithmetic is done and proven;
+the composition is not started.** `libs/fx` can convert an amount exactly and report what rounding
+discarded, and there is a test for every claim in `docs/specs/fx.md` section 8 that does not require a
+ledger. What remains for phase 2.5 is the part that needs the settlement loop: partitioning, the
+clearing account, the funding state, and X7.
+
+The next implementation step is the per-currency partitioner and the `fx_clearing` postings. For
 localization it is the Phase 1 scaffolding, before the first screen exists to retrofit.
+
 
 Toolchain constraints discovered by actually running the build. All are now pinned with reasons:
 
@@ -887,6 +900,7 @@ Toolchain constraints discovered by actually running the build. All are now pinn
 | **ArchUnit >= 1.5.0** | ArchUnit 1.x before 1.5.0 cannot read Java 25 bytecode (class file major version 69). It imports zero classes, so every rule fails as `emptyShould` - or, if `failOnEmptyShould` is ever disabled, **passes silently while enforcing nothing**. Verified by importing 30 classes explicitly. |
 | **No `includeEngines(...)` on Test tasks** | Filtering by engine name silently excluded the ArchUnit engine (id `archunit`), so the architecture rules did not run at all and the task reported "did not discover any tests". |
 | **ArchUnit package identifiers are not regex** | `(kernel|ledger|...)` matches nothing. Use `resideInAnyPackage(...)`. |
+| **Every module a rule mentions must be on `platform/testing`'s classpath** | Otherwise ArchUnit imports none of its classes and the rule checks nothing. This is the *silent* form of the bug above: the subject set stays non-empty, so `emptyShould` never fires, while the `should` clause names a package ArchUnit has never seen. It produced a completely bogus green result for `b19` - a rule asserting no module depends on FX, while FX was invisible. Now caught by `ArchUnitVisibilityTest`, which was itself verified by making it fail on purpose. |
 
 The pure core also still compiles standalone with plain `javac` (no Gradle, no Spring), which is the
 property that lets an auditor reproduce a settlement in isolation (principle P4).
@@ -895,6 +909,26 @@ ADR 0011 is implemented. The engine builds both the netted plan and the direct o
 whichever costs less, and reports a saving that cannot go negative. That changed the wire contract:
 `contracts/openapi/reductxn-api.yaml` gained `pairwise` in the algorithm enum, edited before the code
 (RULE C1).
+
+ADR 0013's arithmetic is implemented in `libs/fx`: the scaled-integer rate, the exact conversion, the
+fractional residual, and the fail-closed quote lock. Writing it out before implementing it corrected
+the contract twice - `FxQuote` carried the residual as a whole minor unit, which cannot represent
+`-0.096`, and the spec's bounds were stated as three independent limits that multiplied to 10^35. Both
+are fixed. Measured against the compiled engine, the spec's worked examples reproduce exactly:
+
+```
+JPY  50,000  ->  2,795,200 INR minor        (INR 27,952.00)
+JPY  50,001  ->  2,795,256 INR minor, residual -0.096
+RUB 100,000  ->    102,410 USD minor        (USD 1,024.10)
+INR  27,952  ->     50,000 JPY minor        (round trip)
+```
+
+**Known inconsistency, deliberately not fixed here:** error codes. `libs/fx` returns dotted,
+namespaced codes (`fx.rate_stale`), matching the contract's examples and the ICU catalog keys in
+ADR 0014. The pre-existing `CurrencyMismatchException` in `libs/ledger` returns `CURRENCY_MISMATCH`.
+Both cannot be right, the contract is authoritative (P5), so the older exception is the one that
+should change - but `libs/ledger` carries the stricter review bar, so it is a follow-up rather than
+something changed silently underneath a financial module.
 
 **Not yet verified:** `apps/api`, `workers/settlement` and `apps/web` have no sources.
 `platform/persistence`, `platform/observability` and `platform/security` are not yet included in

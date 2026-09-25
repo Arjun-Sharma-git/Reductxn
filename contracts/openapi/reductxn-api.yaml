@@ -646,18 +646,28 @@ components:
       description: |
         An immutable, locked conversion of one amount. Immutability is the point: the settlement rate
         is contractual and is never restated (ADR 0013, point 5).
-      required: [id, rate, baseAmount, convertedAmount, residualMinor, lockedAt]
+      required: [id, rate, baseAmount, convertedAmount, residualScaled, residualScale, lockedAt]
       properties:
         id: { type: string, format: uuid }
         rate: { $ref: '#/components/schemas/FxRate' }
         baseAmount: { $ref: '#/components/schemas/Money' }
         convertedAmount: { $ref: '#/components/schemas/Money' }
-        residualMinor:
+        residualScaled:
           type: integer
           format: int64
           description: |
-            Signed rounding residual in the quote currency's minor units, booked to the fx_clearing
-            account so value is conserved. See docs/specs/fx.md section 4.
+            Signed rounding residual, as the numerator of a fraction with `residualScale` as its
+            denominator: residual = residualScaled / 10^residualScale. Always in [-0.5, 0.5) minor
+            units of the quote currency, and booked to fx_clearing so value is conserved.
+            Deliberately NOT a whole minor unit: the residual is genuinely fractional, and rounding
+            it to an integer would silently lose or invent value (ADR 0013, docs/specs/fx.md s.4).
+          example: -96
+        residualScale:
+          type: integer
+          minimum: 0
+          maximum: 16
+          description: Denominator exponent for `residualScaled`. Rate scale plus any exponent shift.
+          example: 3
         lockedAt: { type: string, format: date-time }
         railPerformedFx:
           type: boolean

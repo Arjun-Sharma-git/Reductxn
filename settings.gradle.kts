@@ -15,6 +15,7 @@ includeBuild("build-logic")
 include(":libs:kernel")
 include(":libs:ledger")
 include(":libs:netting")
+include(":libs:fx")
 include(":libs:rails")
 
 // --- Deployables ---
