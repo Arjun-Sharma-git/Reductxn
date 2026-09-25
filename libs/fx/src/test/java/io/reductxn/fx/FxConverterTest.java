@@ -243,4 +243,22 @@ class FxConverterTest {
                 0L, 0, QUOTED_AT, false))
                 .isInstanceOf(InvalidRateException.class);
     }
+
+    @Test
+    void rejectsAQuoteWithANegativeAmount() {
+        // Direction belongs to the transfer instruction, not to an amount (L2). The converter refuses
+        // a negative amount already; this closes the same hole at the type, so the invariant holds
+        // however the quote was built rather than only when it came through lock().
+        assertThatThrownBy(() -> new FxQuote(
+                UUID.randomUUID(), JPY_INR, Money.of(-50_000L, JPY), Money.of(2_795_200L, INR),
+                0L, 0, QUOTED_AT, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("base amount is a magnitude");
+
+        assertThatThrownBy(() -> new FxQuote(
+                UUID.randomUUID(), JPY_INR, Money.of(50_000L, JPY), Money.of(-2_795_200L, INR),
+                0L, 0, QUOTED_AT, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("converted amount is a magnitude");
+    }
 }
