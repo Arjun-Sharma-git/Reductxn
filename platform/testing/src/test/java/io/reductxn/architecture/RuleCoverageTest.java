@@ -85,6 +85,15 @@ class RuleCoverageTest {
                     "ModuleBoundaryTest#b10_planning_internal_is_private",
                     "ModuleBoundaryTest#b10_rails_internal_is_private")),
             Map.entry("B11", List.of("ModuleBoundaryTest#b11_api_never_exposes_an_internal_type")),
+            Map.entry("B12", List.of(
+                    "ModuleBoundaryTest#b12_web_never_touches_adapters",
+                    "ModuleBoundaryTest#b12_web_reaches_application_only_through_port_in")),
+            Map.entry("B13", List.of(
+                    "ModuleBoundaryTest#b13_application_calls_ports_not_implementations")),
+            Map.entry("B14", List.of(
+                    "ModuleBoundaryTest#b14_adapters_never_touch_application_or_web")),
+            Map.entry("B15", List.of("ModuleBoundaryTest#b15_transactional_only_in_application")),
+            Map.entry("B20", List.of("ModuleBoundaryTest#b20_api_has_no_way_to_localise")),
             Map.entry("B18", List.of("ModuleBoundaryTest#b18_fx_depends_only_on_kernel_and_ledger")),
             Map.entry("B19", List.of("ModuleBoundaryTest#b19_no_other_domain_module_knows_about_fx")),
             Map.entry("B21", List.of(
@@ -96,22 +105,27 @@ class RuleCoverageTest {
 
     /** Rules known to be unenforced, with the reason, so a gap is a decision rather than a secret. */
     private static final Map<String, String> DEFERRED_RULES = Map.ofEntries(
-            Map.entry("B6", "apps/api and workers/settlement may not depend on each other. Neither has "
-                    + "sources, so ArchUnit has no classes to match and the rule would be inert"),
+            Map.entry("B6", "apps/api and workers/settlement may not depend on each other. apps/api has "
+                    + "sources now, so one direction has a subject - but the worker has none, so a "
+                    + "dependency in that direction cannot exist to be caught. Written today the rule "
+                    + "would be green while checking nothing, which is the failure this map exists to "
+                    + "make visible rather than to hide"),
             Map.entry("B7", "platform/* may not depend on a deployable. platform/testing is the only "
                     + "platform module with code and it lives in io.reductxn.architecture, so there is "
                     + "no platform package pattern to express this over yet"),
             Map.entry("B9", "compiler settings live only in build-logic. They do, applied by the "
                     + "convention plugin - but nothing detects a module that hand-rolls its own. That "
                     + "check would have to read build files, a different guard from every other here"),
-            Map.entry("B12", "apps/api structure: web calls application only. Needs apps/api sources"),
-            Map.entry("B13", "apps/api structure: application calls port/out only. Needs apps/api sources"),
-            Map.entry("B14", "apps/api structure: adapter never calls application or web. Needs sources"),
-            Map.entry("B15", "no @Transactional outside application. Needs apps/api sources"),
-            Map.entry("B16", "no jOOQ row types out of adapter/persistence. Needs apps/api sources"),
-            Map.entry("B17", "one owning module per table. Needs a schema and a persistence module"),
-            Map.entry("B20", "the API never returns localized prose. Needs apps/api and its HTTP layer; "
-                    + "the assertion belongs beside the problem-response mapping, not in this module"),
+            // B12-B15 and B20 left this map when apps/api gained sources and are enforced in
+            // ModuleBoundaryTest. What remains here are the rules an API module cannot satisfy however
+            // complete it becomes, and each names the missing mechanism rather than the missing work.
+            Map.entry("B16", "no persistence row types (jOOQ records) cross out of adapter/persistence. "
+                    + "The rule is expressible - it forbids any class outside adapter/persistence from "
+                    + "depending on org.jooq - but this module does not depend on jOOQ at all yet, so no "
+                    + "row type can leak and no sabotage could prove the rule bites. It arrives with the "
+                    + "persistence adapter"),
+            Map.entry("B17", "one owning module per table. Needs a schema and a persistence module: with "
+                    + "no table definitions anywhere, there is nothing to attribute to an owner"),
             Map.entry("R1", "the fixed top-level layout. Enforceable and deliberately not enforced: the "
                     + "check would fail the build for adding a directory, and an ADR is already the "
                     + "documented barrier. Judged to be friction without a matching benefit"),
@@ -180,6 +194,19 @@ class RuleCoverageTest {
         assertThat(stale)
                 .as("this test claims coverage for rules docs/MASTER-PLAN.md no longer declares. A "
                         + "stale entry reads as coverage, so either remove it or restore the rule")
+                .isEmpty();
+    }
+
+    @Test
+    void noRuleIsBothEnforcedAndDeferred() {
+        Set<String> both = new TreeSet<>(ENFORCED_RULES.keySet());
+        both.retainAll(DEFERRED_RULES.keySet());
+
+        assertThat(both)
+                .as("a rule cannot be both enforced and deferred. This direction is checked because the "
+                        + "other one is: PropertyCoverageTest fails when a property's deferral goes "
+                        + "stale, and this map had no equivalent, so moving a rule from DEFERRED_RULES "
+                        + "to ENFORCED_RULES could be done halfway and stay green")
                 .isEmpty();
     }
 
