@@ -938,7 +938,7 @@ change, so it is stated explicitly:
 | Netting, tax, ledger, money | ADR 0004, 0005, 0006, 0011 | **Implemented, tested** | 21 tests green |
 | FX rates and the residual | ADR 0013 | **Implemented, tested** | 35 tests green. `libs/fx` owns the rate type, the exact conversion and `FxQuote` |
 | Per-currency composition | ADR 0012 | **Implemented, tested** | 20 tests green. `libs/settlement` partitions a cycle, composes the per-currency plans, and derives the external FX requirement |
-| RULEs B3, B4, B5, B10, B18, B19, B21 | ADR 0012, 0013 | **Enforced** | 15 ArchUnit rules, all verified non-vacuous. B3 and B4 had been stated in section 5.1 and never enforced |
+| RULEs B3, B4, B5, B10, B11, B18, B19, B21 | ADR 0012, 0013 | **Enforced** | 16 ArchUnit rules, all verified non-vacuous. B3 and B4 had been stated in section 5.1 and never enforced; B11 was described as enforced and did not exist |
 | `fx_clearing` postings | ADR 0012 | **Not implemented** | Nothing books the entry pair to the ledger. The plan computes the clearing position; the ledger never hears about it |
 | Funding state, per-currency runs | ADR 0012 | **Not implemented** | Needs `workers/settlement`, which has no sources |
 | Localization | ADR 0014 | **Not implemented** | No catalogs, no `shared/i18n`, no locale resolution |
