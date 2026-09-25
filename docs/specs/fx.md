@@ -263,7 +263,7 @@ its fail-closed freshness check. Properties X1-X6 hold over generated inputs.
 
 | Missing | Why it is not here |
 |---|---|
-| X7, per-currency zero-sum | Tested in `libs/settlement`, which composes the partitions. It needs a module that can see both the engine and `fx_clearing` |
+| X7, per-currency zero-sum | Tested in `libs/planning`, which composes the partitions. It needs a module that can see both the engine and `fx_clearing` |
 | X2's second half, "the cycle sum of residuals equals the `fx_clearing` delta" | Needs postings to sum over, so it lands with the ledger write path |
 | The `fx_clearing` account and its postings | Needs the ledger write path in `apps/api` |
 | `awaiting_fx_funding` and the funding state | Needs the settlement run lifecycle in `workers/settlement` |

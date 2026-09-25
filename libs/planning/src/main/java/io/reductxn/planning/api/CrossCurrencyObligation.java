@@ -1,4 +1,4 @@
-package io.reductxn.settlement.api;
+package io.reductxn.planning.api;
 
 import io.reductxn.fx.api.FxQuote;
 import io.reductxn.ledger.api.Currency;

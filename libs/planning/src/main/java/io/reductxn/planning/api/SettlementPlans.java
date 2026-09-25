@@ -1,6 +1,6 @@
-package io.reductxn.settlement.api;
+package io.reductxn.planning.api;
 
-import io.reductxn.settlement.internal.PerCurrencySettlementPlanner;
+import io.reductxn.planning.internal.PerCurrencySettlementPlanner;
 
 /**
  * Public factories for settlement planners (RULE B10).

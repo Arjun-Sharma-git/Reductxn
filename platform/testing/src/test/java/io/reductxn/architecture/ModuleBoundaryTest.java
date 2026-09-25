@@ -46,7 +46,7 @@ class ModuleBoundaryTest {
             "io.reductxn.ledger..",
             "io.reductxn.netting..",
             "io.reductxn.fx..",
-            "io.reductxn.settlement..",
+            "io.reductxn.planning..",
             "io.reductxn.rails.."
     };
 
@@ -56,7 +56,7 @@ class ModuleBoundaryTest {
             "io.reductxn.ledger.api..",
             "io.reductxn.netting.api..",
             "io.reductxn.fx.api..",
-            "io.reductxn.settlement.api..",
+            "io.reductxn.planning.api..",
             "io.reductxn.rails.api.."
     };
 
@@ -80,7 +80,7 @@ class ModuleBoundaryTest {
                             "io.reductxn.ledger..",
                             "io.reductxn.netting..",
                             "io.reductxn.fx..",
-                            "io.reductxn.settlement..",
+                            "io.reductxn.planning..",
                             "io.reductxn.rails..")
                     .because("RULE B1: kernel is the root of the module graph");
 
@@ -90,7 +90,7 @@ class ModuleBoundaryTest {
                     .should().dependOnClassesThat().resideInAnyPackage(
                             "io.reductxn.netting..",
                             "io.reductxn.fx..",
-                            "io.reductxn.settlement..",
+                            "io.reductxn.planning..",
                             "io.reductxn.rails..")
                     .because("RULE B2: ledger must not depend on netting, fx, settlement or rails");
 
@@ -106,7 +106,7 @@ class ModuleBoundaryTest {
             noClasses().that().resideInAPackage("io.reductxn.netting..")
                     .should().dependOnClassesThat().resideInAnyPackage(
                             "io.reductxn.fx..",
-                            "io.reductxn.settlement..",
+                            "io.reductxn.planning..",
                             "io.reductxn.rails..")
                     .because("RULE B3: netting depends only on kernel and ledger, so the engine cannot "
                             + "acquire currency awareness its per-currency proofs do not account for");
@@ -117,7 +117,7 @@ class ModuleBoundaryTest {
                     .should().dependOnClassesThat().resideInAnyPackage(
                             "io.reductxn.netting..",
                             "io.reductxn.fx..",
-                            "io.reductxn.settlement..")
+                            "io.reductxn.planning..")
                     .because("RULE B4: rails depend only on kernel and ledger");
 
     @ArchTest
@@ -153,7 +153,7 @@ class ModuleBoundaryTest {
                             "io.reductxn.netting..",
                             "io.reductxn.rails..",
                             "io.reductxn.api..",
-                            "io.reductxn.settlement..")
+                            "io.reductxn.planning..")
                     .because("RULE B18: fx may not depend on netting, so rate logic can never hide "
                             + "inside the engine whose proofs assume one currency at a time");
 
@@ -178,9 +178,9 @@ class ModuleBoundaryTest {
                     .because("RULE B19: conversion happens only in libs/fx");
 
     @ArchTest
-    static final ArchRule b10_settlement_internal_is_private =
-            noClasses().that().resideOutsideOfPackage("io.reductxn.settlement..")
-                    .should().dependOnClassesThat().resideInAPackage("io.reductxn.settlement.internal..")
+    static final ArchRule b10_planning_internal_is_private =
+            noClasses().that().resideOutsideOfPackage("io.reductxn.planning..")
+                    .should().dependOnClassesThat().resideInAPackage("io.reductxn.planning.internal..")
                     .because("RULE B10: the partitioner is reached only through SettlementPlans");
 
     /**
@@ -291,8 +291,8 @@ class ModuleBoundaryTest {
      * are listed now so the boundary is stated before anything can cross it.
      */
     @ArchTest
-    static final ArchRule b21_settlement_depends_only_on_kernel_ledger_netting_and_fx =
-            noClasses().that().resideInAPackage("io.reductxn.settlement..")
+    static final ArchRule b21_planning_depends_only_on_kernel_ledger_netting_and_fx =
+            noClasses().that().resideInAPackage("io.reductxn.planning..")
                     .should().dependOnClassesThat().resideInAnyPackage(
                             "io.reductxn.rails..",
                             "io.reductxn.api..",
