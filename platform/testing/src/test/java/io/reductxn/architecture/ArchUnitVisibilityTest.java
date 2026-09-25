@@ -28,7 +28,7 @@ class ArchUnitVisibilityTest {
 
     /** Every module the architecture rules in {@link ModuleBoundaryTest} make claims about. */
     private static final List<String> RULE_SUBJECTS =
-            List.of("kernel", "ledger", "netting", "fx", "rails");
+            List.of("kernel", "ledger", "netting", "fx", "settlement", "rails");
 
     @Test
     void archUnitCanSeeEveryModuleTheRulesTalkAbout() {

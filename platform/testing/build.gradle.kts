@@ -16,5 +16,6 @@ dependencies {
     testImplementation(project(":libs:ledger"))
     testImplementation(project(":libs:netting"))
     testImplementation(project(":libs:fx"))
+    testImplementation(project(":libs:settlement"))
     testImplementation(project(":libs:rails"))
 }
