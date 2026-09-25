@@ -26,13 +26,33 @@ itself, so re-deriving history is not required to read a past obligation.
 `rate = rateScaled / 10^rateScale`, exactly. `libs/fx` is the only module permitted to multiply an
 amount by a rate (**RULE B19**). No `double`, no `float`, no `BigDecimal` (P1, ADR 0013).
 
-Documented bounds, enforced at the API edge so the engine never throws on legitimate traffic:
+Documented bounds. The third row is the one that actually binds, and the earlier draft of this spec
+got it wrong by stating the first three as if they were independent.
 
 | Quantity | Bound | Why |
 |---|---|---|
-| `amountMinor` | 10^15 | Keeps `amountMinor * rateScaled` inside `long` for scale 8 |
 | `rateScale` | 0..8 | Provider-native scale; 8 is the practical maximum |
 | `rateScaled` | 1..10^12 | A rate outside this range is a data error, not a market |
+| `amountMinor` | 0..10^15 | Generous for a group settlement |
+| **the product** | `amountMinor * rateScaled * 10^max(0, expShift) < 2^63` | **This is the real limit.** The conversion is a single 64-bit multiply, so three individually reasonable bounds can still multiply past `long` |
+
+The engine uses `Math.multiplyExact`, so a violation **throws rather than wraps**. That is the
+required behaviour, not a fallback.
+
+**Trailing zeros in the rate are cancelled before multiplying**, which is exact and materially widens
+the usable range, because provider rates at scale 8 usually carry them:
+
+```
+INR -> JPY  rateScaled 178,878,000 at scale 8
+            -> cancels to 178,878 at scale 5     (3 factors of ten)
+INR -> JPY  rateScaled    17,888 at scale 4
+            -> cannot cancel: 17,888 is not a multiple of 10
+```
+
+So the practical ceiling depends on the pair: roughly `9.2 * 10^6` minor units for the worst-case
+rate that survives cancellation, against about `5.1 * 10^13` minor units for `INR -> JPY`
+(about INR 500 billion). Adequate for this product, and worth knowing before someone records a
+sovereign-scale obligation and gets an exception instead of a conversion.
 
 ## 3. Conversion
 
@@ -47,6 +67,35 @@ Three details that are easy to get wrong, and are therefore stated explicitly:
    plausible number.
 2. **Rounding is half-up**, matching `Money.percentageBps`. One rounding rule in the codebase.
 3. **Multiplication uses `Math.multiplyExact`**, so overflow throws rather than wrapping.
+
+### 3.2 The exact algorithm
+
+Stated as steps, because the order matters and two of them are what keep it inside a `long`:
+
+```
+1. reject a negative amount        direction belongs to the transfer, not the amount (L2)
+2. reject amount not in rate.base
+3. cancel trailing zeros           while exponent > 0 and factor % 10 == 0: factor /= 10; exponent--
+4. num = multiplyExact(amountMinor, factor)
+5. expShift = targetExp - sourceExp
+       expShift > 0:  num = multiplyExact(num, 10^expShift)
+       expShift < 0:  exponent += -expShift
+6. cancel trailing zeros from num  while exponent > 0 and num % 10 == 0: num /= 10; exponent--
+7. denominator = 10^exponent
+   quotient    = num / denominator
+   remainder   = num % denominator
+   roundUp     = (2 * remainder >= denominator)          half-up, same rule as Money.percentageBps
+8. convertedMinor = quotient + (roundUp ? 1 : 0)
+   residualScaled = roundUp ? remainder - denominator : remainder
+   residualScale  = exponent
+9. reject if convertedMinor == 0 while the amount was non-zero    (X3, never silently vanish)
+```
+
+Steps 3 and 6 are cancellation, not approximation: dividing both the numerator and the denominator
+by ten retains the exact same rational value. They exist purely to postpone overflow.
+
+Step 7 is safe against overflow because `exponent` is bounded at 16 (`rateScale` 8 plus an exponent
+shift of at most 8), so `2 * remainder < 2 * 10^16`, comfortably inside a `long`.
 
 ### 3.1 Worked examples, computed by hand
 
@@ -99,6 +148,30 @@ residual = exact - booked                   = -0.096        minor units
 The group credited `0.096` of an INR minor unit more than the exact value, so `fx_clearing` is
 debited `0.096` in INR. Value is conserved and the amount is visible in the books.
 
+### 4.1 The residual is fractional, and is represented as one
+
+`-0.096` is not a whole minor unit, so a single `int64` cannot hold it. The residual is therefore
+represented the same way a rate is (P12), as a scaled integer:
+
+```
+residual = residualScaled / 10^residualScale        residualScaled = -96, residualScale = 3
+```
+
+The invariant, which is exactly checkable in integers:
+
+```
+(convertedMinor * 10^residualScale + residualScaled) * D  ==  N  * 10^residualScale
+
+where N = amountMinor * rateScaled * 10^max(0, expShift)
+      D = 10^rateScale * 10^max(0, -expShift)
+```
+
+Property X2 asserts this identity against an independent `BigInteger` oracle, so the test recomputes
+the exact value rather than checking the implementation against itself.
+
+`residualScaled` is always in `[-0.5, 0.5)` minor units, which is asserted separately as a range
+check: a residual outside that band would mean the rounding rule and the recorded residual disagree.
+
 ## 5. Cross-currency journal entries
 
 A cross-currency obligation produces **two single-currency entries**, linked by `fx_link_id`, with
@@ -148,12 +221,31 @@ nothing else *cannot* settle internally: someone must bring yen and rupees toget
 | # | Property |
 |---|---|
 | X1 | Determinism: a stored quote plus an amount always yields the same minor units |
-| X2 | Conservation: `exact - booked == residual`, and the cycle sum of residuals equals the `fx_clearing` delta |
+| X2 | Conservation: `(convertedMinor * 10^residualScale + residualScaled) * D == N * 10^residualScale`, checked against an independent `BigInteger` oracle; plus `residualScaled` within `[-0.5, 0.5)` minor units |
 | X3 | Non-vanishing: a non-zero source amount never converts to zero; it is rejected instead |
-| X4 | Round-trip bound: `A -> B -> A` is within 1 minor unit of `A` for a mid-rate pair at sufficient scale |
+| X4 | Round-trip bound: for an exactly invertible rate and same-exponent currencies, `abs(A -> B -> A - A) <= ceil(0.5 + 0.5/r)`, which is **1 minor unit for every `r >= 1`** |
 | X5 | Monotonicity: a larger source amount never converts to a smaller result |
 | X6 | Bounds: amounts and rates at the documented limits convert without throwing; beyond them it throws rather than wrapping |
 | X7 | Per-currency zero-sum: after any cross-currency cycle, member positions plus `fx_clearing` sum to zero in every currency |
+
+### 8.1 Notes on X2 and X4
+
+**X2** uses `BigInteger` as an *oracle in the test*, which is not a P1 violation: P1 forbids floating
+point and `BigDecimal` in the domain model and on the wire. A test that recomputes the exact rational
+value independently is the only way to check the implementation against something other than itself.
+Its second half, "the cycle sum of residuals equals the `fx_clearing` delta", needs the ledger, so it
+is asserted in the phase that wires conversion into postings, not in `libs/fx`.
+
+**X4's bound is derived, not chosen.** Rounding the forward conversion costs at most `0.5` target
+minor units, which is at most `0.5/r` source minor units; rounding the return conversion costs at most
+`0.5` source minor units. Total `<= 0.5 + 0.5/r`. So the "within 1 minor unit" formulation is exactly
+right for `r >= 1` and **wrong for `r < 1`**, where the bound grows: at `r = 0.1` it is `5.5`.
+The property test therefore generates rates with `r >= 1` and same-exponent currency pairs, and relies
+on an *exactly* invertible rate so the comparison is not measuring the inverse rate's own rounding.
+
+**X7 is deferred.** It is a property of the ledger and the netting partitioner, not of `libs/fx`. It
+is listed here so the requirement is not lost, and it lands in the phase that wires conversion into
+postings (`docs/MASTER-PLAN.md` section 13, phase 2.5).
 
 ## 9. Rail FX capability
 
