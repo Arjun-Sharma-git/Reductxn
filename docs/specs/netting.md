@@ -9,13 +9,18 @@ member's position, minimising the objective implied by the active tax rule.
 
 ## 2. Inputs and outputs
 
-```
-NettingRequest(Money currency, List<MemberId> members, List<Obligation> obligations,
-               TaxRule taxRule, NettingPolicy policy)
+The engine is **single-currency by construction**. This is a deliberate constraint, not a limitation
+to be lifted: it is what makes N1-N9 provable. Multicurrency is handled outside the engine (section 8).
 
-NettingResult(List<NetPosition> positions, List<TransferInstruction> transfers,
-              Money grossMinor, Money netMinor, Money taxMinor, Money taxSavedMinor,
+```
+NettingRequest(Currency currency, List<Obligation> obligations, TaxRule taxRule)
+    -- validates that every obligation shares `currency`, else CurrencyMismatchException
+
+NettingResult(Money gross, Money net, Money tax, Money taxSaved, int grossTransferCount,
+              List<NetPosition> positions, List<TransferInstruction> transfers,
               Algorithm algorithm, boolean provablyOptimal)
+
+Algorithm in { GREEDY, SUBSET_PARTITION, MIP, PAIRWISE }
 ```
 
 ## 3. Algorithm - two tiers
@@ -62,7 +67,8 @@ as the delta between the pairwise-tax and netted-tax figures.
 
 - Whether to expose transfer-size constraints (some rails cap a single transfer).
 - Whether optimality should be proven and stored per run, as an audit artefact.
-- Multi-currency groups: net per currency, no FX in v1.
+- Whether the pairwise baseline (section 7) should also be applied per currency partition, and whether
+  a cross-currency cycle should compare currency strategies as well as plans (ADR 0012, open question).
 
 ---
 
@@ -93,3 +99,33 @@ sparse (3 obligations, 5 members):  PAIRWISE  chosen, 3 transfers, tax 150, save
 
 Properties N8 (`taxSaved >= 0`) and N9 (the engine never costs more than settling directly) assert
 this. N9 is what makes the product's central claim true rather than aspirational.
+
+---
+
+## 8. Multicurrency (ADR 0012)
+
+**The engine does not become multicurrency.** A multicurrency cycle is **partitioned by currency**,
+and each partition is handed to this engine unchanged. Every property in section 4 therefore holds
+**per currency** rather than globally, and no algorithm changes:
+
+```
+cycle for group G
+  |-- partition obligations by settlement currency
+  |     JPY: [ ... ]  ->  NettingRequest(JPY, ...)  ->  N1..N9 hold within JPY
+  |     RUB: [ ... ]  ->  NettingRequest(RUB, ...)  ->  N1..N9 hold within RUB
+  |     INR: [ ... ]  ->  NettingRequest(INR, ...)  ->  N1..N9 hold within INR
+  `-- merge results; totals are reported per currency, never summed in bare minor units
+```
+
+Two consequences worth stating plainly, because both are easy to get wrong:
+
+1. **`sum(positions) == 0` is per currency.** There is no meaningful global zero, because adding
+   yen to rupees is not addition.
+2. **Cross-currency obligations add a transfer leg.** They are represented as two linked
+   single-currency entries (ADR 0012), one of which is an `fx_clearing` leg. Under a per-transfer tax
+   a cross-currency cycle is therefore **more expensive** than the same obligations settled within one
+   currency. The preview must be able to report that cost, not only the saving.
+
+A headline `taxSaved` spanning currencies is only meaningful in a **reporting currency**, using a
+**reporting rate** distinct from the locked settlement rate (ADR 0013), and must be labelled as an
+estimate. See `docs/specs/fx.md` sections 7 and 8.

@@ -9,6 +9,13 @@ info:
     This file is the SOURCE OF TRUTH (RULE C1). Do not edit generated clients.
     All amounts are integer minor units. There are no floating-point amounts anywhere.
 
+    FX rates are also scaled integers, never floats (P12, ADR 0013).
+
+    Locale policy: this API returns NO localized prose and accepts no locale parameter. Errors carry
+    a stable `code` plus structured `params`, and the client localizes from its own ICU catalog
+    (RULE B20, ADR 0014). Timestamps are ISO 8601 with an explicit offset, and instants that depend on
+    a group's calendar are resolved in that group's `settlementTimezone`.
+
 servers:
   - url: https://api.reductxn.example/v1
     description: Production
@@ -26,6 +33,8 @@ tags:
   - name: netting
   - name: settlement
   - name: tax
+  - name: fx
+  - name: reference
   - name: webhooks
 
 paths:
@@ -122,6 +131,18 @@ paths:
               properties:
                 name: { type: string, maxLength: 120 }
                 currency: { $ref: '#/components/schemas/Currency' }
+                reportingCurrency:
+                  allOf: [{ $ref: '#/components/schemas/Currency' }]
+                  description: |
+                    Currency used for headline totals spanning several currencies. Defaults to
+                    `currency`. Purely presentational and restatable (ADR 0013, point 5).
+                settlementTimezone:
+                  type: string
+                  description: |
+                    IANA zone, for example Asia/Tokyo. Anchors the cycle boundary and tax
+                    effective dates so all members agree which cycle an obligation belongs to
+                    (ADR 0014, point 6). Forward-only if changed.
+                  example: Asia/Kolkata
                 maxMembers: { type: integer, default: 200, maximum: 200 }
       responses:
         '201':
@@ -274,6 +295,11 @@ paths:
                 debtorId: { type: string, format: uuid }
                 creditorId: { type: string, format: uuid }
                 amount: { $ref: '#/components/schemas/Money' }
+                settleInCurrency:
+                  allOf: [{ $ref: '#/components/schemas/Currency' }]
+                  description: |
+                    Optional. When different from `amount.currency`, the server locks an FX quote and
+                    the request fails closed if no fresh rate is available (code `fx.rate_stale`).
                 memo: { type: string, maxLength: 280 }
                 occurredAt: { type: string, format: date-time }
       responses:
@@ -444,6 +470,73 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/TaxRule' }
 
+  /currencies:
+    get:
+      tags: [reference]
+      summary: Currency reference data, including minor-unit exponents
+      description: |
+        Cached aggressively. A client needs the exponent to render a Money correctly (P1). The server
+        deliberately does not repeat the exponent on every amount, because it is reference data.
+      responses:
+        '200':
+          description: Currencies
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CurrencyInfo' }
+
+  /fx/rates:
+    get:
+      tags: [fx]
+      summary: Current reference rate (read-only, does not lock anything)
+      parameters:
+        - name: base
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Currency' }
+        - name: quote
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Currency' }
+      responses:
+        '200':
+          description: Rate
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FxRate' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /fx/quotes:
+    post:
+      tags: [fx]
+      summary: Lock a rate against an amount, for a cross-currency obligation
+      description: |
+        Returns an immutable quote. The quote id is stored on the obligation, so reading history never
+        requires re-deriving a rate (ADR 0013). Fails closed when no fresh rate is available: the API
+        refuses rather than guessing, with code `fx.rate_stale` or `fx.rate_unavailable`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [base, quote, amount]
+              properties:
+                base: { $ref: '#/components/schemas/Currency' }
+                quote: { $ref: '#/components/schemas/Currency' }
+                amount: { $ref: '#/components/schemas/Money' }
+      responses:
+        '201':
+          description: Quote locked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FxQuote' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
   /webhooks/rails/{provider}:
     post:
       tags: [webhooks]
@@ -506,16 +599,119 @@ components:
           example: 400000
         currency: { $ref: '#/components/schemas/Currency' }
 
+    CurrencyInfo:
+      type: object
+      description: Reference data for one currency. Fetched once and cached by the client.
+      required: [code, minorUnitExponent]
+      properties:
+        code: { $ref: '#/components/schemas/Currency' }
+        minorUnitExponent:
+          type: integer
+          minimum: 0
+          maximum: 8
+          description: Fractional digits. INR and RUB 2, JPY 0.
+          example: 2
+        isCbdc: { type: boolean }
+        jurisdiction: { type: string, nullable: true }
+
+    FxRate:
+      type: object
+      description: |
+        A rate as a scaled integer (P12). `rateScaled / 10^rateScale` is the rate exactly; no
+        floating-point representation exists anywhere in the system (ADR 0013).
+      required: [base, quote, rateScaled, rateScale, quotedAt, expiresAt, source]
+      properties:
+        base: { $ref: '#/components/schemas/Currency' }
+        quote: { $ref: '#/components/schemas/Currency' }
+        rateScaled:
+          type: integer
+          format: int64
+          example: 55904
+        rateScale:
+          type: integer
+          minimum: 0
+          maximum: 8
+          example: 5
+        midRateScaled:
+          type: integer
+          format: int64
+          description: Provider mid rate, so the applied spread is disclosed rather than hidden.
+        spreadBps: { type: integer }
+        quotedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        source: { type: string, example: mock-provider }
+
+    FxQuote:
+      type: object
+      description: |
+        An immutable, locked conversion of one amount. Immutability is the point: the settlement rate
+        is contractual and is never restated (ADR 0013, point 5).
+      required: [id, rate, baseAmount, convertedAmount, residualMinor, lockedAt]
+      properties:
+        id: { type: string, format: uuid }
+        rate: { $ref: '#/components/schemas/FxRate' }
+        baseAmount: { $ref: '#/components/schemas/Money' }
+        convertedAmount: { $ref: '#/components/schemas/Money' }
+        residualMinor:
+          type: integer
+          format: int64
+          description: |
+            Signed rounding residual in the quote currency's minor units, booked to the fx_clearing
+            account so value is conserved. See docs/specs/fx.md section 4.
+        lockedAt: { type: string, format: date-time }
+        railPerformedFx:
+          type: boolean
+          description: True when the rail performed the conversion (ADR 0013, point 8).
+
+    CurrencyAmounts:
+      type: object
+      description: |
+        Per-currency amounts. Totals are never collapsed into one number, because minor units of
+        different currencies are not commensurable (ADR 0012).
+      additionalProperties: { $ref: '#/components/schemas/Money' }
+      example: { JPY: { amountMinor: 50000, currency: JPY }, INR: { amountMinor: 2795200, currency: INR } }
+
+    FxRequirement:
+      type: object
+      description: |
+        A currency the group must obtain from outside, because reductxn holds no currency (P2).
+        Surfaced as a quantified obligation, never absorbed silently.
+      required: [groupId, amounts]
+      properties:
+        groupId: { type: string, format: uuid }
+        amounts: { $ref: '#/components/schemas/CurrencyAmounts' }
+        reason:
+          type: string
+          enum: [clearing_residual, rounding_residual]
+        satisfiableByRail: { type: boolean }
+
     Problem:
       type: object
-      required: [type, title, status]
+      description: |
+        RFC 9457 problem+json. `code` is the stable machine-readable identity of the error and is the
+        only field a client should branch on or localize (RULE B20, ADR 0014). `title` and `detail`
+        are English-only developer text, for logs and support, and are never rendered directly.
+      required: [type, title, status, code]
       properties:
         type: { type: string, format: uri }
         title: { type: string }
         status: { type: integer }
         detail: { type: string }
         instance: { type: string }
-        code: { type: string, description: Stable machine-readable error code }
+        code:
+          type: string
+          description: |
+            Stable error code, namespaced by feature, never translated. Examples:
+            `obligation.currency_mismatch`, `fx.rate_stale`, `fx.amount_too_small_to_convert`,
+            `settlement.fx_unfunded`.
+          example: fx.rate_stale
+        params:
+          type: object
+          additionalProperties: true
+          description: |
+            Structured values for the client to interpolate into its localized message, so the
+            server never has to compose prose. Amounts here are Money objects, never bare numbers.
+          example: { pair: JPY/INR, quotedAt: '2026-09-25T10:04:00Z', maxAgeSeconds: 60 }
 
     TokenPair:
       type: object
@@ -539,7 +735,13 @@ components:
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
-        currency: { $ref: '#/components/schemas/Currency' }
+        currency:
+          allOf: [{ $ref: '#/components/schemas/Currency' }]
+          description: The group's default settlement currency.
+        reportingCurrency:
+          allOf: [{ $ref: '#/components/schemas/Currency' }]
+          description: Currency for headline totals spanning currencies. Presentational only.
+        settlementTimezone: { type: string, example: Asia/Kolkata }
         memberCount: { type: integer }
         maxMembers: { type: integer }
         nettingPolicy: { type: string, description: Summary of the group's netting and default policy }
@@ -564,6 +766,10 @@ components:
 
     Obligation:
       type: object
+      description: |
+        A commitment, not a money movement. When `settleInCurrency` differs from `amount.currency`
+        the obligation is cross-currency and carries a locked `fxQuote`, so the creditor is promised
+        a concrete amount at recording time (ADR 0012, 0013).
       required: [id, groupId, debtorId, creditorId, amount, status, occurredAt]
       properties:
         id: { type: string, format: uuid }
@@ -571,7 +777,17 @@ components:
         debtorId: { type: string, format: uuid }
         creditorId: { type: string, format: uuid }
         amount: { $ref: '#/components/schemas/Money' }
-        memo: { type: string }
+        settleInCurrency:
+          allOf: [{ $ref: '#/components/schemas/Currency' }]
+          description: |
+            What the creditor is to receive. Defaults to `amount.currency`. When different, `fxQuote`
+            is required.
+        fxQuote: { $ref: '#/components/schemas/FxQuote' }
+        memo:
+          type: string
+          description: |
+            Free text authored by a member. User content: never translated, never parsed for meaning,
+            never used to derive a code (ADR 0014).
         status: { type: string, enum: [open, netted, settled, voided] }
         occurredAt: { type: string, format: date-time }
 
@@ -589,23 +805,81 @@ components:
       properties:
         fromUserId: { type: string, format: uuid }
         toUserId: { type: string, format: uuid }
+        toAccountType:
+          type: string
+          enum: [member, fx_clearing]
+          description: |
+            `fx_clearing` marks the leg that crosses currencies, so the FX cost of a plan is visible
+            in the report rather than hidden inside a member's transfer (ADR 0012).
         amount: { $ref: '#/components/schemas/Money' }
         tax: { $ref: '#/components/schemas/Money' }
         status:
           type: string
           enum: [pending, authorized, submitted, confirmed, failed]
+        fxLinkId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Links this instruction to the paired entry in the other currency (L9).
         railRef: { type: string, nullable: true }
-        failureReason: { type: string, nullable: true }
+        failureCode:
+          type: string
+          nullable: true
+          description: |
+            Stable machine-readable failure code, for example `rail.insufficient_funds`. This is what
+            the client localizes (RULE B20).
+        failureReason:
+          type: string
+          nullable: true
+          description: English developer text for logs and support. Never rendered directly.
 
     NettingPreview:
       type: object
-      required: [bestCase, taxSaved]
+      description: |
+        A what-if preview. In a multicurrency group the per-currency partitions are authoritative,
+        and `reportingTotals` collapses them for display only (ADR 0012, 0013).
+      required: [bestCase, partitions]
       properties:
-        grossTransferCount: { type: integer }
-        netTransferCount: { type: integer }
+        currency:
+          allOf: [{ $ref: '#/components/schemas/Currency' }]
+          description: Present when the preview covers a single currency. Absent for a multicurrency preview.
+        grossTransferCount: { type: integer, deprecated: true, description: Use `partitions`. }
+        netTransferCount: { type: integer, deprecated: true, description: Use `partitions`. }
         grossTax: { $ref: '#/components/schemas/Money' }
         netTax: { $ref: '#/components/schemas/Money' }
         taxSaved: { $ref: '#/components/schemas/Money' }
+        partitions:
+          type: array
+          items:
+            type: object
+            required: [currency, grossTransferCount, netTransferCount, grossTax, netTax, taxSaved]
+            properties:
+              currency: { $ref: '#/components/schemas/Currency' }
+              grossTransferCount: { type: integer }
+              netTransferCount: { type: integer }
+              grossTax: { $ref: '#/components/schemas/Money' }
+              netTax: { $ref: '#/components/schemas/Money' }
+              taxSaved: { $ref: '#/components/schemas/Money' }
+              algorithm: { type: string, enum: [greedy, subset_partition, mip, pairwise] }
+        reportingTotals:
+          type: object
+          properties:
+            currency: { $ref: '#/components/schemas/Currency' }
+            taxSaved: { $ref: '#/components/schemas/Money' }
+            fxCost: { $ref: '#/components/schemas/Money' }
+            rateAsOf: { type: string, format: date-time }
+        sameCurrencyAlternative:
+          type: object
+          description: |
+            What the cycle would have cost had every obligation been recorded in one currency. Lets
+            the product state the cost of the currency choice, not only the saving from netting.
+          properties:
+            currency: { $ref: '#/components/schemas/Currency' }
+            tax: { $ref: '#/components/schemas/Money' }
+            delta: { $ref: '#/components/schemas/Money' }
+        fxRequirements:
+          type: array
+          items: { $ref: '#/components/schemas/FxRequirement' }
         provablyOptimal: { type: boolean }
         bestCase:
           type: object
@@ -619,6 +893,10 @@ components:
 
     SettlementRun:
       type: object
+      description: |
+        One run per (group, cycle), containing one partition per currency present. Per-currency
+        figures are authoritative; `reportingTotals` is presentational and restatable
+        (ADR 0012, 0013).
       required: [id, cycleId, groupId, status]
       properties:
         id: { type: string, format: uuid }
@@ -626,13 +904,38 @@ components:
         groupId: { type: string, format: uuid }
         status:
           type: string
-          enum: [pending, computing, awaiting_approval, executing, done, failed, rejected]
-        algorithm: { type: string, enum: [greedy, subset_partition, mip, pairwise] }
-        gross: { $ref: '#/components/schemas/Money' }
-        net: { $ref: '#/components/schemas/Money' }
-        tax: { $ref: '#/components/schemas/Money' }
-        taxSaved: { $ref: '#/components/schemas/Money' }
-        transferCount: { type: integer }
+          enum: [pending, computing, awaiting_approval, awaiting_fx_funding, executing, done, failed, rejected]
+        partitions:
+          type: array
+          description: One entry per currency. Authoritative figures live here.
+          items:
+            type: object
+            required: [currency, gross, net, tax, taxSaved, transferCount]
+            properties:
+              currency: { $ref: '#/components/schemas/Currency' }
+              gross: { $ref: '#/components/schemas/Money' }
+              net: { $ref: '#/components/schemas/Money' }
+              tax: { $ref: '#/components/schemas/Money' }
+              taxSaved: { $ref: '#/components/schemas/Money' }
+              transferCount: { type: integer }
+              algorithm: { type: string, enum: [greedy, subset_partition, mip, pairwise] }
+        reportingTotals:
+          type: object
+          description: |
+            Headline figures in the group's reporting currency, using a reporting rate. An estimate,
+            never a ledger figure, and never used to compute a transfer or an assessment.
+          properties:
+            currency: { $ref: '#/components/schemas/Currency' }
+            tax: { $ref: '#/components/schemas/Money' }
+            taxSaved: { $ref: '#/components/schemas/Money' }
+            fxCost: { $ref: '#/components/schemas/Money' }
+            rateAsOf: { type: string, format: date-time }
+        fxRequirements:
+          type: array
+          description: |
+            Currencies the group must obtain from outside. Empty means the run is internally
+            settlable. Non-empty puts the run in `awaiting_fx_funding` (ADR 0012, RULE S4).
+          items: { $ref: '#/components/schemas/FxRequirement' }
         computedAt: { type: string, format: date-time, nullable: true }
         executedAt: { type: string, format: date-time, nullable: true }
 

@@ -1,8 +1,8 @@
 # reductxn - Master Plan & Architecture
 
-**Status:** Draft v0.1 · **Last updated:** 2026-09-24
+**Status:** Draft v0.2 · **Last updated:** 2026-09-25
 **Audience:** engineers, reviewers, security & compliance, external auditors
-**Companion docs:** `docs/adr/*`, `docs/specs/netting.md`, `docs/specs/tax-rules.md`, `docs/specs/ledger.md`, `docs/specs/settlement.md`, `docs/THREAT-MODEL.md`
+**Companion docs:** `docs/adr/*`, `docs/specs/{netting,tax-rules,ledger,settlement,fx,i18n}.md`, `docs/THREAT-MODEL.md`
 
 ---
 
@@ -63,6 +63,8 @@ Every design decision is measured against these invariants.
 | **P9** | **No pre-1.0 dependencies in the frontend.** GA releases only. | We are not a QA lab for our own dependency tree. |
 | **P10** | **Tax law is configuration, not code.** A jurisdiction's rule is a `TaxRule` record, not a branch. | Tax law is the fastest-changing thing in the system. |
 | **P11** | Every module has **exactly one reason to change** and **one owning table set**. | This is what makes the module graph in section 5 meaningful rather than decorative. |
+| **P12** | An **FX rate is a scaled integer**, exactly like money. No floating point in valuation, ever. | A `double` rate times an exact amount is a silent error, and it compounds across every conversion in every cycle. |
+| **P13** | All user-facing text is **localized**, and the API returns **stable codes, never prose**. | Adding a language must never require a backend release, and translated prose cannot be asserted in tests or diffed in logs. |
 ---
 
 ## 3. System context
@@ -86,10 +88,12 @@ Every design decision is measured against these invariants.
  |  Identity / KYC  |<--|  apps/api                           |-->| Object storage  |
  |  provider        |   |  Spring Boot 4.1 - Java 25 LTS      |   | reports/exports |
  +------------------+   |  virtual threads - MVC - jOOQ       |   +-----------------+
-                        +---+-----------+-------------+-------+
-                            |           |             |
-            +---------------+           |             +-----------------+
-            v                           v                               v
+ +------------------+   |  netting runs per currency (0012)   |
+ |  FX rate provider|<--|  exact rates live in libs/fx (0013) |
+ |  mid + spread    |   +---+-----------+-------------+-------+
+ +------------------+       |           |             |
+             +--------------+           |             +-----------------+
+             v                          v             v
  +----------------------+   +---------------------+    +-----------------------+
  | PostgreSQL 16        |   | Redis               |    | Kafka / Redpanda      |
  | jOOQ - Flyway        |   | cache, locks,       |    | transactional outbox  |
@@ -119,6 +123,15 @@ Every design decision is measured against these invariants.
 executes, the rail is authoritative for that movement; reductxn stores the rail reference and
 reconciles against it later. That is the operational meaning of the non-custodial posture (P2).
 
+**Two external dependencies that are new and should be treated as genuine ones.** The **FX rate
+provider** is on the write path for cross-currency obligations: no rate means no cross-currency
+obligation can be recorded (ADR 0013, point 6 - fail closed). A stale or unavailable provider is an
+availability incident for a subset of traffic, and it needs its own runbook and staleness alerting
+rather than being discovered as a spike in rejected requests.
+
+The **locale catalogs** are the other one, and they are deliberately *not* external: they ship in the
+build, so text on a money-moving screen cannot change under a user between deploys (ADR 0014).
+
 ---
 
 ## 4. Repository structure
@@ -139,6 +152,8 @@ reductxn/
 |   |   +-- tax-rules.md            # TaxRule shapes + per-jurisdiction configuration
 |   |   +-- ledger.md               # double-entry model, hash chain, invariants
 |   |   +-- settlement.md           # cycle lifecycle, quorum, rail execution
+|   |   +-- fx.md                   # rates, conversion, residual, clearing account
+|   |   +-- i18n.md                 # locales, ICU catalogs, locale-safe money
 |   +-- THREAT-MODEL.md
 |   +-- runbooks/
 |
@@ -158,11 +173,13 @@ reductxn/
 |   +-- kernel/                     # Result, DomainError, ids, Clock, value types
 |   +-- ledger/                     # Money, JournalEntry, Posting, invariants
 |   +-- netting/                    # greedy + optimal netting, TaxRule engine
+|   +-- fx/                         # FxRate, conversion, valuation (ADR 0013)
 |   +-- rails/                      # PaymentRail port + adapters
 |
 +-- apps/
 |   +-- api/                        # Spring Boot 4.1.1 modular monolith
 |   +-- web/                        # React 19 + Vite + TanStack + GSAP
+|       +-- locales/                # ICU message catalogs, per locale (ADR 0014)
 |
 +-- workers/
 |   +-- settlement/                 # Spring Batch jobs + Kafka consumers
@@ -193,6 +210,7 @@ reductxn/
 | `platform/*` | framework configuration, infrastructure adapters | domain concepts (`Obligation`, `NetPosition`, `Money`) |
 | `contracts/*` | schemas, generated types | business logic |
 | `apps/web` | UI, client state, animations | money arithmetic of record |
+| `apps/web/locales` | ICU message catalogs | logic, interpolation beyond ICU |
 
 **NOTE:** the "no domain concepts in `platform/`" rule is what keeps infrastructure swappable.
 If `platform/persistence` mentions `Obligation`, a boundary has already leaked.
@@ -212,11 +230,11 @@ another module's `api` dependencies, and a cycle is impossible by construction.
                                ^
               +----------------+----------------+
               |                |                |
-         +---------+      +----------+    +----------+
-         | ledger  |      | netting  |    |  rails   |
-         +----+----+      +-----+----+    +-----+----+
-              ^                 ^               ^
-              +--------+--------+---------------+
+         +---------+      +----------+    +----------+    +----------+
+         | ledger  |      | netting  |    |    fx    |    |  rails   |
+         +----+----+      +-----+----+    +-----+----+    +-----+----+
+              ^                 ^               ^               ^
+              +--------+--------+---------------+---------------+
                        |
          +-------------+---------------+     +---------------------+
          |         apps/api            |     |  workers/settlement |
@@ -238,6 +256,13 @@ another module's `api` dependencies, and a cycle is impossible by construction.
 *down* into `libs/*`.
 **RULE B7** - `platform/*` never depends on `apps/*` or `workers/*`.
 **RULE B8** - no module cycles, ever.
+**RULE B18** - `libs/fx` depends only on `libs/kernel` and `libs/ledger`. It may not depend on
+`libs/netting`, so rate logic can never hide inside the netting engine.
+**RULE B19** - **conversion happens only in `libs/fx`.** No other module multiplies an amount by a
+rate, and no other module may read `fx_rates` or `fx_quotes`. Everything else sees a converted amount
+that has already been computed, or nothing at all.
+**RULE B20** - the API never returns localized prose. Problem responses carry a stable `code` plus
+structured `params`; localization happens in the client (P13, ADR 0014).
 
 **NOTE:** RULE B6 is the one people fight. When settlement needs "the same" logic as the API, the
 answer is never a `common` module containing everything - it is to extract the actual concept into
@@ -365,6 +390,11 @@ application code.
 | `obligations` | `apps/api` - obligation |
 | `settlement_cycles`, `settlement_runs`, `settlement_transfers`, `net_positions` | `workers/settlement` |
 | `tax_rules`, `tax_assessments` | `libs/netting` - tax |
+| `fx_rates`, `fx_quotes`, `currencies` | `libs/fx` (schema per `docs/specs/fx.md`) |
+| ICU message catalogs | `apps/web` - in the build artefact, never in the database |
+
+**NOTE:** `currencies` is owned by `libs/fx` rather than `libs/ledger` because the minor-unit exponent
+is what conversion needs first, and because a currency is reference data, not a ledger concept.
 
 **NOTE:** settlement tables are owned by the worker because that is where they are written. The
 API reads them through a read model. This is deliberate: it keeps the API write path fast and lets
@@ -452,11 +482,13 @@ src/
 |   +-- group/  obligation/  netPosition/  user/
 +-- shared/               # NO business knowledge
     +-- api/              # generated client + fetch wrapper
-    +-- money/            # formatting/parsing of minor units
+    +-- money/            # formatting/parsing of minor units, locale-aware
+    +-- i18n/             # ICU catalog loader, locale resolution, direction token
     +-- ui/               # design system primitives
     +-- gsap/             # timelines, useGSAP hooks, matchMedia presets
     +-- lib/              # date, result, invariant helpers
     +-- config/           # env parsing (Zod-validated)
+locales/                  # ICU catalogs per locale, en is the source of truth
 ```
 
 ### 6.1 Import direction rules
@@ -482,6 +514,13 @@ fetching, ever.
 there is private.
 **RULE F9** - no arithmetic on money in the frontend except integer minor-unit arithmetic in
 `shared/money`. (Backs P1.)
+**RULE F10** - no user-facing string literals in components. All text comes from the ICU catalog
+(ADR 0014). An intentional exception carries `// i18n-ignore: <reason>`.
+**RULE F11** - all money, number and date formatting goes through `shared/money` and `shared/i18n`.
+Never a raw `Intl.NumberFormat` applied to a `number` amount, because that reinstates the
+floating-point path P1 forbids.
+**RULE F12** - user amount input is parsed to integer minor units by string manipulation. Never
+`parseFloat`; over-precise input is rejected rather than truncated.
 
 ### 6.2 Enforcing it: ESLint boundaries
 
@@ -558,12 +597,17 @@ Modularity that is not checked is not real. Every pull request runs:
 
 | Gate | Tool | Fails when |
 |---|---|---|
-| Module graph | ArchUnit + Spring Modulith | RULE B1-B17 violated |
-| Import boundaries | `eslint-plugin-boundaries` | RULE F1-F9 violated |
+| Module graph | ArchUnit + Spring Modulith | RULE B1-B20 violated |
+| Import boundaries | `eslint-plugin-boundaries` | RULE F1-F12 violated |
 | Money discipline | lint ban on `double`/`float` in domain + ESLint ban on division by 100 | P1 violated |
+| FX exactness | jqwik X1-X7 | A conversion is non-deterministic, or the residual is not booked |
+| FX isolation | ArchUnit | A rate is multiplied anywhere outside `libs/fx` (B18, B19) |
+| Locale coverage | catalog check | A key is missing versus `en`, unused, or a literal appears in a component (F10, I1-I3) |
+| Error-code parity | codegen check | A server error `code` has no catalog entry, or vice versa (I3) |
+| Locale money safety | Vitest property tests | Formatting changes the digits, or a `float` enters the format/parse path (F11, F12, I5) |
 | Spec sync | codegen diff check | RULE C3 violated |
-| Ledger invariants | jqwik property tests | A journal entry does not balance |
-| Netting correctness | jqwik + golden fixtures | Sum of nets != 0, or a member ends negative |
+| Ledger invariants | jqwik property tests | A journal entry does not balance, or an FX link is unpaired (L9) |
+| Netting correctness | jqwik + golden fixtures | Sum of nets != 0 per currency, or a member ends negative |
 | Settlement idempotency | Testcontainers replay test | Double execution changes state |
 | Coverage | JaCoCo - `libs/*` **95%**, overall **75%** | Below threshold |
 | Frontend | Vitest + Playwright | Any failure |
@@ -630,6 +674,34 @@ decorative motion, animation that delays data visibility, and any animation with
 `prefers-reduced-motion` branch. Timelines are registered in `shared/gsap/presets.ts` so
 reduced-motion handling is uniform.
 
+### 10.6 Add a new currency
+1. Insert into `currencies`: code, minor-unit exponent, `is_cbdc`, jurisdiction.
+2. Add a tax rule for `(jurisdiction, currency)` (recipe 10.2/10.3).
+3. Add the currency pair to the FX provider configuration, with a staleness bound.
+4. UI: nothing. Currency labels and formatting follow from `Currency.minorUnitExponent` (P1).
+5. **No changes** to `libs/ledger`, `libs/netting`, `libs/fx` code, or any controller.
+
+Note that JPY (exponent 0) and INR (exponent 2) already coexist, so a new exponent is not new code.
+
+### 10.7 Add a new language
+1. Add `apps/web/locales/<locale>/*.json` seeded from `en`, and an entry in `_meta.json` with
+   `"reviewed": false`.
+2. Add the locale to the resolver's supported list, and to the Playwright locale matrix.
+3. Translate. A human review flips `"reviewed"` to `true`, which is what permits the locale on
+   money-moving and approval screens.
+4. Check the plural categories the locale needs. Russian needs four forms; a two-form translation is
+   wrong and the catalog check cannot detect that, only the reviewer can.
+5. **No backend changes at all.** If a new error needs wording, that is step 3 of a backend change
+   (adding a `code`), not a localization change (RULE B20).
+
+### 10.8 Add a rate provider
+1. Implement the provider port in `apps/api/adapter/rate/` (the port itself is owned by
+   `libs/fx/api`).
+2. Configure the staleness bound and the failover order.
+3. Add a WireMock contract test, plus a test that a stale quote **refuses** a cross-currency
+   obligation rather than guessing (ADR 0013, point 6).
+4. **No changes** to `libs/ledger`, `libs/netting`, the settlement worker, or the UI.
+
 ---
 
 ## 11. Forbidden patterns
@@ -645,6 +717,16 @@ reduced-motion handling is uniform.
 | Cross-module table joins in application code | B17 | Review + read models |
 | A second backend language | P7 | ADR required |
 | Pre-1.0 frontend dependency | P9 | Dependency policy gate |
+| `double`/`float` for an FX rate | P12, B19 | ArchUnit + jqwik |
+| Multiplying an amount by a rate outside `libs/fx` | B19 | ArchUnit |
+| Reading `fx_rates`/`fx_quotes` outside `libs/fx` | B19 | ArchUnit |
+| `Intl.NumberFormat` applied to a `number` amount | P1, F11 | ESLint + property test I5 |
+| `parseFloat` on user amount input | P1, F12 | ESLint |
+| A user-facing string literal in a component | F10 | Catalog check |
+| Localized prose in an API response | P13, B20 | ArchUnit + review |
+| Summing minor units across currencies | P1, ADR 0012 | Review; totals are per currency |
+| A headline total without a stated reporting currency | ADR 0013 | Review |
+| Weakening L6 to allow a mixed-currency journal entry | ADR 0012 | Review; L6 is deliberately intact |
 | Hand-editing the generated client | C1 | C3 diff gate |
 | `useEffect` data fetching | F6 | ESLint rule |
 | Deep import into a feature's internals | F2, F8 | ESLint boundaries |
@@ -674,7 +756,13 @@ Seed ADRs: `0001-non-custodial-architecture`, `0002-java-spring-boot-single-back
 `0003-openapi-as-contract`, `0004-append-only-ledger`,
 `0005-netting-algorithm-and-optimality-guarantee`, `0006-tax-as-configuration`,
 `0007-tanstack-stable-only-frontend`, `0008-group-as-shard-key`,
-`0009-spring-modulith-modular-monolith`, `0010-crypto-shredding-for-erasure`.
+`0009-spring-modulith-modular-monolith`, `0010-crypto-shredding-for-erasure`,
+`0011-netting-must-not-increase-tax`, `0012-multicurrency-netting-per-currency`,
+`0013-exact-fx-rates-and-residual`, `0014-localization-and-locale-handling`.
+
+**NOTE:** ADR 0012, 0013 and 0014 are `accepted` as decisions but **not yet implemented**. They are
+recorded first so that the contract and the schema can be shaped by them from the start, rather than
+being reshaped around them later. Section 13 says when each lands.
 
 **NOTE:** ADRs record *why the rejected alternatives were rejected*. That is the part future
 maintainers actually need.
@@ -686,11 +774,22 @@ maintainers actually need.
 | Phase | Deliverable | Modules touched |
 |---|---|---|
 | 0 | Decisions, ADRs, legal stance | `docs/*` only |
-| 1 | MVP ledger + netting preview | `libs/kernel`, `libs/ledger`, `apps/api`, `apps/web` |
+| 1 | MVP ledger + netting preview, **with i18n scaffolding from the first screen** | `libs/kernel`, `libs/ledger`, `apps/api`, `apps/web` (+ `locales/`) |
 | 2 | Settlement cycle + reports on MockRail | `libs/netting`, `libs/rails`, `workers/settlement`, `apps/web` |
-| 3 | Real rail + tax engine + compliance hooks | `libs/rails`, `libs/netting/internal/tax`, `platform/security` |
+| 2.5 | **Cross-currency obligations** (ADR 0012, 0013): `libs/fx`, per-currency partitions, FX funding state | `libs/fx`, `libs/ledger`, `workers/settlement`, `apps/web`, `contracts/` |
+| 3 | Real rail + tax engine + compliance hooks, **and remaining locales reviewed** | `libs/rails`, `libs/netting/internal/tax`, `platform/security`, `apps/web/locales` |
 | 4 | Scale hardening | `platform/*`, `infra/*`, `workers/settlement` |
 | 5 | Compliance depth + mobile | `apps/api` identity, new `apps/mobile` consuming `contracts/` |
+
+**Two placement decisions worth defending.**
+
+**i18n is Phase 1, not Phase 5.** Extracting strings after a UI exists means touching every component,
+and the plural, parsing and formatting decisions have to be made before the first screen ships. It is
+cheap now and a rewrite later (ADR 0014).
+
+**Multicurrency is Phase 2.5, not Phase 1.** It depends on the settlement worker existing (for
+`awaiting_fx_funding` and per-currency runs), and on a rate provider being selected. Doing it before
+there is a settlement loop would mean building the FX funding state with nothing to attach it to.
 
 **NOTE:** phase 5's mobile app is why `contracts/` is a top-level directory and why `shared/money`
 and `shared/api` stay framework-agnostic. The contract and the money rules are the two things every
@@ -710,6 +809,14 @@ A change is done when:
 6. New user-visible behaviour has a Playwright test.
 7. New animation has a reduced-motion branch.
 8. If a **RULE** changed, an ADR is accepted.
+9. **Every new user-facing string exists in the `en` catalog**, and any shipped locale has no missing
+   keys (F10, I1). Machine-translated text is marked unreviewed and is not used on money-moving
+   screens.
+10. **Money and dates are rendered through `shared/money` and `shared/i18n`**, and a test proves the
+    formatted digits equal the digits derived from the integer minor units (F11, I5).
+11. **If the change touches an amount, it states its currency**, and any total spanning currencies
+    names its reporting currency (ADR 0012, 0013).
+12. **A rate multiplication is inside `libs/fx`**, or it is not happening (B19).
 
 ---
 
@@ -754,6 +861,23 @@ Found while compiling and executing the pure core, and recorded here rather than
 | `GreedyNettingTest` | 6 | Worked example, flat members, empty group, zero-amount obligations, and the sparse case that must settle directly |
 | `GreedyNettingPropertyTest` | 8 | N1, N2, N3, N4, N6, N7, N8, N9 over generated inputs |
 | `ModuleBoundaryTest` | 8 | RULEs B1, B2, B5, B8, B10 - verified non-vacuous: 30 classes imported |
+
+**What is designed versus what exists.** This distinction matters more than usual after a design-heavy
+change, so it is stated explicitly:
+
+| Area | Decision | Code | Notes |
+|---|---|---|---|
+| Netting, tax, ledger, money | ADR 0004, 0005, 0006, 0011 | **Implemented, tested** | 29 tests green |
+| Module boundaries | RULEs B1-B17 | **Implemented, enforced** | 8 ArchUnit rules, verified non-vacuous |
+| Multicurrency | ADR 0012 | **Not implemented** | `libs/fx` does not exist yet. `NettingRequest` still rejects a second currency, correctly. |
+| FX rates and the residual | ADR 0013 | **Not implemented** | Rate representation, conversion, `fx_clearing`: design only |
+| Localization | ADR 0014 | **Not implemented** | No catalogs, no `shared/i18n`, no locale resolution |
+| RULEs B18-B20, F10-F12 | ADR 0012, 0013, 0014 | **Not enforced** | Listed in section 8 as gates, but the gates do not exist yet |
+
+So the counts above are unchanged from before this design work, and that is the honest position: three
+ADRs were accepted and the contract and specs were updated, but **no behavioural code changed**. The
+next implementation step for multicurrency is `libs/fx` plus a per-currency partitioner; for
+localization it is the Phase 1 scaffolding, before the first screen exists to retrofit.
 
 Toolchain constraints discovered by actually running the build. All are now pinned with reasons:
 
