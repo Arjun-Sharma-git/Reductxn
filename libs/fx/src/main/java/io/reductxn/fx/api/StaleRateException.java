@@ -2,7 +2,6 @@ package io.reductxn.fx.api;
 
 import io.reductxn.ledger.api.Currency;
 
-import java.time.Duration;
 import java.time.Instant;
 
 /**
@@ -23,16 +22,18 @@ public final class StaleRateException extends FxException {
     private final String baseCode;
     private final String quoteCode;
     private final Instant quotedAt;
+    private final Instant expiresAt;
     private final Instant asOf;
 
     public StaleRateException(
-            Currency base, Currency quote, Instant quotedAt, Instant asOf, Duration maxAge) {
+            Currency base, Currency quote, Instant quotedAt, Instant expiresAt, Instant asOf) {
         super("fx.rate_stale",
                 "rate " + base.code() + "/" + quote.code() + " quoted at " + quotedAt
-                        + " is not usable at " + asOf + " (max age " + maxAge + ")");
+                        + " and valid until " + expiresAt + " is not usable at " + asOf);
         this.baseCode = base.code();
         this.quoteCode = quote.code();
         this.quotedAt = quotedAt;
+        this.expiresAt = expiresAt;
         this.asOf = asOf;
     }
 
@@ -46,6 +47,11 @@ public final class StaleRateException extends FxException {
 
     public Instant quotedAt() {
         return quotedAt;
+    }
+
+    /** When the rate stopped being usable. */
+    public Instant expiresAt() {
+        return expiresAt;
     }
 
     public Instant asOf() {
