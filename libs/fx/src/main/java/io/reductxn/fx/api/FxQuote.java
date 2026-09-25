@@ -50,6 +50,17 @@ public record FxQuote(
                     "converted amount is in " + convertedAmount.currency().code()
                             + " but the rate quotes " + rate.quote().code());
         }
+        // An obligation amount is a magnitude, and direction belongs to the transfer instruction (L2).
+        // Checked here rather than only in the converter, because this constructor is public and a
+        // hand-built quote with a negative amount would turn a debt into a credit downstream.
+        if (baseAmount.isNegative()) {
+            throw new IllegalArgumentException(
+                    "a quote's base amount is a magnitude and must not be negative");
+        }
+        if (convertedAmount.isNegative()) {
+            throw new IllegalArgumentException(
+                    "a quote's converted amount is a magnitude and must not be negative");
+        }
     }
 
     /**

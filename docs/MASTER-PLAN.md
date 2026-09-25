@@ -224,27 +224,32 @@ another module's `api` dependencies, and a cycle is impossible by construction.
 ### 5.1 Module graph and dependency rules
 
 ```
-                         +-----------+
-                         |  kernel   |
-                         +-----+-----+
-                               ^
-              +----------------+----------------+
-              |                |                |
-         +---------+      +----------+    +----------+    +----------+
-         | ledger  |      | netting  |    |    fx    |    |  rails   |
-         +----+----+      +-----+----+    +-----+----+    +-----+----+
-              ^                 ^               ^               ^
-              +--------+--------+---------------+---------------+
-                       |
-         +-------------+---------------+     +---------------------+
-         |         apps/api            |     |  workers/settlement |
-         +-------------+---------------+     +----------+----------+
-                       ^                                ^
-                       +-------------+------------------+
-                                     |
-                             +-------+--------+
-                             |   platform     |
-                             +----------------+
+                          +-----------+
+                          |  kernel   |
+                          +-----+-----+
+                                ^
+              +-----------------+-----------------+
+              |                 |                 |
+         +---------+       +----------+      +----------+      +----------+
+         | ledger  |       | netting  |      |    fx    |      |  rails   |
+         +----+----+       +-----+----+      +-----+----+      +-----+----+
+              ^                  ^ ^               ^ ^               ^
+              |                  | |               | |               |
+              |                  | +------+--------+ |               |
+              |                  |        |          |               |
+              |                  +--------+----------+               |
+              |                           |                           |
+              |                    +------v------+                    |
+              |                    | settlement  |                    |
+              |                    +------+------+                    |
+              |                           |                           |
+              +-------------+-------------+---------------------------+
+                            |
+          +-----------------+------------------+
+          |                                    |
+  +-------v--------+                  +--------v-----------+
+  |   apps/api     |                  | workers/settlement |
+  +----------------+                  +--------------------+
 ```
 
 **RULE B1** - `libs/kernel` depends on nothing.
@@ -263,10 +268,29 @@ rate, and no other module may read `fx_rates` or `fx_quotes`. Everything else se
 that has already been computed, or nothing at all.
 **RULE B20** - the API never returns localized prose. Problem responses carry a stable `code` plus
 structured `params`; localization happens in the client (P13, ADR 0014).
+**RULE B21** - `libs/settlement` depends only on `libs/kernel`, `libs/ledger`, `libs/netting` and
+`libs/fx`. It is the only module permitted to compose per-currency plans, and the only place
+`fx_clearing` is modelled. It is pure: no I/O, no clock, no provider.
 
 **NOTE:** RULE B6 is the one people fight. When settlement needs "the same" logic as the API, the
 answer is never a `common` module containing everything - it is to extract the actual concept into
 `libs/*` under a name that describes it.
+
+**`libs/settlement` is the first working example of that rule**, so the reasoning is recorded rather
+than left in a commit message. Partitioning a multicurrency cycle is needed by two modules that may
+not see each other (B6): `apps/api`, to preview what a cycle would cost, and `workers/settlement`, to
+build the run. Leaving it in the worker would have forced the API to reimplement it, which is two
+implementations of the same financial arithmetic drifting apart. And it could not go in
+`libs/netting`, which may only depend on kernel and ledger (B3) - giving the netting engine FX
+awareness is exactly what ADR 0012 forbids, because its properties depend on one currency at a time.
+So it moved *down* into a pure module that both deployables consume.
+
+The naming split is deliberate and worth stating, because both modules contain the word:
+
+| Module | Owns |
+|---|---|
+| `libs/settlement` | **What** must be settled: the per-currency plan, the partitions, the `fx_clearing` position, the external FX requirement. Pure and deterministic |
+| `workers/settlement` | **Executing** it: the run lifecycle, quorum, idempotency, rail submission, funding state |
 
 ### 5.2 Gradle module template
 
@@ -600,7 +624,7 @@ Modularity that is not checked is not real. Every pull request runs:
 | Module graph | ArchUnit + Spring Modulith | RULE B1-B20 violated |
 | Import boundaries | `eslint-plugin-boundaries` | RULE F1-F12 violated |
 | Money discipline | lint ban on `double`/`float` in domain + ESLint ban on division by 100 | P1 violated |
-| FX exactness | jqwik X1-X6 - **live** | A conversion is non-deterministic, the residual is not booked, or the round trip drifts. X7 needs the ledger and lands in phase 2.5 |
+| FX exactness | jqwik X1-X7 - **live** | A conversion is non-deterministic, the residual is not booked, or the round trip drifts |
 | FX isolation | ArchUnit - **live** | A rate is multiplied anywhere outside `libs/fx` (B18, B19). Non-vacuous, and guarded against becoming vacuous |
 | Locale coverage | catalog check | A key is missing versus `en`, unused, or a literal appears in a component (F10, I1-I3) |
 | Error-code parity | codegen check | A server error `code` has no catalog entry, or vice versa (I3) |
@@ -776,7 +800,7 @@ maintainers actually need.
 | 0 | Decisions, ADRs, legal stance | `docs/*` only |
 | 1 | MVP ledger + netting preview, **with i18n scaffolding from the first screen** | `libs/kernel`, `libs/ledger`, `apps/api`, `apps/web` (+ `locales/`) |
 | 2 | Settlement cycle + reports on MockRail | `libs/netting`, `libs/rails`, `workers/settlement`, `apps/web` |
-| 2.5 | **Cross-currency obligations** (ADR 0012, 0013): `libs/fx`, per-currency partitions, FX funding state | `libs/fx`, `libs/ledger`, `workers/settlement`, `apps/web`, `contracts/` |
+| 2.5 | **Cross-currency obligations** (ADR 0012, 0013): `libs/fx`, `libs/settlement`, per-currency partitions, FX funding state | `libs/fx` done, `libs/settlement` done (plan only), `libs/ledger`, `workers/settlement`, `apps/web`, `contracts/` |
 | 3 | Real rail + tax engine + compliance hooks, **and remaining locales reviewed** | `libs/rails`, `libs/netting/internal/tax`, `platform/security`, `apps/web/locales` |
 | 4 | Scale hardening | `platform/*`, `infra/*`, `workers/settlement` |
 | 5 | Compliance depth + mobile | `apps/api` identity, new `apps/mobile` consuming `contracts/` |
@@ -853,7 +877,7 @@ Found while compiling and executing the pure core, and recorded here rather than
 
 ## Appendix B - Verified state
 
-**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 67 tests, none failing:
+**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 92 tests, none failing:
 
 | Suite | Tests | What it proves |
 |---|---|---|
@@ -861,12 +885,14 @@ Found while compiling and executing the pure core, and recorded here rather than
 | `GreedyNettingTest` | 6 | Worked example, flat members, empty group, zero-amount obligations, and the sparse case that must settle directly |
 | `GreedyNettingPropertyTest` | 8 | N1, N2, N3, N4, N6, N7, N8, N9 over generated inputs |
 | `FxRateTest` | 8 | A rate cannot exist malformed: no self-rate, no non-positive numerator, bounded scale, expiry after quote |
-| `FxConverterTest` | 17 | The spec's worked examples, both signs of the residual, the zero-rounding refusal, the overflow boundary, quote locking |
-| `FxConverterPropertyTest` | 9 | X1, X2, X3, X4, X5, X6 over generated inputs. X2 checked against an independent `BigInteger` oracle |
-| `ModuleBoundaryTest` | 11 | RULEs B1, B2, B5, B8, B10, B18, B19 |
+| `FxConverterTest` | 18 | The spec's worked examples, both signs of the residual, the zero-rounding refusal, the overflow boundary, quote locking and quote magnitudes |
+| `FxConverterPropertyTest` | 9 | X1-X6 over generated inputs. X2 checked against an independent `BigInteger` oracle |
+| `SettlementPlannerTest` | 14 | ADR 0012's worked example, the clearing split, per-currency tax, order independence, refused input |
+| `SettlementPlannerPropertyTest` | 6 | **X7** and the composition properties: zero-sum including `fx_clearing`, partition completeness, the two legs netting to the clearing position, reproducibility |
+| `ModuleBoundaryTest` | 15 | RULEs B1-B5, B8, B10, B18, B19, B21 |
 | `ArchUnitVisibilityTest` | 1 | That the architecture rules above are not vacuous |
 
-All 12 architecture rules are verified non-vacuous, and that verification is now automated rather than
+All 15 architecture rules are verified non-vacuous, and that verification is automated rather than
 something a reviewer has to notice. See the constraint table below.
 
 **What is designed versus what exists.** This distinction matters more than usual after a design-heavy
@@ -875,21 +901,27 @@ change, so it is stated explicitly:
 | Area | Decision | Code | Notes |
 |---|---|---|---|
 | Netting, tax, ledger, money | ADR 0004, 0005, 0006, 0011 | **Implemented, tested** | 21 tests green |
-| FX rates and the residual | ADR 0013 | **Implemented, tested** | 34 tests green. `libs/fx` owns the rate type, the exact conversion and `FxQuote` |
-| RULEs B10, B18, B19 | ADR 0013 | **Enforced** | 3 new ArchUnit rules, each verified non-vacuous |
-| Multicurrency composition | ADR 0012 | **Not implemented** | Nothing partitions a cycle by currency, nothing writes `fx_clearing`, and nothing consumes the residual. `NettingRequest` still rejects a second currency, which is correct today |
-| `fx_clearing`, per-currency runs | ADR 0012 | **Not implemented** | Needs `workers/settlement`, which has no sources |
+| FX rates and the residual | ADR 0013 | **Implemented, tested** | 35 tests green. `libs/fx` owns the rate type, the exact conversion and `FxQuote` |
+| Per-currency composition | ADR 0012 | **Implemented, tested** | 20 tests green. `libs/settlement` partitions a cycle, composes the per-currency plans, and derives the external FX requirement |
+| RULEs B3, B4, B5, B10, B18, B19, B21 | ADR 0012, 0013 | **Enforced** | 15 ArchUnit rules, all verified non-vacuous. B3 and B4 had been stated in section 5.1 and never enforced |
+| `fx_clearing` postings | ADR 0012 | **Not implemented** | Nothing books the entry pair to the ledger. The plan computes the clearing position; the ledger never hears about it |
+| Funding state, per-currency runs | ADR 0012 | **Not implemented** | Needs `workers/settlement`, which has no sources |
 | Localization | ADR 0014 | **Not implemented** | No catalogs, no `shared/i18n`, no locale resolution |
 | RULEs B20, F10-F12 | ADR 0014 | **Not enforced** | Listed in section 8 as gates, not yet written |
 
-So the honest position is narrower than "multicurrency is done". **The arithmetic is done and proven;
-the composition is not started.** `libs/fx` can convert an amount exactly and report what rounding
-discarded, and there is a test for every claim in `docs/specs/fx.md` section 8 that does not require a
-ledger. What remains for phase 2.5 is the part that needs the settlement loop: partitioning, the
-clearing account, the funding state, and X7.
+So the honest position is narrower than "multicurrency is done", and it has moved: **the plan is done
+and proven; the postings are not.** A cycle can be partitioned, netted per currency, and reported with
+its external FX requirement quantified per currency, and X7 is asserted against generated cycles.
 
-The next implementation step is the per-currency partitioner and the `fx_clearing` postings. For
-localization it is the Phase 1 scaffolding, before the first screen exists to retrofit.
+What remains is the ledger side. `SettlementPlan` says what must move and what the group must find from
+outside; nothing yet writes the two linked journal entries, nothing consumes the residual fraction, and
+no run can be gated on funding. Those need `apps/api` and `workers/settlement` to have sources, which
+they do not.
+
+The next implementation step is the ledger side: booking the two linked entries per cross-currency
+obligation, booking the residual fraction to `fx_clearing`, and gating a run on its funding. All three
+need `apps/api` and `workers/settlement` to exist. For localization it is the Phase 1 scaffolding,
+before the first screen exists to retrofit.
 
 
 Toolchain constraints discovered by actually running the build. All are now pinned with reasons:
@@ -901,6 +933,7 @@ Toolchain constraints discovered by actually running the build. All are now pinn
 | **No `includeEngines(...)` on Test tasks** | Filtering by engine name silently excluded the ArchUnit engine (id `archunit`), so the architecture rules did not run at all and the task reported "did not discover any tests". |
 | **ArchUnit package identifiers are not regex** | `(kernel|ledger|...)` matches nothing. Use `resideInAnyPackage(...)`. |
 | **Every module a rule mentions must be on `platform/testing`'s classpath** | Otherwise ArchUnit imports none of its classes and the rule checks nothing. This is the *silent* form of the bug above: the subject set stays non-empty, so `emptyShould` never fires, while the `should` clause names a package ArchUnit has never seen. It produced a completely bogus green result for `b19` - a rule asserting no module depends on FX, while FX was invisible. Now caught by `ArchUnitVisibilityTest`, which was itself verified by making it fail on purpose. |
+| **A rule can only forbid what it can see** | `b21` lists `apps/api` and `workers/settlement` as forbidden dependencies, but those have no sources, so ArchUnit has no classes to match and a violation would pass unnoticed. The rule is not vacuous - its subject resolves and is evaluated - but two of its exclusions are inert until the deployables exist. Stated in the rule itself so nobody reads a green tick as more than it is. |
 
 The pure core also still compiles standalone with plain `javac` (no Gradle, no Spring), which is the
 property that lets an auditor reproduce a settlement in isolation (principle P4).
@@ -930,9 +963,11 @@ Both cannot be right, the contract is authoritative (P5), so the older exception
 should change - but `libs/ledger` carries the stricter review bar, so it is a follow-up rather than
 something changed silently underneath a financial module.
 
-**Not yet verified:** `apps/api`, `workers/settlement` and `apps/web` have no sources.
-`platform/persistence`, `platform/observability` and `platform/security` are not yet included in
-`settings.gradle.kts`. Those are Phase 1 work.
+**Not yet verified:** `apps/api`, `workers/settlement`, `apps/web` and the `platform/*` modules have no
+sources. `apps/api`, `workers/settlement`, `platform/observability`, `platform/persistence` and
+`platform/security` are already declared in `settings.gradle.kts`, so they are real (empty) Gradle
+projects and a module boundary rule already covers them - they simply contain nothing yet. This
+paragraph previously said they were not yet declared, which was wrong. Those are Phase 1 work.
 
 
 *End of master plan. Changes to this document follow section 12.*
