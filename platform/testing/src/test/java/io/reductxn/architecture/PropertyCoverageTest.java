@@ -221,7 +221,7 @@ class PropertyCoverageTest {
      * Every Java test source in the repository, across every container.
      *
      * <p>All of them rather than only the owning module, because coverage legitimately crosses modules:
-     * {@code X7} is an fx property and the assertion that labels it lives in {@code libs/settlement}.
+     * {@code X7} is an fx property and the assertion that labels it lives in {@code libs/planning}.
      * A per-module check would report that as missing and be wrong.
      */
     private static List<Path> testSources() throws IOException {

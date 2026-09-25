@@ -1,18 +1,18 @@
-package io.reductxn.settlement.internal;
+package io.reductxn.planning.internal;
 
 import io.reductxn.ledger.api.Currency;
 import io.reductxn.netting.api.NettingEngine;
 import io.reductxn.netting.api.NettingEngines;
 import io.reductxn.netting.api.NettingRequest;
 import io.reductxn.netting.api.Obligation;
-import io.reductxn.settlement.api.CrossCurrencyObligation;
-import io.reductxn.settlement.api.CurrencyPlan;
-import io.reductxn.settlement.api.CycleObligation;
-import io.reductxn.settlement.api.FxClearing;
-import io.reductxn.settlement.api.SettlementPlan;
-import io.reductxn.settlement.api.SettlementPlanner;
-import io.reductxn.settlement.api.SingleCurrencyObligation;
-import io.reductxn.settlement.api.TaxRuleResolver;
+import io.reductxn.planning.api.CrossCurrencyObligation;
+import io.reductxn.planning.api.CurrencyPlan;
+import io.reductxn.planning.api.CycleObligation;
+import io.reductxn.planning.api.FxClearing;
+import io.reductxn.planning.api.SettlementPlan;
+import io.reductxn.planning.api.SettlementPlanner;
+import io.reductxn.planning.api.SingleCurrencyObligation;
+import io.reductxn.planning.api.TaxRuleResolver;
 
 import java.util.ArrayList;
 import java.util.Comparator;

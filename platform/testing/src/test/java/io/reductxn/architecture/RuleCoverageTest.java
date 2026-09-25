@@ -82,13 +82,13 @@ class RuleCoverageTest {
                     "ModuleBoundaryTest#b10_ledger_internal_is_private",
                     "ModuleBoundaryTest#b10_netting_internal_is_private",
                     "ModuleBoundaryTest#b10_fx_internal_is_private",
-                    "ModuleBoundaryTest#b10_settlement_internal_is_private",
+                    "ModuleBoundaryTest#b10_planning_internal_is_private",
                     "ModuleBoundaryTest#b10_rails_internal_is_private")),
             Map.entry("B11", List.of("ModuleBoundaryTest#b11_api_never_exposes_an_internal_type")),
             Map.entry("B18", List.of("ModuleBoundaryTest#b18_fx_depends_only_on_kernel_and_ledger")),
             Map.entry("B19", List.of("ModuleBoundaryTest#b19_no_other_domain_module_knows_about_fx")),
             Map.entry("B21", List.of(
-                    "ModuleBoundaryTest#b21_settlement_depends_only_on_kernel_ledger_netting_and_fx")),
+                    "ModuleBoundaryTest#b21_planning_depends_only_on_kernel_ledger_netting_and_fx")),
             // A principle that also has a mechanical guard: money is an integer minor unit, and no
             // floating-point type may appear in domain code.
             Map.entry("P1", List.of("build-logic#forbidFloatingPointMoney")),
@@ -123,7 +123,7 @@ class RuleCoverageTest {
                     + "state machine; a spec that says 'no silent rollback' can only be tested against "
                     + "something that can fail midway, which means a real rail"),
             Map.entry("S4", "the funding gate: no run while a currency's fx_clearing position is "
-                    + "non-zero and unfunded. libs/settlement already reports each currency's clearing "
+                    + "non-zero and unfunded. libs/planning already reports each currency's clearing "
                     + "position, which is this rule's input, so half of it is built. The other half is "
                     + "the run transitioning to awaiting_fx_funding, which needs workers/settlement"),
             Map.entry("S5", "the FX requirement is a reported number, never a hidden one. The plan "

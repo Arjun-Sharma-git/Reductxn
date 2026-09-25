@@ -1,4 +1,4 @@
-package io.reductxn.settlement.api;
+package io.reductxn.planning.api;
 
 import io.reductxn.ledger.api.Money;
 import io.reductxn.netting.api.NetPosition;

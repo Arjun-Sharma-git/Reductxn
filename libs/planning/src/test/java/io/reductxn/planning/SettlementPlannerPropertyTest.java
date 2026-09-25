@@ -1,4 +1,4 @@
-package io.reductxn.settlement;
+package io.reductxn.planning;
 
 import io.reductxn.fx.api.FxQuote;
 import io.reductxn.fx.api.FxRate;
@@ -7,13 +7,13 @@ import io.reductxn.ledger.api.Money;
 import io.reductxn.netting.api.NetPosition;
 import io.reductxn.netting.api.TaxRules;
 import io.reductxn.netting.api.TransferInstruction;
-import io.reductxn.settlement.api.CrossCurrencyObligation;
-import io.reductxn.settlement.api.CurrencyPlan;
-import io.reductxn.settlement.api.CycleObligation;
-import io.reductxn.settlement.api.SettlementPlan;
-import io.reductxn.settlement.api.SettlementPlanner;
-import io.reductxn.settlement.api.SettlementPlans;
-import io.reductxn.settlement.api.SingleCurrencyObligation;
+import io.reductxn.planning.api.CrossCurrencyObligation;
+import io.reductxn.planning.api.CurrencyPlan;
+import io.reductxn.planning.api.CycleObligation;
+import io.reductxn.planning.api.SettlementPlan;
+import io.reductxn.planning.api.SettlementPlanner;
+import io.reductxn.planning.api.SettlementPlans;
+import io.reductxn.planning.api.SingleCurrencyObligation;
 
 import net.jqwik.api.Arbitraries;
 import net.jqwik.api.Arbitrary;

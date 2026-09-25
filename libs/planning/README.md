@@ -1,4 +1,4 @@
-# libs/settlement
+# libs/planning
 
 Multicurrency composition: turn a cycle of obligations into **per-currency settlement plans**. Pure
 Java: no Spring, no JDBC, no HTTP, no clock, no provider (RULE B5, P4).
@@ -26,12 +26,12 @@ engine.
 
 | Module | Owns |
 |---|---|
-| `libs/settlement` | **What** must be settled: partitions, positions, transfers, the clearing position, the external requirement |
+| `libs/planning` | **What** must be settled: partitions, positions, transfers, the clearing position, the external requirement |
 | `workers/settlement` | **Executing** it: run lifecycle, quorum, idempotency, rail submission, funding state |
 
 ## Public surface
 
-Everything callers may touch lives in `io.reductxn.settlement.api` (RULE B10).
+Everything callers may touch lives in `io.reductxn.planning.api` (RULE B10).
 
 | Type | Role |
 |---|---|
@@ -43,7 +43,7 @@ Everything callers may touch lives in `io.reductxn.settlement.api` (RULE B10).
 | `TaxRuleResolver` | Port for resolving the tax rule per currency partition |
 | `FxClearing` | The reserved internal account id, and the check that it is never a member |
 
-`io.reductxn.settlement.internal` is private and must not be referenced from outside this module.
+`io.reductxn.planning.internal` is private and must not be referenced from outside this module.
 
 ## Allowed dependencies
 
@@ -78,7 +78,7 @@ Everything callers may touch lives in `io.reductxn.settlement.api` (RULE B10).
 
 ## Tests
 
-`./gradlew :libs:settlement:test`
+`./gradlew :libs:planning:test`
 
 Unit tests use the ADR 0012 worked example. The property tests assert that **N1-N9 hold per currency**
 - the claim ADR 0012 makes - plus X7 (per-currency zero-sum including `fx_clearing`), that partitions
