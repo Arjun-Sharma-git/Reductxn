@@ -174,6 +174,7 @@ reductxn/
 |   +-- ledger/                     # Money, JournalEntry, Posting, invariants
 |   +-- netting/                    # greedy + optimal netting, TaxRule engine
 |   +-- fx/                         # FxRate, conversion, valuation (ADR 0013)
+|   +-- planning/                   # per-currency plans, the fx_clearing position (ADR 0012)
 |   +-- rails/                      # PaymentRail port + adapters
 |
 +-- apps/
@@ -268,7 +269,7 @@ rate, and no other module may read `fx_rates` or `fx_quotes`. Everything else se
 that has already been computed, or nothing at all.
 **RULE B20** - the API never returns localized prose. Problem responses carry a stable `code` plus
 structured `params`; localization happens in the client (P13, ADR 0014).
-**RULE B21** - `libs/settlement` depends only on `libs/kernel`, `libs/ledger`, `libs/netting` and
+**RULE B21** - `libs/planning` depends only on `libs/kernel`, `libs/ledger`, `libs/netting` and
 `libs/fx`. It is the only module permitted to compose per-currency plans, and the only place
 `fx_clearing` is modelled. It is pure: no I/O, no clock, no provider.
 
@@ -276,7 +277,7 @@ structured `params`; localization happens in the client (P13, ADR 0014).
 answer is never a `common` module containing everything - it is to extract the actual concept into
 `libs/*` under a name that describes it.
 
-**`libs/settlement` is the first working example of that rule**, so the reasoning is recorded rather
+**`libs/planning` is the first working example of that rule**, so the reasoning is recorded rather
 than left in a commit message. Partitioning a multicurrency cycle is needed by two modules that may
 not see each other (B6): `apps/api`, to preview what a cycle would cost, and `workers/settlement`, to
 build the run. Leaving it in the worker would have forced the API to reimplement it, which is two
@@ -285,12 +286,34 @@ implementations of the same financial arithmetic drifting apart. And it could no
 awareness is exactly what ADR 0012 forbids, because its properties depend on one currency at a time.
 So it moved *down* into a pure module that both deployables consume.
 
-The naming split is deliberate and worth stating, because both modules contain the word:
+The naming used to be a trap. Both modules were called `settlement`, so the only thing distinguishing
+them was the path, and every sentence about "settlement" needed the reader to work out which one was
+meant. The distinction that actually matters is **plan versus run**, and the names now carry it:
 
 | Module | Owns |
 |---|---|
-| `libs/settlement` | **What** must be settled: the per-currency plan, the partitions, the `fx_clearing` position, the external FX requirement. Pure and deterministic |
+| `libs/planning` | **What** must be settled: the per-currency plan, the partitions, the `fx_clearing` position, the external FX requirement. Pure and deterministic |
 | `workers/settlement` | **Executing** it: the run lifecycle, quorum, idempotency, rail submission, funding state |
+
+**The worker kept the name, because "settlement" already meant the run everywhere it appeared.** The
+tables it owns are `settlement_cycles`, `settlement_runs` and `settlement_transfers` (RULE B17); the
+contract reserves the `settlement.*` error namespace, and the one known example is
+`settlement.fx_unfunded`, which is the funding gate (S4) - a run concern; `docs/specs/settlement.md` is
+about quorum, idempotency, rails and funding, all of the run. The library was the outlier, so the
+library is what moved, to a name that says what it produces.
+
+**It was not only about readability.** Two Gradle modules cannot share a package root, and the package
+root here is the module's last path segment. With both at `io.reductxn.settlement`, every ArchUnit rule
+written against `io.reductxn.settlement..` would have matched **both** modules - including B21, which
+says settlement depends only on kernel, ledger, netting and fx. The worker must depend on rails and on
+persistence. A boundary rule that matches two modules is not a boundary rule, and it would have failed
+the moment the worker got its first source file, for a reason that looked like a code problem.
+
+Done while the worker is still empty and the library is 12 files, which is the whole argument for
+deciding it now: after Phase 2 it would be a migration.
+
+Recorded as **ADR 0015**, because section 12 requires an ADR for a change to the module graph and for a
+change to a RULE that names a module, and B21 names this one.
 
 ### 5.2 Gradle module template
 
@@ -452,7 +475,7 @@ class ModuleBoundaryTest {
 
   @ArchTest static final ArchRule api_and_worker_are_independent =
       noClasses().that().resideInAPackage("io.reductxn.api..")
-          .should().dependOnClassesThat().resideInAPackage("io.reductxn.settlement..")
+          .should().dependOnClassesThat().resideInAPackage("io.reductxn.planning..")
           .because("RULE B6");
 
   @ArchTest static final ArchRule web_never_touches_adapters =
@@ -795,7 +818,8 @@ Seed ADRs: `0001-non-custodial-architecture`, `0002-java-spring-boot-single-back
 `0007-tanstack-stable-only-frontend`, `0008-group-as-shard-key`,
 `0009-spring-modulith-modular-monolith`, `0010-crypto-shredding-for-erasure`,
 `0011-netting-must-not-increase-tax`, `0012-multicurrency-netting-per-currency`,
-`0013-exact-fx-rates-and-residual`, `0014-localization-and-locale-handling`.
+`0013-exact-fx-rates-and-residual`, `0014-localization-and-locale-handling`,
+`0015-planning-computes-the-plan-settlement-executes-the-run`.
 
 **NOTE:** ADR 0012, 0013 and 0014 are `accepted` as decisions but **not yet implemented**. They are
 recorded first so that the contract and the schema can be shaped by them from the start, rather than
@@ -813,7 +837,7 @@ maintainers actually need.
 | 0 | Decisions, ADRs, legal stance | `docs/*` only |
 | 1 | MVP ledger + netting preview, **with i18n scaffolding from the first screen** | `libs/kernel`, `libs/ledger`, `apps/api`, `apps/web` (+ `locales/`) |
 | 2 | Settlement cycle + reports on MockRail | `libs/netting`, `libs/rails`, `workers/settlement`, `apps/web` |
-| 2.5 | **Cross-currency obligations** (ADR 0012, 0013): `libs/fx`, `libs/settlement`, per-currency partitions, FX funding state | `libs/fx` done, `libs/settlement` done (plan only), `libs/ledger`, `workers/settlement`, `apps/web`, `contracts/` |
+| 2.5 | **Cross-currency obligations** (ADR 0012, 0013): `libs/fx`, `libs/planning`, per-currency partitions, FX funding state | `libs/fx` done, `libs/planning` done (plan only), `libs/ledger`, `workers/settlement`, `apps/web`, `contracts/` |
 | 3 | Real rail + tax engine + compliance hooks, **and remaining locales reviewed** | `libs/rails`, `libs/netting/internal/tax`, `platform/security`, `apps/web/locales` |
 | 4 | Scale hardening | `platform/*`, `infra/*`, `workers/settlement` |
 | 5 | Compliance depth + mobile | `apps/api` identity, new `apps/mobile` consuming `contracts/` |
@@ -881,6 +905,7 @@ Found while compiling and executing the pure core, and recorded here rather than
 | Decision | Why |
 |---|---|
 | `io.reductxn.ledger.api.Currency` deliberately shadows `java.util.Currency` | Ours carries a minor-unit exponent, which is exactly what formatting needs. The JDK type requires a locale-driven lookup and is not the model we want at the centre of a ledger. |
+| **Module names say *plan* or *run*, not both** - `libs/planning` computes the plan, `workers/settlement` executes the run | Two modules with the same name make every sentence about them ambiguous, and two Gradle modules cannot share a package root without every ArchUnit rule written against it matching both. Full reasoning in section 5.1. |
 | **RULE N1** - no wildcard imports in reductxn code | A wildcard `java.util.*` import makes `Currency` ambiguous and stops the build. Explicit imports also make a file's dependencies readable and keep ArchUnit failure messages precise. |
 | No other domain type takes a name that already exists in `java.util` or `java.time` | Ambiguity multiplied across modules is how a domain language erodes. |
 | Error codes are lower case, dot-separated and namespaced by the owning module | `fx.rate_stale`, `ledger.currency_mismatch`. A namespace is what makes a collision impossible rather than unlikely, and what makes a code attributable in a log. Enforced by `DomainCodes` and `DomainErrorCodeTest`. |
@@ -937,7 +962,7 @@ change, so it is stated explicitly:
 |---|---|---|---|
 | Netting, tax, ledger, money | ADR 0004, 0005, 0006, 0011 | **Implemented, tested** | 21 tests green |
 | FX rates and the residual | ADR 0013 | **Implemented, tested** | 35 tests green. `libs/fx` owns the rate type, the exact conversion and `FxQuote` |
-| Per-currency composition | ADR 0012 | **Implemented, tested** | 20 tests green. `libs/settlement` partitions a cycle, composes the per-currency plans, and derives the external FX requirement |
+| Per-currency composition | ADR 0012 | **Implemented, tested** | 20 tests green. `libs/planning` partitions a cycle, composes the per-currency plans, and derives the external FX requirement |
 | RULEs B3, B4, B5, B10, B11, B18, B19, B21 | ADR 0012, 0013 | **Enforced** | 16 ArchUnit rules, all verified non-vacuous. B3 and B4 had been stated in section 5.1 and never enforced; B11 was described as enforced and did not exist |
 | `fx_clearing` postings | ADR 0012 | **Not implemented** | Nothing books the entry pair to the ledger. The plan computes the clearing position; the ledger never hears about it |
 | Funding state, per-currency runs | ADR 0012 | **Not implemented** | Needs `workers/settlement`, which has no sources |

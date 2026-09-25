@@ -120,7 +120,7 @@ and each partition is handed to this engine unchanged. Every property in section
 **per currency** rather than globally, and no algorithm changes:
 
 ```
-cycle for group G            (libs/settlement - see MASTER-PLAN rule B21)
+cycle for group G            (libs/planning - see MASTER-PLAN rule B21)
   |-- partition obligations by settlement currency
   |     JPY: [ ... ]  ->  NettingRequest(JPY, ...)  ->  N1..N9 hold within JPY
   |     RUB: [ ... ]  ->  NettingRequest(RUB, ...)  ->  N1..N9 hold within RUB
@@ -128,7 +128,7 @@ cycle for group G            (libs/settlement - see MASTER-PLAN rule B21)
   `-- merge results; totals are reported per currency, never summed in bare minor units
 ```
 
-The partitioner lives in `libs/settlement`, not here. It cannot live here: this module may only depend
+The partitioner lives in `libs/planning`, not here. It cannot live here: this module may only depend
 on kernel and ledger (B3), and partitioning needs to understand a locked FX quote. Netting stays
 unaware of FX on purpose, because every property above assumes one currency at a time.
 
@@ -148,7 +148,7 @@ external FX requirement rather than a member's position (RULE S4, RULE S5).
 **The partitioner sorts the legs before handing them over, and it has to.** The engine is deterministic
 only for *identical* input: the pairwise tier emits one transfer per obligation in the order they were
 recorded, which `GreedyNettingTest` asserts as intended. Obligations arrive from a database in
-unspecified order, so `libs/settlement` normalises the order per partition. Without that, the same cycle
+unspecified order, so `libs/planning` normalises the order per partition. Without that, the same cycle
 could yield two plans equal in every amount and unequal as values, and a preview the group approved
 would not literally be the plan that executed. Sorting in the caller rather than the engine is what
 keeps ADR 0012's "the engine does not change" true.
