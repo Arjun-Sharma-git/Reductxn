@@ -2,7 +2,7 @@
 
 One file per decision. Template in `docs/MASTER-PLAN.md` section 12.
 
-Any change to a **RULE**, the module graph, the stack, or a principle P1-P11 requires an ADR.
+Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 requires an ADR.
 
 | ADR | Title | Status |
 |---|---|---|
@@ -17,3 +17,6 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P11 req
 | 0009 | Spring Modulith modular monolith | accepted |
 | 0010 | Crypto-shredding for erasure | accepted |
 | 0011 | Netting must not increase the settlement tax | accepted |
+| 0012 | Multicurrency settlement: net per currency, convert the residual only | accepted |
+| 0013 | Exact FX rates, cross-currency entries, and the rounding residual | accepted |
+| 0014 | Localization: ICU catalogs, codes not prose, and locale-safe money | accepted |
