@@ -350,6 +350,15 @@ io.reductxn.netting
 These two rules are enforced by ArchUnit (section 5.6) and are the single biggest reason a
 codebase stays modular years in. Without them, "modular" only means "in a different folder".
 
+**B11 was not enforced, and said it was.** Section 5.4 made that claim for the life of the project
+while only B10 existed, which is the purest example of the problem this repository keeps hitting: an
+unenforced rule reads exactly like an obeyed one. It is now `b11_api_never_exposes_an_internal_type`,
+covering return types, parameter types, thrown types and field types - and it is verified by breaking
+it, because the first implementation was itself vacuous. Written as `noClasses().should(condition)`
+over a custom condition, it passed against a deliberate sabotage; negation does not compose with custom
+conditions the way it does with built-in ones. It is a positive rule now, and failing on purpose is
+what established that.
+
 ### 5.4 Inside `apps/api`: hexagonal layers
 
 `apps/api` is a **modular monolith**: one deployable, many internal modules.
@@ -621,13 +630,16 @@ Modularity that is not checked is not real. Every pull request runs:
 
 | Gate | Tool | Fails when |
 |---|---|---|
-| Module graph | ArchUnit + Spring Modulith | RULE B1-B20 violated |
+| Module graph | ArchUnit + Spring Modulith | RULE B1-B21 violated. **Live**: 16 rules, all verified non-vacuous |
+| Rule coverage | `RuleCoverageTest` - **live** | A RULE is declared in this plan and is neither enforced nor explicitly deferred, a coverage entry is stale, or a claimed enforcement does not resolve to something that runs |
 | Import boundaries | `eslint-plugin-boundaries` | RULE F1-F12 violated |
-| Money discipline | lint ban on `double`/`float` in domain + ESLint ban on division by 100 | P1 violated |
+| Money discipline | lint ban on `double`/`float` in domain + ESLint ban on division by 100 | P1 violated. **Live**: the `forbidFloatingPointMoney` task in `build-logic` |
+| Import style | `forbidWildcardImports` task - **live** | A wildcard import appears (RULE N1) |
 | FX exactness | jqwik X1-X7 - **live** | A conversion is non-deterministic, the residual is not booked, or the round trip drifts |
 | FX isolation | ArchUnit - **live** | A rate is multiplied anywhere outside `libs/fx` (B18, B19). Non-vacuous, and guarded against becoming vacuous |
+| Error-code convention | `DomainErrorCodeTest` - **live** | A code is malformed, namespaced by the wrong module, duplicated, or not declared as a constant |
 | Locale coverage | catalog check | A key is missing versus `en`, unused, or a literal appears in a component (F10, I1-I3) |
-| Error-code parity | codegen check | A server error `code` has no catalog entry, or vice versa (I3) |
+| Error-code parity | codegen check | A server error `code` has no catalog entry, or vice versa (I3). **Not built.** Its server half now exists: every code is an enumerable constant, which is what a catalog check needs |
 | Locale money safety | Vitest property tests | Formatting changes the digits, or a `float` enters the format/parse path (F11, F12, I5) |
 | Spec sync | codegen diff check | RULE C3 violated |
 | Ledger invariants | jqwik property tests | A journal entry does not balance, or an FX link is unpaired (L9) |
@@ -870,14 +882,17 @@ Found while compiling and executing the pure core, and recorded here rather than
 | `io.reductxn.ledger.api.Currency` deliberately shadows `java.util.Currency` | Ours carries a minor-unit exponent, which is exactly what formatting needs. The JDK type requires a locale-driven lookup and is not the model we want at the centre of a ledger. |
 | **RULE N1** - no wildcard imports in reductxn code | A wildcard `java.util.*` import makes `Currency` ambiguous and stops the build. Explicit imports also make a file's dependencies readable and keep ArchUnit failure messages precise. |
 | No other domain type takes a name that already exists in `java.util` or `java.time` | Ambiguity multiplied across modules is how a domain language erodes. |
+| Error codes are lower case, dot-separated and namespaced by the owning module | `fx.rate_stale`, `ledger.currency_mismatch`. A namespace is what makes a collision impossible rather than unlikely, and what makes a code attributable in a log. Enforced by `DomainCodes` and `DomainErrorCodeTest`. |
 
-**NOTE:** RULE N1 is not yet gated in CI. Until it is, it is a GUIDE enforced in review.
+**NOTE:** RULE N1 is now gated, by the `forbidWildcardImports` verification task in `build-logic`,
+alongside the RULE P1 floating-point guard. Both scan sources and fail the build, so a rule that only
+lives in a document is no longer the situation for either.
 
 ---
 
 ## Appendix B - Verified state
 
-**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 92 tests, none failing:
+**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 96 tests, none failing:
 
 | Suite | Tests | What it proves |
 |---|---|---|
@@ -889,11 +904,18 @@ Found while compiling and executing the pure core, and recorded here rather than
 | `FxConverterPropertyTest` | 9 | X1-X6 over generated inputs. X2 checked against an independent `BigInteger` oracle |
 | `SettlementPlannerTest` | 14 | ADR 0012's worked example, the clearing split, per-currency tax, order independence, refused input |
 | `SettlementPlannerPropertyTest` | 6 | **X7** and the composition properties: zero-sum including `fx_clearing`, partition completeness, the two legs netting to the clearing position, reproducibility |
-| `ModuleBoundaryTest` | 15 | RULEs B1-B5, B8, B10, B18, B19, B21 |
+| `ModuleBoundaryTest` | 16 | RULEs B1-B5, B8, B10, B11, B18, B19, B21 |
 | `ArchUnitVisibilityTest` | 1 | That the architecture rules above are not vacuous |
+| `DomainErrorCodeTest` | 1 | That every error code is well formed, namespaced by its own module, unique, and declared as a constant |
+| `RuleCoverageTest` | 2 | That every RULE in this plan is enforced or explicitly deferred, and that every claimed enforcement resolves to something that actually runs |
 
-All 15 architecture rules are verified non-vacuous, and that verification is automated rather than
+All 16 architecture rules are verified non-vacuous, and that verification is automated rather than
 something a reviewer has to notice. See the constraint table below.
+
+**Two guards here are not ArchUnit rules, and both matter as much:** `forbidFloatingPointMoney` and
+`forbidWildcardImports` are Gradle verification tasks in `build-logic`, so they run for every module
+rather than only for the one with architecture tests. RULE N1 had been recorded as "not yet gated"
+since it was written; it is gated now.
 
 **What is designed versus what exists.** This distinction matters more than usual after a design-heavy
 change, so it is stated explicitly:
@@ -956,12 +978,28 @@ RUB 100,000  ->    102,410 USD minor        (USD 1,024.10)
 INR  27,952  ->     50,000 JPY minor        (round trip)
 ```
 
-**Known inconsistency, deliberately not fixed here:** error codes. `libs/fx` returns dotted,
-namespaced codes (`fx.rate_stale`), matching the contract's examples and the ICU catalog keys in
-ADR 0014. The pre-existing `CurrencyMismatchException` in `libs/ledger` returns `CURRENCY_MISMATCH`.
-Both cannot be right, the contract is authoritative (P5), so the older exception is the one that
-should change - but `libs/ledger` carries the stricter review bar, so it is a follow-up rather than
-something changed silently underneath a financial module.
+**Error codes were inconsistent, and are now not.** `libs/fx` returned dotted, namespaced codes
+(`fx.rate_stale`) matching the contract's examples and the ICU catalog keys in ADR 0014, while the
+pre-existing `CurrencyMismatchException` in `libs/ledger` returned a bare `CURRENCY_MISMATCH`. The
+contract is authoritative (P5), so the older exception was the one to change, and it did.
+
+The delay was not about difficulty, it was about the absence of a check. The disagreement was recorded
+as a comment in `FxException` and left there, because a comment cannot fail a build. The fix came with
+the thing that makes it stay fixed:
+
+- **`DomainCodes` in `libs/kernel`** states the convention once: lower case, dot-separated,
+  namespaced by the owning module.
+- **Every code is a `public static final String CODE`.** Not decoration - it is what makes codes
+  *enumerable*. The error-code parity gate (I3, section 8) has to know every code the server can emit
+  in order to check it against `en/errors.json`, and a code hidden inside a method body cannot be
+  enumerated, so it cannot be gated.
+- **`DomainErrorCodeTest`** enforces well-formedness, module-ownership of the namespace, uniqueness,
+  and the presence of the constant - each verified by sabotage.
+
+`obligation.currency_mismatch` used to appear as the example in the contract and in the i18n spec. It is
+now `ledger.currency_mismatch`, because the convention that four `fx.*` codes had already established is
+that the namespace is the owning module, and two spellings of one error is how a client catalog grows a
+key nobody can find.
 
 **Not yet verified:** `apps/api`, `workers/settlement`, `apps/web` and the `platform/*` modules have no
 sources. `apps/api`, `workers/settlement`, `platform/observability`, `platform/persistence` and
