@@ -23,7 +23,10 @@ const search = z.object({
   memberId: z.string().uuid().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
-  sort: z.string().optional(),
+  // The two orders the API accepts, rather than a free string: the server refuses a sort it does not order by, and
+  // a typo in a bookmark should be the unfiltered view rather than a refused request - the same reasoning the status
+  // enum above gets. `-occurredAt` is the default, so an absent value is not a missing parameter.
+  sort: z.enum(['occurredAt', '-occurredAt']).optional(),
 });
 
 export const Route = createFileRoute('/groups/$groupId/obligations')({

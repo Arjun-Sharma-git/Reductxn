@@ -17,12 +17,21 @@ export type Obligation = paths['/obligations']['post']['responses']['201']['cont
 
 export type ObligationStatus = Obligation['status'];
 
+/**
+ * The two orders the endpoint accepts, read from the contract rather than spelled again.
+ *
+ * A free string here would let the route pass a sort the server refuses - which is exactly what it did before
+ * `GET /obligations` existed to refuse it - and the contract declares the vocabulary, so this is a second look at
+ * one fact rather than a second statement of it.
+ */
+export type ObligationSort = NonNullable<paths['/obligations']['get']['parameters']['query']>['sort'];
+
 export type ObligationFilters = {
   readonly status?: ObligationStatus;
   readonly memberId?: string;
   readonly from?: string;
   readonly to?: string;
-  readonly sort?: string;
+  readonly sort?: ObligationSort;
 };
 
 export const obligationsQuery = (groupId: string, filters: ObligationFilters = {}) =>
