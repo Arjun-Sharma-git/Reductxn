@@ -30,3 +30,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0022 | A refusal is an answer with a consequence | accepted |
 | 0023 | The worker writes its verdicts down for readers that cannot compute them | accepted |
 | 0024 | A silence is not evidence, so escalation is a report | accepted |
+| 0025 | A person's word is evidence, so a resolution is attributed | accepted |

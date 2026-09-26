@@ -99,7 +99,8 @@ Execution flows through `libs/rails`. Required behaviours of every adapter:
    rejected). Only retryable failures are retried, with exponential backoff and a circuit breaker.
 4. A reconciliation sweep polls for transfers stuck in `submitted` beyond a threshold.
 
-**Status: 1, 2, 3 and 4 are implemented, and escalation is implemented as a report (ADR 0024).**
+**Status: 1, 2, 3 and 4 are implemented; escalation is implemented as a report (ADR 0024), and a person may now
+resolve what it names (ADR 0025).**
 
 **1 and 2.** The port's contract says submit is idempotent, and `MockRail` implements it as a memory:
 it answers a re-submission with the state it already holds rather than confirming a movement twice. The
@@ -152,8 +153,32 @@ repeats every pass, because a silence that has not ended is still happening - an
 said it, for the same reason. Nothing is written about the *transfers* either: the absence of an answer is not
 evidence of anything except silence, so marking a quiet transfer `failed` would assert that the money did not move
 and marking it `confirmed` would assert that it did. A person who finds out from the rail has a report telling them
-which movement to ask about; letting them record the answer is the next step, and it is a decision about who may
-assert that money moved.
+which movement to ask about, and the way back is below.
+
+**RULE S6** - a transfer's fate may be recorded from a person's word, and only when the record says *who* gave it
+and *what they looked at*. Nothing in this engine asserts that money moved on the strength of silence, so the one
+thing that can decide a transfer no rail will answer is somebody who found out - the rail's support desk, a
+statement, a bank line - and the write has to be a claim somebody owns. `--reductxn.command=resolve` takes the run,
+the transfer, the outcome (`confirmed` or `failed`), the person and the basis, and all five are required:
+`V509` stores `resolved_by`, `resolved_basis` and `resolved_at` beside the state, and the transfer's own value type
+refuses an attribution in pieces. Nothing verifies the name - this build has no identities, and pretending otherwise
+would be worse than saying so - so it is an attribution rather than an authentication. When identities exist, this
+column becomes a foreign key and the command becomes an act somebody was authorised to take.
+
+The write is bounded, which is the whole of why it is safe: it makes **no call to the rail** (the operator already
+has the answer, and asking again would make the command's outcome depend on the very silence it exists for), it
+touches **no other transfer** (an operator resolving one movement has not asked for the run to be attempted), and it
+books **exactly what a confirmation books** - the same `Bookings.settlement` entry, derived from the transfer, in
+the same transaction as the state write - or nothing at all when the answer is that the money did not move. Two
+things follow that are worth stating: a `confirmed` resolution **completes or fails the run by the rule execution
+uses** (`RunOutcome`, one implementation for both writers), and an answer that has arrived **is never rewritten** -
+a second resolution is refused, naming who decided and when, which is what an operator re-running after a slow
+response needs to see. A transfer no rail was ever asked about (`pending`) is refused too: there is no answer to
+have found out, and if money moved anyway then the missing fact is a submission rather than a decision.
+
+What is deliberately *not* required is that the transfer be past `reductxn.settlement.escalation.after`: patience is
+the worker's prompt to a human, not a permission a human needs. An operator who knows the answer to a transfer the
+driver is still polling may record it.
 
 **4 is implemented as a driver, with one difference from the letter of this section and a reason.** The sweep
 was specified as a threshold on a `submitted` transfer; what was built is a driver whose threshold is on the
@@ -284,11 +309,18 @@ On top of that, the run's whole lifecycle:
   `EntryChain` rather than comparing fields. Section 4a has what this does and does not cover.
 - **Driving (section 4.4)** - `DriveRuns` offers every run whose progress is possible to `ExecuteRun`, and two
   adapters trigger it: a cadence (`ScheduledRunDriver`, `@Scheduled`, rate-limited by a window and a batch size)
-  and an operator's command line (`SettlementCommand`: `compute`, `drive`, `fund`). Until this existed, the only
-  caller of `ExecuteRun` in the repository was a test - and the worker, being a non-web application with no
-  non-daemon thread, exited at startup rather than running as a service at all. ADR 0018 records the boundary it
-  draws: the worker drives what it owns, an operator triggers what only a person can decide, and a member's
-  approval is neither - which is the next decision.
+  and an operator's command line (`SettlementCommand`: `compute`, `drive`, `fund`, `escalations`, `resolve`). Until
+  this existed, the only caller of `ExecuteRun` in the repository was a test - and the worker, being a non-web
+  application with no non-daemon thread, exited at startup rather than running as a service at all. ADR 0018 records
+  the boundary it draws: the worker drives what it owns, an operator triggers what only a person can decide, and a
+  member's approval is neither - which is the next decision.
+- **A person's answer about a transfer no rail will decide (RULE S6)** - `ResolveTransfer` records what an operator
+  found out: `V509`'s `resolved_by`/`resolved_basis`/`resolved_at` beside the transfer's state, the movement booked
+  exactly as a confirmation books it (or nothing at all, when the answer is that the money did not move), the
+  silence cleared so the escalation report stops naming it, and the run's fate written by `RunOutcome` - the rule
+  `ExecuteRun` used, extracted into one place for this second writer. It calls no rail and touches no other
+  transfer, and it refuses an already-answered transfer, a transfer no rail was asked about, and an assertion with
+  no name on it.
 
 The tests verify the *stored* plan and stored state rather than the call: per-currency zero-sum read back from
 `net_positions` (N1), every participant zeroed by applying the plan's own transfers (N2), the clearing account's
@@ -303,7 +335,7 @@ funding never reaches it at all.
 | Nothing schedules a *cycle* | A run is driven once it exists, but nothing decides that a cycle has come due: a group's settlement schedule is a group's property and `groups` does not exist. Cycles are opened by an operator's command in the meantime, and the policy that replaces it ("every month, at the group's cut-off") is a decision about a group's money that belongs with the group. ADR 0018 records the two questions that stay separate: what moves a run, and what a person has to decide |
 | A member's answer reaching this worker | **Closed for both answers** - the API records an answer into `settlement_decisions`, which this worker's quorum judges: an approval counts toward quorum (ADR 0020) and a refusal ends the run (ADR 0022). `RecordedDecisionsTest` proves that two approvals settle a cycle with nothing else touching the worker, that one is not a quorum, that an answer from someone the run does not concern counts for nothing either way, and that a refusal written from outside leaves the run reading `awaiting_approval` until this worker's next look writes `rejected` - the status being this worker's to move is the whole reason that last step exists. What is not here is a *stored conclusion* about how far off quorum a run is, which is what would let a member be told "one approval short" |
 | A member reading a run | **Closed for the rows and for the gates' verdicts; the totals are still open** - `apps/api` projects this worker's run, partition, transfer and decision rows (`GET /runs/{runId}`, `/transfers`), so a member can read the plan, the movements and the answers before approving (ADR 0021). Since ADR 0023 it also projects the gates' own verdict, which this worker writes down: whether quorum is met with the approvals counted and required and how many debtors still have to confirm, and what each currency is still short of - so "you are one approval short" is sayable without the API implementing the rule, and a run nobody has looked at yet reports no verdict rather than an invented one. What is deliberately not there: `reportingTotals` (the reporting currency is a group's property and groups do not exist as tables), the plan's *total* external requirement (`gates.funding.outstanding` is the gap, which is the actionable half), `executedAt` (nothing records when a run reached `done`), and the run's participants - which is why the verdict carries a count of the members still to confirm rather than naming them. Naming them would put a second copy of the run's member set outside `net_positions` |
-| Escalating a transfer no rail will ever decide | **Closed for the report, open for the resolution** - section 4.4's "or escalate" is implemented as a report (ADR 0024): `reductxn.settlement.escalation.after` says how long a rail may go unanswered (two hours by default), `V508` stores when the spell of silence began so the duration is a fact rather than a guess from a retry count, and both the cadence and `--reductxn.command=escalations` name the transfers, the state the rail left each one in, how many calls went unanswered and the rail's own last words. What is deliberately *not* there is a resolution: the absence of an answer is not evidence, so nothing writes `failed` (which would assert the money did not move) or `confirmed` (which would assert that it did). The next step is a command for an operator who has learned the answer from the rail, which needs the booking path a confirmation uses and a decision about who may assert that money moved |
+| Escalating a transfer no rail will ever decide | **Closed** - section 4.4's "or escalate" is a report (ADR 0024) and a person's answer to it (ADR 0025). `reductxn.settlement.escalation.after` (two hours by default) says how long a rail may go unanswered, `V508` stores when the spell of silence began so the duration is a fact rather than a guess from a retry count, and both the cadence and `--reductxn.command=escalations` name the transfers, the state the rail left each one in, how many calls went unanswered and the rail's own last words. Nothing is written on the strength of silence, because the absence of an answer is not evidence - and what closes the gap is not the worker deciding but a person who found out: `--reductxn.command=resolve` writes the outcome with `V509`'s `resolved_by`/`resolved_basis`/`resolved_at` (RULE S6), books the movement a confirmation books when the answer is that it moved, clears the silence so the report stops naming it, and lets `RunOutcome` - one rule, two writers - decide the run's fate. What remains is identity: nothing verifies the name, so this is an attribution rather than an authorisation, and "who may assert that money moved" is answered as "a person, in writing" until members and roles exist |
 | Posting the currency a group brings in from outside | A funding is recorded as a fact about the run and moves no ledger entry, so nothing shows the group's own contribution arriving. The entry needs an account for the group itself, and what kind of account that is (`owner_type = 'group'`, and which of asset/liability/income) is open in `docs/specs/ledger.md` section 6 - guessing it here would have invented typing the ledger has deliberately not chosen |
 | A scheduler, or any other trigger | **Closed for the worker's own work, open for cycles** - nothing computes a run, moves an approved one on, or resolves a transfer left in flight *without a caller* was the honest form of "nothing triggers any of it"; the cadence (`ScheduledRunDriver`) and the operator's command line now cover the first three (ADR 0018, 0019, 0024). What is still open is the trigger for a *cycle*: a run is driven once it exists, and nothing decides that a cycle has come due (see the first row) |
 | Retryable-vs-terminal classification, backoff, circuit breaker (section 4.3) | `PaymentRail.submit` returns a `Result` with nowhere to put the classification the spec requires, so the port needs a change before the behaviour can exist. The worker fails safe meanwhile: an unreachable rail leaves the transfer `authorized` and the run `executing`, and a later pass offers it again |
