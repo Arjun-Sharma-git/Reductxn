@@ -28,24 +28,34 @@ only credible because the domain logic lives in `libs/*` and cannot be reached a
 
 ## Two things to know before running it
 
-**It will not start without a store, and that is deliberate.** The only `OpenObligations` and
-`TaxRuleCatalog` implementations are development doubles behind the `dev` profile, while the use case is
-not profiled - so the default profile has no bean to inject and the context refuses to build.
-`MissingStoreFailsClosedTest` asserts that refusal. Run locally with
-`--spring.profiles.active=dev`; a deployment cannot reach a double by forgetting a flag.
+**It needs a database and a jurisdiction, and will not start without either.** There are no development
+doubles left: `JooqOpenObligations` and `JooqTaxRuleCatalog` are the only implementations of their ports, so
+a missing database or an unset `reductxn.tax.jurisdiction` stops the context. That replaced a
+profile-gated design that existed for one reason - keeping an in-memory stub out of a deployment - and the
+mechanism went with the stubs: there is nothing left to keep out. `docker compose -f
+infra/docker/compose.yaml up postgres` and then
+`./gradlew :apps:api:bootRun --args='--reductxn.tax.jurisdiction=IN'` is the local path.
 
 **No business rules live here.** Which currencies a cycle spans, how each partition nets, what the tax is
 and where the FX requirement lands are answered by `libs/*`. A rule that appears in `application` is a
 rule in the wrong module.
 
+## What the persistence layer looks like from here
+
+`adapter/persistence` holds two jOOQ repositories and no generated row types: `Record` is mapped to a domain
+type inside the fetch, so nothing jOOQ-shaped leaves the package. RULE B16 enforces that, and it is
+repository-wide rather than module-wide, because `libs/*` may not use jOOQ at all. The `obligations` schema
+is `apps/api`'s own - `src/main/resources/db/migration/V101__obligations.sql`, in the `1xx` version range -
+while `tax_rules` belongs to `libs/netting` and is read through a read model. `platform/persistence` runs
+both and owns neither.
+
 ## What is not here yet
 
-Persistence, identity, and four of the five controllers the plan names. The preview therefore answers for
-the obligations in the running process rather than for stored ones - which is what a development double
-can know, and why the doubles are named after what they are instead of sitting in `adapter/persistence`
-looking like the real thing.
+Identity, groups, and four of the five controllers the plan names. An obligation's `group_id` has no foreign
+key because `groups` does not exist yet, and cross-currency obligations cannot be stored because the
+`obligations` table has no quote columns - both are stated in the migration rather than left to be noticed.
 
-**Tests:** `./gradlew :apps:api:test`
+**Tests:** `./gradlew :apps:api:test` (Testcontainers, real Postgres)
 
 **Spec:** `contracts/openapi/reductxn-api.yaml` - edited first, always (RULE C1) - and
 `docs/MASTER-PLAN.md` section 5.4. **Owner:** backend reviewer.

@@ -27,6 +27,7 @@ dependencies {
 
     testImplementation(libs.spring.tx)
     testImplementation(libs.spring.context)
+    testImplementation(libs.jooq)
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +50,20 @@ val coverageTestInputs = listOf(
     rootProject.layout.projectDirectory.dir("build-logic/src/main/kotlin")
 )
 
+// SchemaOwnershipTest reads every module's migrations, which are outside this module's source tree for the
+// same reason the docs are: Gradle cannot infer them, and an unread input means the test does not re-run.
+//
+// The patterns are module-anchored to match `javaTestTrees` below. A leading `**/` resolves the whole
+// repository, including every module's `build` directory, and Gradle then fails the build for an implicit
+// dependency on another task's output - which is a fair complaint about an input that claims to look
+// everywhere. Anchoring keeps the same files and states where they are.
+val migrations = fileTree(rootProject.layout.projectDirectory) {
+    include("libs/*/src/main/resources/db/migration/*.sql")
+    include("apps/*/src/main/resources/db/migration/*.sql")
+    include("workers/*/src/main/resources/db/migration/*.sql")
+    include("platform/*/src/main/resources/db/migration/*.sql")
+}
+
 val javaTestTrees = fileTree(rootProject.layout.projectDirectory) {
     include("libs/*/src/test/java/**/*.java")
     include("apps/*/src/test/java/**/*.java")
@@ -67,5 +82,9 @@ tasks.withType<Test>().configureEach {
 
     inputs.files(javaTestTrees)
         .withPropertyName("testSourcesScannedForPropertyLabels")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+
+    inputs.files(migrations)
+        .withPropertyName("migrationsReadBySchemaOwnershipTest")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }

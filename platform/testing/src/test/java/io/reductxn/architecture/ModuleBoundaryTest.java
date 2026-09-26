@@ -406,6 +406,24 @@ class ModuleBoundaryTest {
                     .because("RULE B15: a commit in an unexpected layer is a commit nobody reviewed");
 
     /**
+     * RULE B16: no persistence row type crosses out of {@code adapter/persistence}.
+     *
+     * <p>jOOQ's generator puts a class per table wherever a query touches one, and that class then becomes
+     * the thing every caller depends on: a column rename reaches a use case, and a use case starts being
+     * shaped around a table. Mapping {@code Record} to a domain type inside the fetch keeps the row type
+     * local - which is why the repository in this module does not use the generator - and this rule is what
+     * keeps it that way.
+     *
+     * <p>It is repository-wide rather than module-wide on purpose. {@code libs/*} may not use jOOQ at all
+     * (they are framework-free, RULE B5), so one rule covers both halves of the boundary.
+     */
+    @ArchTest
+    static final ArchRule b16_row_types_never_leave_the_persistence_adapters =
+            noClasses().that().resideOutsideOfPackage("io.reductxn.api.adapter.persistence..")
+                    .should().dependOnClassesThat().resideInAPackage("org.jooq..")
+                    .because("RULE B16: a row type that escapes makes every caller depend on a table");
+
+    /**
      * RULE B20: the API never returns localized prose, so it has no apparatus for composing any.
      *
      * <p><strong>This is a proxy, and saying so matters.</strong> What it forbids is the machinery of

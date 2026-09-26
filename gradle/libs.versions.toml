@@ -9,9 +9,14 @@
 java = "25"
 springBoot = "4.1.1"
 springFramework = "7.0.9"
-jooq = "3.20.0"
-flyway = "11.0.0"
-postgresql = "42.7.5"
+# The three below must agree with the Spring Boot line, because the Boot BOM manages them for every
+# module that imports it and the BOM wins. A pin that disagrees is a pin that is silently ignored - which
+# is what these were until platform/persistence finally depended on them: flyway was pinned at 11.0.0 and
+# resolved to 12.4.0, jOOQ at 3.20.0 and resolved to 3.21.7, postgresql at 42.7.5 and resolved to 42.7.13.
+# Nothing had ever used them, so nothing had ever disagreed out loud. Read from the BOM rather than guessed.
+jooq = "3.21.7"
+flyway = "12.4.0"
+postgresql = "42.7.13"
 testcontainers = "1.20.5"
 # Must be >= 1.5.0. Earlier 1.x releases cannot read Java 25 bytecode (class file major version 69):
 # they import zero classes, and every architecture rule then fails as "emptyShould" - or, if
@@ -41,6 +46,10 @@ spring-boot-starter-security = { module = "org.springframework.boot:spring-boot-
 spring-boot-starter-data-redis = { module = "org.springframework.boot:spring-boot-starter-data-redis" }
 spring-boot-starter-batch = { module = "org.springframework.boot:spring-boot-starter-batch" }
 spring-boot-starter-jooq = { module = "org.springframework.boot:spring-boot-starter-jooq" }
+spring-boot-starter-flyway = { module = "org.springframework.boot:spring-boot-starter-flyway" }
+# The jOOQ library without the starter, for the architecture tests: B16 forbids jOOQ types outside the
+# persistence adapters, and a rule can only police a type it can see.
+jooq = { module = "org.jooq:jooq", version.ref = "jooq" }
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
 # The Spring Framework libraries a module needs without a starter. `spring-tx` carries @Transactional -
 # the library, not the starter, because a starter would pull a DataSource in, and RULE B15 needs the

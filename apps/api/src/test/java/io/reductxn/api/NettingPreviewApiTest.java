@@ -1,22 +1,15 @@
 package io.reductxn.api;
 
-import io.reductxn.api.adapter.dev.DevOpenObligations;
-import io.reductxn.ledger.api.Currency;
-import io.reductxn.ledger.api.Money;
-import io.reductxn.planning.api.SingleCurrencyObligation;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
-import java.util.List;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.hasSize;
@@ -26,31 +19,30 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * The contract's preview endpoint, through every layer.
+ * The contract's preview endpoint, through every layer, against a real database.
  *
- * <p>Exercised over the {@code dev} doubles, because no obligation store exists yet. That is stated rather
- * than hidden: these tests prove the mapping and the layering, and they cannot prove that anything is
- * persisted. The assertions are on the wire format the contract defines, so they keep working when the
- * adapter behind the port is replaced by the real one.
+ * <p>These tests have now run in two stages, and the difference is the point. They began over in-memory
+ * doubles, when no store existed: they proved the mapping and the layering, and could not prove that
+ * anything was persisted. Rows are now written with SQL into a container and read back through jOOQ, so a
+ * broken migration, a misnamed column and a timezone mistake all fail here rather than in an environment.
+ *
+ * <p>The assertions are on the wire format the contract defines, which is why they survived both stages
+ * unchanged - the shape a client sees was never the part that was provisional.
  */
 @SpringBootTest
-@ActiveProfiles("dev")
-class NettingPreviewApiTest {
+class NettingPreviewApiTest extends DatabaseTest {
 
     private static final UUID GROUP = new UUID(0L, 1L);
     private static final UUID ALICE = new UUID(0L, 10L);
     private static final UUID BORIS = new UUID(0L, 11L);
 
-    private static final Currency INR = Currency.of("INR", 2);
-
-    /** The dev double's default flat tax, in minor units of whichever currency is assessed. */
+    /** The flat charge per transfer the fixture seeds, in minor units of whichever currency is assessed. */
     private static final long FLAT_TAX_MINOR = 50L;
+
+    private static final String AS_OF = "2026-09-25T10:00:00Z";
 
     @Autowired
     private WebApplicationContext context;
-
-    @Autowired
-    private DevOpenObligations obligations;
 
     private MockMvc mvc;
 
@@ -69,9 +61,8 @@ class NettingPreviewApiTest {
     void previewsASingleCurrencyGroupInTheContractShape() throws Exception {
         // Two opposing obligations net to one transfer of 6,000. Pairwise settlement would have been two
         // transfers, so with a flat per-transfer tax the bill falls from 100 to 50.
-        obligations.seed(GROUP, List.of(
-                new SingleCurrencyObligation(ALICE, BORIS, Money.of(10_000L, INR)),
-                new SingleCurrencyObligation(BORIS, ALICE, Money.of(4_000L, INR))));
+        obligate(GROUP, ALICE, BORIS, 10_000L, "INR", 2);
+        obligate(GROUP, BORIS, ALICE, 4_000L, "INR", 2);
 
         preview(GROUP)
                 .andExpect(status().isOk())
@@ -101,10 +92,8 @@ class NettingPreviewApiTest {
 
     @Test
     void aMulticurrencyGroupReportsPartitionsRatherThanChoosingACurrency() throws Exception {
-        Currency jpy = Currency.of("JPY", 0);
-        obligations.seed(GROUP, List.of(
-                new SingleCurrencyObligation(ALICE, BORIS, Money.of(10_000L, INR)),
-                new SingleCurrencyObligation(ALICE, BORIS, Money.of(10_000L, jpy))));
+        obligate(GROUP, ALICE, BORIS, 10_000L, "INR", 2);
+        obligate(GROUP, ALICE, BORIS, 10_000L, "JPY", 0);
 
         preview(GROUP)
                 .andExpect(status().isOk())
@@ -144,8 +133,33 @@ class NettingPreviewApiTest {
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
     }
 
+    @Test
+    void anObligationVoidedAfterTheInstantWasStillOpenAtIt() throws Exception {
+        // Voided on 20 September. At 10:00 on 15 September it was open, so a preview of that instant must
+        // still see it: the filter is `voided_at > asOf`, not `voided_at IS NULL`. A preview that dropped it
+        // would understate a past cycle's cost by exactly what has been voided since, which is the kind of
+        // error that never looks like an error.
+        obligate(GROUP, ALICE, BORIS, 10_000L, "INR", 2);
+        voidObligationOf(ALICE, "2026-09-20 00:00:00+00");
+
+        preview(GROUP, "2026-09-15T10:00:00Z")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bestCase.transfers", hasSize(1)))
+                .andExpect(jsonPath("$.bestCase.transfers[0].amount.amountMinor").value(10_000L));
+
+        // And at the later instant it is gone, which is what makes the first half a claim about time rather
+        // than about voiding being ignored.
+        preview(GROUP, AS_OF)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bestCase.transfers", hasSize(0)))
+                .andExpect(jsonPath("$.partitions", hasSize(0)));
+    }
+
     private ResultActions preview(UUID groupId) throws Exception {
-        return mvc.perform(get("/v1/groups/{groupId}/netting/preview", groupId)
-                .param("asOf", "2026-09-25T10:00:00Z"));
+        return preview(groupId, AS_OF);
+    }
+
+    private ResultActions preview(UUID groupId, String asOf) throws Exception {
+        return mvc.perform(get("/v1/groups/{groupId}/netting/preview", groupId).param("asOf", asOf));
     }
 }
