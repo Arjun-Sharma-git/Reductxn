@@ -78,6 +78,9 @@ class RuleCoverageTest {
             Map.entry("B5", List.of(
                     "ModuleBoundaryTest#b5_libs_are_framework_free",
                     "ModuleBoundaryTest#b5_libs_do_not_depend_on_deployables")),
+            Map.entry("B6", List.of(
+                    "ModuleBoundaryTest#b6_api_never_depends_on_the_worker",
+                    "ModuleBoundaryTest#b6_worker_never_depends_on_the_api")),
             Map.entry("B8", List.of("ModuleBoundaryTest#b8_no_cycles_between_modules")),
             Map.entry("B10", List.of(
                     "ModuleBoundaryTest#b10_ledger_internal_is_private",
@@ -113,11 +116,6 @@ class RuleCoverageTest {
 
     /** Rules known to be unenforced, with the reason, so a gap is a decision rather than a secret. */
     private static final Map<String, String> DEFERRED_RULES = Map.ofEntries(
-            Map.entry("B6", "apps/api and workers/settlement may not depend on each other. apps/api has "
-                    + "sources now, so one direction has a subject - but the worker has none, so a "
-                    + "dependency in that direction cannot exist to be caught. Written today the rule "
-                    + "would be green while checking nothing, which is the failure this map exists to "
-                    + "make visible rather than to hide"),
             Map.entry("B7", "platform/* may not depend on a deployable. platform/testing is the only "
                     + "platform module with code and it lives in io.reductxn.architecture, so there is "
                     + "no platform package pattern to express this over yet"),

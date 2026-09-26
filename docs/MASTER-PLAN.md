@@ -991,7 +991,7 @@ lives in a document is no longer the situation for either.
 | `RuleCoverageTest` | 3 | That every RULE in the plan *or the specs* is enforced or explicitly deferred, that every claimed enforcement resolves to something that runs, and that no rule is both |
 | `PropertyCoverageTest` | 3 | That every property in the specs is labelled by a test assertion or explicitly deferred, and that no test labels a property no spec defines |
 
-All 24 architecture rules are verified non-vacuous, and that verification is automated rather than
+All 28 architecture rules are verified non-vacuous, and that verification is automated rather than
 something a reviewer has to notice. See the constraint table below.
 
 **Coverage is checked for behaviour as well as structure.** `S1-S5` - quorum, idempotency, partial
