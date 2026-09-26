@@ -89,6 +89,8 @@ abstract class DatabaseTest {
         // The settlement worker's rows, for the one read model that reads them: children before parents, and
         // after the obligations they point at.
         jdbc.execute("DELETE FROM settlement_run_obligations");
+        // A member's answers, which this module now writes: they point at a run, so they go before it.
+        jdbc.execute("DELETE FROM settlement_decisions");
         jdbc.execute("DELETE FROM settlement_runs");
         jdbc.execute("DELETE FROM settlement_cycles");
 
