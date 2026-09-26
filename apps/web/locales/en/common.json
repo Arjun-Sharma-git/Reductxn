@@ -15,7 +15,8 @@
   "groupNav": {
     "label": "This group",
     "obligations": "Commitments",
-    "netting": "Netting preview"
+    "netting": "Netting preview",
+    "settlement": "Plans"
   },
   "openGroup": {
     "title": "Open a group",

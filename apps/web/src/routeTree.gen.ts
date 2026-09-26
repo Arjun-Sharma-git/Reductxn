@@ -13,6 +13,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as GroupsGroupIdRouteRouteImport } from './routes/groups/$groupId/route'
 import { Route as GroupsGroupIdNettingRouteImport } from './routes/groups/$groupId/netting'
 import { Route as GroupsGroupIdObligationsRouteImport } from './routes/groups/$groupId/obligations'
+import { Route as GroupsGroupIdSettlementIndexRouteImport } from './routes/groups/$groupId/settlement/index'
+import { Route as GroupsGroupIdSettlementRunIdRouteImport } from './routes/groups/$groupId/settlement/$runId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -35,18 +37,34 @@ const GroupsGroupIdObligationsRoute =
     path: '/obligations',
     getParentRoute: () => GroupsGroupIdRouteRoute,
   } as any)
+const GroupsGroupIdSettlementIndexRoute =
+  GroupsGroupIdSettlementIndexRouteImport.update({
+    id: '/settlement/',
+    path: '/settlement/',
+    getParentRoute: () => GroupsGroupIdRouteRoute,
+  } as any)
+const GroupsGroupIdSettlementRunIdRoute =
+  GroupsGroupIdSettlementRunIdRouteImport.update({
+    id: '/settlement/$runId',
+    path: '/settlement/$runId',
+    getParentRoute: () => GroupsGroupIdRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
   '/groups/$groupId/obligations': typeof GroupsGroupIdObligationsRoute
+  '/groups/$groupId/settlement/$runId': typeof GroupsGroupIdSettlementRunIdRoute
+  '/groups/$groupId/settlement/': typeof GroupsGroupIdSettlementIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
   '/groups/$groupId/obligations': typeof GroupsGroupIdObligationsRoute
+  '/groups/$groupId/settlement/$runId': typeof GroupsGroupIdSettlementRunIdRoute
+  '/groups/$groupId/settlement': typeof GroupsGroupIdSettlementIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -54,6 +72,8 @@ export interface FileRoutesById {
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
   '/groups/$groupId/obligations': typeof GroupsGroupIdObligationsRoute
+  '/groups/$groupId/settlement/$runId': typeof GroupsGroupIdSettlementRunIdRoute
+  '/groups/$groupId/settlement/': typeof GroupsGroupIdSettlementIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -62,18 +82,24 @@ export interface FileRouteTypes {
     | '/groups/$groupId'
     | '/groups/$groupId/netting'
     | '/groups/$groupId/obligations'
+    | '/groups/$groupId/settlement/$runId'
+    | '/groups/$groupId/settlement/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/groups/$groupId'
     | '/groups/$groupId/netting'
     | '/groups/$groupId/obligations'
+    | '/groups/$groupId/settlement/$runId'
+    | '/groups/$groupId/settlement'
   id:
     | '__root__'
     | '/'
     | '/groups/$groupId'
     | '/groups/$groupId/netting'
     | '/groups/$groupId/obligations'
+    | '/groups/$groupId/settlement/$runId'
+    | '/groups/$groupId/settlement/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -111,17 +137,35 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GroupsGroupIdObligationsRouteImport
       parentRoute: typeof GroupsGroupIdRouteRoute
     }
+    '/groups/$groupId/settlement/': {
+      id: '/groups/$groupId/settlement/'
+      path: '/settlement'
+      fullPath: '/groups/$groupId/settlement/'
+      preLoaderRoute: typeof GroupsGroupIdSettlementIndexRouteImport
+      parentRoute: typeof GroupsGroupIdRouteRoute
+    }
+    '/groups/$groupId/settlement/$runId': {
+      id: '/groups/$groupId/settlement/$runId'
+      path: '/settlement/$runId'
+      fullPath: '/groups/$groupId/settlement/$runId'
+      preLoaderRoute: typeof GroupsGroupIdSettlementRunIdRouteImport
+      parentRoute: typeof GroupsGroupIdRouteRoute
+    }
   }
 }
 
 interface GroupsGroupIdRouteRouteChildren {
   GroupsGroupIdNettingRoute: typeof GroupsGroupIdNettingRoute
   GroupsGroupIdObligationsRoute: typeof GroupsGroupIdObligationsRoute
+  GroupsGroupIdSettlementRunIdRoute: typeof GroupsGroupIdSettlementRunIdRoute
+  GroupsGroupIdSettlementIndexRoute: typeof GroupsGroupIdSettlementIndexRoute
 }
 
 const GroupsGroupIdRouteRouteChildren: GroupsGroupIdRouteRouteChildren = {
   GroupsGroupIdNettingRoute: GroupsGroupIdNettingRoute,
   GroupsGroupIdObligationsRoute: GroupsGroupIdObligationsRoute,
+  GroupsGroupIdSettlementRunIdRoute: GroupsGroupIdSettlementRunIdRoute,
+  GroupsGroupIdSettlementIndexRoute: GroupsGroupIdSettlementIndexRoute,
 }
 
 const GroupsGroupIdRouteRouteWithChildren =

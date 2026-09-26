@@ -255,3 +255,208 @@ export async function stubObligationsApi(
 
   return posted;
 }
+
+// --- Settlement runs -----------------------------------------------------------------------------------
+
+export type RunStub = {
+  id: string;
+  cycleId: string;
+  groupId: string;
+  status: string;
+  computedAt: string;
+  partitions: {
+    currency: string;
+    gross: { amountMinor: number; currency: string };
+    net: { amountMinor: number; currency: string };
+    tax: { amountMinor: number; currency: string };
+    taxSaved: { amountMinor: number; currency: string };
+    transferCount: number;
+  }[];
+  answers: { memberId: string; decision: string; decidedAt: string }[];
+  gates?: {
+    concludedAt: string;
+    status: string;
+    quorum: { met: boolean; counted: number; required: number; debtorsStillToConfirm: number };
+    funding: { satisfied: boolean; outstanding: { amountMinor: number; currency: string }[] };
+  } | null;
+};
+
+export type TransferStub = {
+  railRef: string;
+  fromUserId: string;
+  toUserId: string | null;
+  toAccountType: 'member' | 'fx_clearing';
+  amount: { amountMinor: number; currency: string };
+  status: string;
+  failureReason?: string | null;
+};
+
+const RUN_ID = '77777777-7777-4777-8777-777777777777';
+const CYCLE_ID = '88888888-8888-4888-8888-888888888888';
+
+/** A run waiting for answers, with a currency gap as well, so the gates have something to say. */
+export const WAITING_RUN: RunStub = {
+  id: RUN_ID,
+  cycleId: CYCLE_ID,
+  groupId: '3f7c1c1e-0d2a-4a5e-9a6f-6c1d2f4b8e10',
+  status: 'awaiting_approval',
+  computedAt: '2026-09-26T09:15:00Z',
+  partitions: [
+    {
+      currency: 'INR',
+      gross: { amountMinor: 500_000, currency: 'INR' },
+      net: { amountMinor: 300_000, currency: 'INR' },
+      tax: { amountMinor: 400, currency: 'INR' },
+      taxSaved: { amountMinor: 1_200, currency: 'INR' },
+      transferCount: 2,
+    },
+  ],
+  answers: [],
+  gates: {
+    concludedAt: '2026-09-26T09:20:00Z',
+    status: 'awaiting_approval',
+    quorum: { met: false, counted: 1, required: 3, debtorsStillToConfirm: 2 },
+    funding: { satisfied: false, outstanding: [{ amountMinor: 12_500, currency: 'INR' }] },
+  },
+};
+
+export const RUN_TRANSFERS: TransferStub[] = [
+  {
+    railRef: `run:${RUN_ID}:inr:aa`,
+    fromUserId: MEMBERS[1]!.userId,
+    toUserId: null,
+    toAccountType: 'fx_clearing',
+    amount: { amountMinor: 40_000, currency: 'INR' },
+    status: 'pending',
+  },
+  {
+    railRef: `run:${RUN_ID}:inr:mm`,
+    fromUserId: MEMBERS[0]!.userId,
+    toUserId: MEMBERS[2]!.userId,
+    toAccountType: 'member',
+    amount: { amountMinor: 260_000, currency: 'INR' },
+    status: 'pending',
+  },
+];
+
+/** What the decision endpoint should answer. */
+export type DecisionBehaviour =
+  | { readonly kind: 'accept' }
+  | { readonly kind: 'refuse'; readonly code: string; readonly status: number };
+
+export type SettlementRecorder = {
+  readonly posted: readonly Record<string, unknown>[];
+  /** The answers the endpoint has recorded, so a test can see that one was stored. */
+  readonly answers: readonly { readonly memberId: string; readonly decision: string }[];
+};
+
+/**
+ * The settlement API: the group's runs, one run, its transfers and the decision endpoint.
+ *
+ * One handler for `/v1/runs/*` that dispatches on the path, rather than several overlapping patterns: Playwright
+ * matches routes in reverse registration order, so a "specific one before the generic one" arrangement holds only
+ * until somebody registers a route in the wrong place - and a test that fails because of that is a test about the
+ * stub instead of about the product.
+ *
+ * The recorder is what lets a test look at the requests and at what the endpoint now holds: the answer that was sent,
+ * and (for the refusal case) that nothing was recorded.
+ */
+export async function stubSettlementApi(
+  page: Page,
+  options: {
+    readonly runs?: readonly RunStub[];
+    readonly run?: RunStub;
+    readonly transfers?: readonly TransferStub[];
+    readonly decision?: DecisionBehaviour;
+  } = {},
+): Promise<SettlementRecorder> {
+  const posted: Record<string, unknown>[] = [];
+  const answers: { memberId: string; decision: string }[] = [];
+  const base = options.run ?? WAITING_RUN;
+
+  await page.route('**/v1/currencies', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CURRENCIES) }),
+  );
+
+  await page.route('**/v1/groups/*/members', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MEMBERS) }),
+  );
+
+  await page.route('**/v1/groups/*/runs', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([{ ...base, answers: withDates(answers) }, ...(options.runs ?? [])]),
+    }),
+  );
+
+  await page.route('**/v1/runs/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+
+    if (path.endsWith('/transfers')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(options.transfers ?? RUN_TRANSFERS),
+      });
+
+      return;
+    }
+
+    if (path.endsWith('/decisions')) {
+      const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+
+      posted.push(body);
+
+      const behaviour = options.decision ?? { kind: 'accept' };
+
+      if (behaviour.kind === 'refuse') {
+        await route.fulfill({
+          status: behaviour.status,
+          contentType: 'application/problem+json',
+          body: JSON.stringify({
+            type: `https://reductxn.io/problems/${behaviour.code}`,
+            title: behaviour.code,
+            status: behaviour.status,
+            code: behaviour.code,
+            params: {},
+          }),
+        });
+
+        return;
+      }
+
+      const decision = typeof body['decision'] === 'string' ? body['decision'] : 'approve';
+
+      answers.push({ memberId: String(body['memberId']), decision });
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          runId: base.id,
+          memberId: body['memberId'],
+          decision,
+          recordedAt: '2026-09-26T10:00:00Z',
+        }),
+      });
+
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ...base, answers: withDates(answers) }),
+    });
+  });
+
+  return { posted, answers };
+}
+
+/** Answers as the read model serves them, so the screen's answer table has a row per answer. */
+function withDates(
+  answers: readonly { readonly memberId: string; readonly decision: string }[],
+): { memberId: string; decision: string; decidedAt: string }[] {
+  return answers.map((answer) => ({ ...answer, decidedAt: '2026-09-26T10:00:00Z' }));
+}

@@ -21,8 +21,8 @@ today (the netting preview, ADR 0028); the rest of the plan's route tree arrives
 |---|---|
 | `src/app` | The composition root: the router, the query client, the providers. No business logic and no screens |
 | `src/routes` | TanStack Router file-based routes, and **thin** (RULE F4): validate search parameters, wrap the screen in its locale, render one feature |
-| `src/features/<name>` | One vertical capability. Public surface is `index.ts`; everything else is private (RULE F8). `obligations` owns the list, the filters' UI and the recording form; `netting` owns the preview |
-| `src/entities/<name>` | Domain-shaped client models and their `queryOptions` factories: `currency`, `member`, `obligation`, `netting`, `fx` |
+| `src/features/<name>` | One vertical capability. Public surface is `index.ts`; everything else is private (RULE F8). `obligations` owns the list, the filters' UI and the recording form; `netting` owns the preview; `settlement` owns the group's runs, one run and the answer form |
+| `src/entities/<name>` | Domain-shaped client models and their `queryOptions` factories: `currency`, `member`, `obligation`, `netting`, `fx`, `run` |
 | `src/shared/api` | The generated contract (`schema.d.ts`) and the only `fetch` in the app (RULE F5) |
 | `src/shared/money` | Integer minor units, formatted and parsed for a locale. The P1 boundary in the client |
 | `src/shared/i18n` | Locale resolution, ICU catalogs, the direction token, the review-state rule |
@@ -82,3 +82,10 @@ over-precise input is refused *in the browser* rather than truncated by a server
 `Idempotency-Key` that belongs to the **attempt**, not to the click: the form creates it once and every retry -
 automatic after a `503`, or the "try again" button - reuses it, which is what makes retrying safe rather than a way
 to record something twice. A `422` is never retried, because the answer would be the same.
+
+**An answer to a plan is a different shape of write, and the difference is stated rather than assumed.** Recording a
+member's decision on a settlement run carries **no idempotency key**, because the contract makes it idempotent by rule
+instead: one answer per member, never overwritten, and answering twice is a `409`. It is not retried, because a lost
+response becomes a correct state after one more press (the `409` says the answer is already on the record, and the
+screen stops offering the buttons). And nothing is written optimistically, because what a member is waiting to see is
+the run's *status* - which is the worker's judgement over the answers, not a row this client inserted. See ADR 0030.

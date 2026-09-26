@@ -1,0 +1,94 @@
+{
+  "runs": {
+    "title": "Settlement plans",
+    "lede": "Every run this group has computed, newest first. A run is the plan for one group cycle: who pays whom, and what it costs. Opening one is how a member reads it before saying yes.",
+    "cardTitle": "Runs",
+    "cardDescription": "Each line is one cycle's plan. The amount shown is the net movement in that currency, not a total across currencies.",
+    "caption": "The group's settlement runs",
+    "computedAt": "Computed",
+    "status": "Status",
+    "moves": "Moves",
+    "gates": "Approvals",
+    "open": "Open",
+    "notLookedYet": "Not looked at yet",
+    "quorumSoFar": "{counted} of {required} so far",
+    "empty": "This group has not computed a settlement plan yet. A plan is computed for a closed cycle."
+  },
+  "run": {
+    "title": "Settlement plan",
+    "computedAt": "computed {at}"
+  },
+  "loading": "Reading the run…",
+  "partitions": {
+    "title": "Figures per currency",
+    "description": "Gross is what was owed before netting, net is what moves as a result of it, tax is what the plan pays on the settlement, and the saving is what netting avoided.",
+    "caption": "The plan's figures per currency",
+    "currency": "Currency",
+    "gross": "Gross",
+    "net": "Net",
+    "tax": "Tax",
+    "taxSaved": "Saved by netting",
+    "transfers": "Movements"
+  },
+  "transfers": {
+    "title": "Who pays whom",
+    "description": "Every movement the plan asks for, in the order the rail will be given them.",
+    "caption": "The plan's instructions",
+    "from": "From",
+    "to": "To",
+    "amount": "Amount",
+    "status": "Status",
+    "fxClearing": "The group's currency conversion",
+    "empty": "This plan asks for no movements: everything nets to nothing in every currency."
+  },
+  "transferStatus": {
+    "pending": "Not sent yet",
+    "sent": "Sent",
+    "settled": "Settled",
+    "failed": "Failed"
+  },
+  "answers": {
+    "title": "Answers on the record",
+    "description": "Every answer a member has given, including any that cannot count. Whether an answer counted is the run's judgement, and the plan's status is where that shows.",
+    "caption": "Answers to this run",
+    "member": "Member",
+    "answer": "Answer",
+    "when": "When",
+    "empty": "Nobody has answered this plan yet."
+  },
+  "answer": {
+    "approve": "Approved",
+    "reject": "Refused"
+  },
+  "status": {
+    "pending": "Not started",
+    "computing": "Being computed",
+    "awaiting_approval": "Waiting for answers",
+    "awaiting_fx_funding": "Waiting for currency",
+    "executing": "Being paid",
+    "done": "Settled",
+    "rejected": "Refused",
+    "failed": "Failed",
+    "unknown": "A state this screen does not know"
+  },
+  "gates": {
+    "notYetLooked": "The settlement worker has not looked at this plan yet, so nothing is known about its approvals.",
+    "quorumMet": "{counted} of {required} approvals needed - this plan has them.",
+    "quorumShort": "{counted} of {required} approvals so far, so {missing} short.",
+    "debtorsToConfirm": "{count, plural, one {# member who owes money still has to confirm} other {# members who owe money still have to confirm}}.",
+    "fundingSatisfied": "The group has brought in every currency the plan needs.",
+    "fundingMissing": "The group still has to bring in:",
+    "stale": "This conclusion is about an earlier state of the plan, which has changed since."
+  },
+  "decision": {
+    "title": "Your answer",
+    "description": "An answer is recorded against this plan and the plan's own arithmetic decides what it means. A member has one answer per plan, and it is never overwritten.",
+    "member": "Answering as",
+    "chooseMember": "Choose the member answering",
+    "approve": "Approve this plan",
+    "reject": "Refuse this plan",
+    "recording": "Recording your answer…",
+    "recorded": "Recorded: {decision}. Whether it counts is the plan's own decision, and its status is where that shows.",
+    "alreadyAnswered": "This member has already answered this plan, and an answer is never overwritten. The answer on the record is the one above."
+  }
+}

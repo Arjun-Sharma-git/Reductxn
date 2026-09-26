@@ -9,6 +9,7 @@ import io.reductxn.planning.api.FxClearing;
 import org.jooq.DSLContext;
 import org.jooq.Field;
 import org.jooq.Record;
+import org.jooq.Result;
 import org.jooq.Table;
 import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
@@ -52,6 +53,9 @@ public class JooqSettlementRuns implements SettlementRuns {
     private static final Field<UUID> RUN_CYCLE = DSL.field("cycle_id", UUID.class);
     private static final Field<String> RUN_STATUS = DSL.field("status", String.class);
     private static final Field<OffsetDateTime> RUN_COMPUTED_AT = DSL.field("computed_at", OffsetDateTime.class);
+
+    /** The column the group's page is ordered by; {@code V501} indexes {@code (group_id, created_at DESC)} for it. */
+    private static final Field<OffsetDateTime> RUN_CREATED_AT = DSL.field("created_at", OffsetDateTime.class);
 
     private static final Table<Record> PARTITIONS = DSL.table("settlement_partitions");
     private static final Field<UUID> PART_RUN = DSL.field("run_id", UUID.class);
@@ -131,6 +135,32 @@ public class JooqSettlementRuns implements SettlementRuns {
                 transfers(runId),
                 answers(runId),
                 gates(runId)));
+    }
+
+    @Override
+    public List<RunReport> listByGroup(UUID groupId, int limit) {
+        Objects.requireNonNull(groupId, "groupId");
+
+        // The order and the limit are done by the database, on the index V501 created for exactly this read
+        // (`settlement_runs_by_group`), rather than by reading every run and taking the first few.
+        Result<org.jooq.Record6<UUID, UUID, UUID, String, OffsetDateTime, OffsetDateTime>> rows = dsl
+                .select(RUN_ID, RUN_GROUP, RUN_CYCLE, RUN_STATUS, RUN_COMPUTED_AT, RUN_CREATED_AT)
+                .from(RUNS)
+                .where(RUN_GROUP.eq(groupId))
+                .orderBy(RUN_CREATED_AT.desc(), RUN_ID.desc())
+                .limit(limit)
+                .fetch();
+
+        return rows.map(run -> new RunReport(
+                run.get(RUN_ID),
+                run.get(RUN_GROUP),
+                run.get(RUN_CYCLE),
+                run.get(RUN_STATUS),
+                instantOf(run.get(RUN_COMPUTED_AT)),
+                partitions(run.get(RUN_ID)),
+                transfers(run.get(RUN_ID)),
+                answers(run.get(RUN_ID)),
+                gates(run.get(RUN_ID))));
     }
 
     /**
