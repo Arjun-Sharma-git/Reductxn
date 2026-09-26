@@ -79,6 +79,15 @@ function GroupLayout() {
         >
           {t('common.groupNav.settlement')}
         </Link>
+        <Link
+          className={styles.link}
+          to="/groups/$groupId/tax"
+          params={{ groupId }}
+          search={carryLocale}
+          activeProps={{ 'aria-current': 'page', className: styles.current }}
+        >
+          {t('common.groupNav.tax')}
+        </Link>
       </nav>
 
       <Outlet />

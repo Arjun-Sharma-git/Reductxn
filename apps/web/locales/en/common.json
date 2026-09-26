@@ -18,7 +18,8 @@
     "obligations": "Commitments",
     "balances": "Balances",
     "netting": "Netting preview",
-    "settlement": "Plans"
+    "settlement": "Plans",
+    "tax": "Tax"
   },
   "openGroup": {
     "title": "Open a group",

@@ -121,6 +121,103 @@ export const BALANCES: Balances = [
 /** A group with no open commitments: an empty list rather than an error. */
 export const NO_BALANCES: Balances = [];
 
+// --- Tax -----------------------------------------------------------------------------------------------
+
+export type TaxRule = paths['/tax/rules']['get']['responses']['200']['content']['application/json'][number];
+export type TaxReportLine =
+  paths['/tax/reports']['get']['responses']['200']['content']['application/json'][number];
+
+/**
+ * Two rules of different shapes, in two currencies, one bounded and one open: a screen that rendered only the first
+ * shape or only the first currency would fail rather than pass.
+ */
+export const TAX_RULES: TaxRule[] = [
+  {
+    id: 'aaaa1111-1111-4111-8111-111111111111',
+    jurisdiction: 'IN',
+    currency: 'INR',
+    kind: 'flat',
+    params: { perTransferMinor: 50 },
+    effectiveFrom: '2020-01-01T00:00:00Z',
+    effectiveTo: null,
+    sourceRef: 'FY2020 s.7(3)',
+  },
+  {
+    id: 'bbbb2222-2222-4222-8222-222222222222',
+    jurisdiction: 'IN',
+    currency: 'JPY',
+    kind: 'advalorem',
+    params: { rateBps: 150, minMinor: 0 },
+    effectiveFrom: '2024-04-01T00:00:00Z',
+    effectiveTo: '2030-03-31T00:00:00Z',
+    sourceRef: 'FY2024 s.9(1)',
+  },
+];
+
+/** A report over one plan in each currency, so both exponents are exercised. */
+export const TAX_REPORT: TaxReportLine[] = [
+  {
+    currency: 'INR',
+    grossTax: { amountMinor: 600, currency: 'INR' },
+    netTax: { amountMinor: 50, currency: 'INR' },
+    taxSaved: { amountMinor: 550, currency: 'INR' },
+    runCount: 1,
+  },
+  {
+    currency: 'JPY',
+    grossTax: { amountMinor: 200, currency: 'JPY' },
+    netTax: { amountMinor: 50, currency: 'JPY' },
+    taxSaved: { amountMinor: 150, currency: 'JPY' },
+    runCount: 1,
+  },
+];
+
+/** No plan computed in the period: an empty report rather than an error. */
+export const TAX_REPORT_EMPTY: TaxReportLine[] = [];
+
+export type TaxRecorder = {
+  /** Every report request the screen sent, as the query string the server would have read. */
+  readonly reportRequests: readonly string[];
+};
+
+/**
+ * The tax API: the rules in force, and the group's report.
+ *
+ * The report handler records the query it was asked. The period is the one part of this screen that is a *question*
+ * rather than a rendering, and a test that only read the URL back would not know whether the screen asked the server
+ * the question the URL describes.
+ */
+export async function stubTaxApi(
+  page: Page,
+  options: { readonly rules?: readonly TaxRule[]; readonly report?: readonly TaxReportLine[] } = {},
+): Promise<TaxRecorder> {
+  const reportRequests: string[] = [];
+
+  await page.route('**/v1/currencies', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CURRENCIES) }),
+  );
+
+  await page.route('**/v1/tax/rules', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(options.rules ?? TAX_RULES),
+    }),
+  );
+
+  await page.route('**/v1/tax/reports*', (route) => {
+    reportRequests.push(new URL(route.request().url()).search);
+
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(options.report ?? TAX_REPORT),
+    });
+  });
+
+  return { reportRequests };
+}
+
 // --- Obligations ---------------------------------------------------------------------------------------
 
 export type Member = {
