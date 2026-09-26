@@ -111,6 +111,12 @@ something the system will not do.
   the group, and `settlement_cycles_are_unique_per_group_and_instant` refuses two cycles at one instant - so the
   ordering test's tie has to come from two cycles a second apart with the same run `created_at`. The run's own test
   comment records it, because the next person writing a fixture will reach for the same one-argument helper.
+- **The fresh clone found two things the working tree could not, and both are recorded in MASTER-PLAN's findings.** A test that passed by
+  luck (`UUID.compareTo` predicting PostgreSQL's `uuid` order - signed halves against unsigned bytes) and three
+  browser tests that failed only because a cold `vite preview` is slower than a warm one. Neither was a defect in the
+  product; both were defects in how the product was verified, and the only reason they surfaced is that the work was
+  checked from a clone rather than from the tree it was written in. The suite's assertion ceiling is now fifteen
+  seconds for that reason, and the config says why.
 - **What the read model publishes decides what the client can show.** The gates carry `debtorsStillToConfirm` as a
   count rather than a list of members, so "two members who owe money still have to confirm" is a sentence this screen
   can say and "Asha and Bhavesh still have to confirm" is not. That is the read model's judgement about the run's

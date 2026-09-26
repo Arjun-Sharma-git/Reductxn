@@ -22,6 +22,17 @@ export default defineConfig({
   forbidOnly: !!process.env['CI'],
   retries: process.env['CI'] === undefined ? 0 : 1,
   reporter: process.env['CI'] === undefined ? 'list' : [['github'], ['html', { open: 'never' }]],
+  /*
+   * A fifteen-second ceiling on an assertion, rather than the five-second default.
+   *
+   * This is about a cold start, not about patience. The first run of this suite against a freshly built clone had
+   * three netting-preview tests fail at the default 5s and pass on an immediate re-run: `vite preview` compiles and
+   * serves the bundle on the first request, and a cold machine can take longer to answer that first request than a
+   * warm one - so the timeout was measuring the machine, not the screen. A longer ceiling does not hide a real
+   * failure (a wrong assertion still fails, four seconds later); it removes a source of noise that only appears
+   * where the suite matters most, which is a fresh checkout in a pipeline that does not exist yet.
+   */
+  expect: { timeout: 15_000 },
   use: {
     baseURL: 'http://127.0.0.1:4173',
     trace: 'on-first-retry',
@@ -33,6 +44,14 @@ export default defineConfig({
     },
   ],
   webServer: {
+    /*
+     * Locally this reuses a server that is already listening, and that has a trap in it worth stating: `vite
+     * preview` serves the `dist` directory, so a *failed* build leaves the previous one in place and the suite then
+     * tests the last artefact that built. The suite is run from `pnpm e2e`, always after `pnpm build` (or `pnpm
+     * check`, which builds), so the artefact is current in practice - and this is one of the things a CI pipeline
+     * would remove the possibility of by starting from nothing every time. There is no CI configuration in this
+     * repository yet; MASTER-PLAN records that as a gap.
+     */
     command: 'pnpm build && pnpm exec vite preview --port 4173 --strictPort',
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: process.env['CI'] === undefined,
