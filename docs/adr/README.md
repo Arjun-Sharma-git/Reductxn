@@ -38,3 +38,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0030 | A run has to be findable before it can be answered | accepted |
 | 0031 | The gates run somewhere that is not the machine that wrote the change | accepted |
 | 0032 | A cycle and a run are two acts, and the second one happens without a person | accepted |
+| 0033 | The API opens the cycle; the worker still computes it | accepted |
