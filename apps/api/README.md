@@ -53,19 +53,31 @@ belong to `libs/ledger` (`V301`), `currencies`, `fx_rates` and `fx_quotes` to `l
 `tax_rules` to `libs/netting` (`V201`), read through read models. `platform/persistence` runs every migration
 and owns none.
 
-**One read model crosses the other way.** The preview excludes commitments a settled run has already discharged,
-so it reads `workers/settlement`'s `settlement_run_obligations` and `settlement_runs` - as a projection over its
-tables, never as a dependency on the module (RULE B6, RULE B17). Those migrations are not on this module's
-classpath, so this module's *tests* take them by filesystem path; a deployment needs no such arrangement,
-because whichever deployable starts first applies every migration to the one schema.
+**The boundary crosses both ways now.** The preview reads `workers/settlement`'s tables as a projection, and
+`POST /v1/runs/{runId}/approve` *writes* into one of them: a member's answer goes into `settlement_decisions`,
+because the member's surface is here and the run there, the two deployables never depend on each other (RULE B6)
+and there is no broker in this build. What makes that safe is not care but design - quorum is a pure function over
+the run's own rows (ADR 0016), so an answer from a member the run does not concern counts for nothing whichever
+deployable wrote it. ADR 0020 records the decision, the alternatives and what it defers.
+
+The crossing is pinned by two tests rather than by a shared type, since no type can be shared across RULE B6:
+`ApproveRunApiTest` here, and `RecordedApprovalsTest` in the worker, which writes the same row with the same SQL
+and proves the run's arithmetic judges it. Those migrations are not on this module's classpath, so this module's
+*tests* take them by filesystem path; a deployment needs no such arrangement, because whichever deployable starts
+first applies every migration to the one schema.
 
 ## What is not here yet
 
-Identity, groups, and three of the five controllers the plan names. An obligation's `group_id` has no foreign
-key because `groups` does not exist yet, and a cross-currency obligation cannot be stored because the
-`obligations` table has no quote columns - both are stated in the migrations rather than left to be noticed.
+Identity, groups, and the run *read* endpoints. An obligation's `group_id` has no foreign key because `groups`
+does not exist yet, and a cross-currency obligation cannot be stored because the `obligations` table has no quote
+columns - both are stated in the migrations rather than left to be noticed.
 
-The write path exists now: `POST /v1/obligations` records a commitment and books the entry it produces, in one
+`POST /v1/runs/{runId}/approve` records a member's approval; nothing here can reject one, and nothing here can
+read a run back, so the contract's `GET /runs/{runId}` and `GET /runs/{runId}/transfers` are the next slice and the
+thing that makes approving informed rather than blind. A rejection is not simple symmetry: it ends the run, that
+transition belongs to `workers/settlement`, and it needs a consumer over there (ADR 0020 says which one and why).
+
+The write path exists: `POST /v1/obligations` records a commitment and books the entry it produces, in one
 transaction - one entry for an ordinary commitment, a linked pair through `fx_clearing` for one whose creditor
 is paid in another currency. It has no route for anything else: no void, no list, no settlement.
 
