@@ -1,5 +1,7 @@
 package io.reductxn.settlement.application;
 
+import io.reductxn.booking.api.Bookings;
+import io.reductxn.booking.api.SettledTransfer;
 import io.reductxn.kernel.api.Result;
 import io.reductxn.ledger.api.Currency;
 import io.reductxn.rails.api.PaymentRail;
@@ -8,7 +10,10 @@ import io.reductxn.settlement.port.in.ExecuteRun;
 import io.reductxn.settlement.port.in.PlannedTransfer;
 import io.reductxn.settlement.port.in.RunRefusals;
 import io.reductxn.settlement.port.in.RunStatus;
+import io.reductxn.settlement.port.in.SettlementRun;
 import io.reductxn.settlement.port.in.TransferStatus;
+import io.reductxn.settlement.port.out.ChainHeads;
+import io.reductxn.settlement.port.out.JournalEntries;
 import io.reductxn.settlement.port.out.Runs;
 
 import org.springframework.stereotype.Service;
@@ -16,6 +21,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -53,14 +59,23 @@ public class ExecuteRunService implements ExecuteRun {
 
     private final Runs runs;
     private final PaymentRail rail;
+    private final JournalEntries journalEntries;
+    private final ChainHeads chainHeads;
     private final Clock clock;
     private final TransactionTemplate transactions;
 
     public ExecuteRunService(
-            Runs runs, PaymentRail rail, Clock clock, PlatformTransactionManager transactionManager) {
+            Runs runs,
+            PaymentRail rail,
+            JournalEntries journalEntries,
+            ChainHeads chainHeads,
+            Clock clock,
+            PlatformTransactionManager transactionManager) {
 
         this.runs = Objects.requireNonNull(runs, "runs");
         this.rail = Objects.requireNonNull(rail, "rail");
+        this.journalEntries = Objects.requireNonNull(journalEntries, "journalEntries");
+        this.chainHeads = Objects.requireNonNull(chainHeads, "chainHeads");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.transactions = new TransactionTemplate(
                 Objects.requireNonNull(transactionManager, "transactionManager"));
@@ -98,9 +113,9 @@ public class ExecuteRunService implements ExecuteRun {
             }
 
             if (transfer.status().isAtTheRail()) {
-                askTheRailForIt(transfer);
+                askTheRailForIt(transfer, run.run());
             } else {
-                giveItToTheRail(transfer, runId);
+                giveItToTheRail(transfer, run.run());
             }
         }
 
@@ -162,11 +177,11 @@ public class ExecuteRunService implements ExecuteRun {
      * movement. Had the write been saved for after the call, the same crash would leave no trace that the
      * transfer had ever been sent, and nothing would know to ask the rail about it.
      */
-    private void giveItToTheRail(PlannedTransfer transfer, UUID runId) {
+    private void giveItToTheRail(PlannedTransfer transfer, SettlementRun run) {
         inTransaction(() -> runs.markTransfer(transfer.id(), TransferStatus.AUTHORIZED, null, clock.instant()));
 
         Result<PaymentRail.RailReference> answer = rail.submit(new PaymentRail.TransferInstruction(
-                runId, transfer.railRef(), transfer.fromUserId(), transfer.toUserId(), transfer.amount()));
+                run.id(), transfer.railRef(), transfer.fromUserId(), transfer.toUserId(), transfer.amount()));
 
         if (answer instanceof Result.Failure<PaymentRail.RailReference> failure) {
             // The call did not complete: the rail never took the transfer. It stays `authorized` rather than
@@ -178,10 +193,7 @@ public class ExecuteRunService implements ExecuteRun {
             return;
         }
 
-        PaymentRail.RailStatus status = answer.orElseThrow().status();
-
-        inTransaction(() -> runs.markTransfer(transfer.id(), stateOf(status.state()), status.detail(),
-                clock.instant()));
+        record(transfer, run, answer.orElseThrow().status());
     }
 
     /**
@@ -192,7 +204,7 @@ public class ExecuteRunService implements ExecuteRun {
      * the only thing that knows. A rail that cannot be reached leaves the transfer where it is: silence is not a
      * failure state, and the sweep in section 4.4 is what will decide when patience runs out.
      */
-    private void askTheRailForIt(PlannedTransfer transfer) {
+    private void askTheRailForIt(PlannedTransfer transfer, SettlementRun run) {
         Result<PaymentRail.RailStatus> answer = rail.status(transfer.railRef());
 
         if (answer instanceof Result.Failure<PaymentRail.RailStatus> failure) {
@@ -202,10 +214,37 @@ public class ExecuteRunService implements ExecuteRun {
             return;
         }
 
-        PaymentRail.RailStatus status = answer.orElseThrow();
+        record(transfer, run, answer.orElseThrow());
+    }
 
-        inTransaction(() -> runs.markTransfer(transfer.id(), stateOf(status.state()), status.detail(),
-                clock.instant()));
+    /**
+     * Writes what the rail answered, and - when the answer is a confirmation - the entry that records it.
+     *
+     * <p><strong>The status and the entry commit together, and that is the reason this method exists.</strong>
+     * A confirmation is the one moment at which a transfer's state and the ledger have to agree: a run whose
+     * transfer reads {@code confirmed} with no entry behind it would report money moved that the ledger never
+     * saw, and an entry with a transfer still reading {@code submitted} would be a movement that no retry
+     * would ever repeat or reconcile. Two writes, one transaction, one instant.
+     *
+     * <p>The chain head is read inside that transaction rather than before it, because the lock that makes the
+     * read safe is held until the transaction ends ({@link io.reductxn.settlement.port.out.ChainHeads}). This
+     * is also why the instant is taken once and used for both the entry and the row: the movement happened at
+     * one moment, and the ledger's copy of it should not be a microsecond later than the run's.
+     */
+    private void record(PlannedTransfer transfer, SettlementRun run, PaymentRail.RailStatus answer) {
+        TransferStatus status = stateOf(answer.state());
+        Instant now = clock.instant();
+
+        inTransaction(() -> {
+            if (status == TransferStatus.CONFIRMED) {
+                journalEntries.append(Bookings.settlement(
+                        chainHeads.forGroup(run.groupId()),
+                        new SettledTransfer(transfer.id(), run.groupId(), transfer.fromUserId(),
+                                transfer.toUserId(), transfer.amount(), now, transfer.railRef())));
+            }
+
+            runs.markTransfer(transfer.id(), status, answer.detail(), now);
+        });
     }
 
     /**

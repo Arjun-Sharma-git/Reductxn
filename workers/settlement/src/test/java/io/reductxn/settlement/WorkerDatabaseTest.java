@@ -1,10 +1,15 @@
 package io.reductxn.settlement;
 
+import io.reductxn.fx.api.FxQuote;
+import io.reductxn.fx.api.FxRate;
 import io.reductxn.kernel.api.Result;
+import io.reductxn.ledger.api.Currency;
+import io.reductxn.ledger.api.Money;
 import io.reductxn.settlement.port.in.ComputeRun;
 import io.reductxn.settlement.port.in.ComputedRun;
 import io.reductxn.settlement.port.in.DecideOnRun;
 import io.reductxn.settlement.port.in.ExecuteRun;
+import io.reductxn.settlement.port.in.FundingRequest;
 import io.reductxn.settlement.port.in.RecordFxFunding;
 import io.reductxn.settlement.port.in.RunDecision;
 import io.reductxn.settlement.port.in.RunRequest;
@@ -18,6 +23,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -48,6 +54,15 @@ abstract class WorkerDatabaseTest {
 
     /** The cycle's cut-off. Fixed, so nothing here depends on the clock. */
     protected static final Instant AS_OF = Instant.parse("2026-09-30T23:59:59Z");
+
+    /** The instants a locked quote carries, and the instant an obligation is recorded at. */
+    protected static final Instant RATE_QUOTED_AT = Instant.parse("2026-09-24T10:00:00Z");
+    protected static final Instant RATE_EXPIRES_AT = Instant.parse("2026-09-24T10:01:00Z");
+    protected static final Instant RATE_LOCKED_AT = Instant.parse("2026-09-24T10:00:30Z");
+    protected static final Instant OBLIGATION_RECORDED_AT = Instant.parse("2026-09-20T10:00:00Z");
+
+    protected static final Currency INR = Currency.of("INR", 2);
+    protected static final Currency JPY = Currency.of("JPY", 0);
 
     protected static final UUID GROUP = UUID.fromString("11111111-1111-4111-8111-111111111111");
     protected static final UUID ALICE = UUID.fromString("22222222-2222-4222-8222-222222222222");
@@ -112,10 +127,16 @@ abstract class WorkerDatabaseTest {
         jdbc.execute("DELETE FROM settlement_transfers");
         jdbc.execute("DELETE FROM net_positions");
         jdbc.execute("DELETE FROM settlement_partitions");
+        jdbc.execute("DELETE FROM settlement_run_obligations");
         jdbc.execute("DELETE FROM settlement_decisions");
         jdbc.execute("DELETE FROM settlement_fx_fundings");
         jdbc.execute("DELETE FROM settlement_runs");
         jdbc.execute("DELETE FROM settlement_cycles");
+
+        // The ledger, which this module now writes: a settlement entry and its postings. Emptied like every
+        // other table, so a test that counts entries is counting its own.
+        jdbc.execute("DELETE FROM postings");
+        jdbc.execute("DELETE FROM journal_entries");
 
         jdbc.execute("DELETE FROM obligations");
         jdbc.execute("DELETE FROM fx_quotes");
@@ -178,32 +199,55 @@ abstract class WorkerDatabaseTest {
      * transaction, quote first - and a fixture that could write an obligation without its quote would let a test
      * set up a state the record path cannot produce.
      *
+     * <p><strong>The quote is built in Java and inserted from its own fields, and it is returned.</strong> It
+     * used to be written as literal SQL with the converted amount and residual typed into the statement, which
+     * made the fixture a second implementation of the conversion - one that could disagree with {@code libs/fx}
+     * without anything noticing. Building it through {@code FxQuote.lock} means the fixture writes what the
+     * library computed, and returning it lets a test that needs the ledger side book the same pair
+     * ({@code Bookings.crossCurrency} takes the quote).
+     *
      * <p>The rate is ADR 0013's, the other way round: 1 INR is 1.78878 JPY, so INR 125.00 is 223.5975 JPY and
-     * converts to 224. The residual is stored as the fraction it is: -0.4025 of a yen, negative because rounding
-     * rounded up.
+     * converts to 224, with the residual stored as the fraction it is: -0.4025 of a yen, negative because
+     * rounding rounded up.
      */
-    protected UUID crossCurrencyObligation(UUID debtor, UUID creditor, long baseMinor, long convertedMinor) {
+    protected FxQuote crossCurrencyObligation(UUID debtor, UUID creditor, long baseMinor, long convertedMinor) {
         UUID obligationId = UUID.randomUUID();
-        UUID quoteId = UUID.randomUUID();
+
+        FxRate rate = FxRate.ofMid(INR, JPY, 178_878L, 5, RATE_QUOTED_AT, RATE_EXPIRES_AT, "test fixture");
+        FxQuote quote = FxQuote.lock(UUID.randomUUID(), Money.of(baseMinor, INR), rate, RATE_LOCKED_AT, false);
+
+        if (!quote.convertedAmount().equals(Money.of(convertedMinor, JPY))) {
+            // The fixture takes the converted amount as an argument because the tests assert it, so a
+            // disagreement between the argument and what libs/fx computes has to be visible here rather than
+            // producing an obligation whose two stored halves contradict each other.
+            throw new IllegalArgumentException(
+                    "the fixture was told " + convertedMinor + " JPY but the rate converts " + baseMinor
+                            + " INR to " + quote.convertedAmount() + ". One of the two is wrong, and both are stored");
+        }
 
         jdbc.update("""
                 INSERT INTO fx_quotes (id, base_code, base_exponent, base_amount_minor, quote_code,
                                        quote_exponent, converted_amount_minor, residual_scaled, residual_scale,
                                        rate_scaled, rate_scale, mid_rate_scaled, spread_bps, rate_source,
                                        rate_quoted_at, rate_expires_at, locked_at, rail_performed_fx)
-                VALUES (?, 'INR', 2, ?, 'JPY', 0, ?, -4025, 4, 178878, 5, 178878, 0, 'test fixture',
-                        TIMESTAMPTZ '2026-09-24 10:00:00+00', TIMESTAMPTZ '2026-09-24 10:01:00+00',
-                        TIMESTAMPTZ '2026-09-24 10:00:30+00', false)
-                """, quoteId, baseMinor, convertedMinor);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, quote.id(), quote.baseAmount().currency().code(),
+                quote.baseAmount().currency().minorUnitExponent(), quote.baseAmount().amountMinor(),
+                quote.convertedAmount().currency().code(), quote.convertedAmount().currency().minorUnitExponent(),
+                quote.convertedAmount().amountMinor(), quote.residualScaled(), quote.residualScale(),
+                quote.rate().rateScaled(), quote.rate().rateScale(), quote.rate().midRateScaled(),
+                quote.rate().spreadBps(), quote.rate().source(),
+                RATE_QUOTED_AT.atOffset(ZoneOffset.UTC), RATE_EXPIRES_AT.atOffset(ZoneOffset.UTC),
+                RATE_LOCKED_AT.atOffset(ZoneOffset.UTC), quote.railPerformedFx());
 
         jdbc.update("""
                 INSERT INTO obligations (id, group_id, debtor_id, creditor_id, amount_minor, currency_code,
                                          currency_exponent, memo, idempotency_key, quote_id, incurred_at,
                                          voided_at)
                 VALUES (?, ?, ?, ?, ?, 'INR', 2, NULL, ?, ?, TIMESTAMPTZ '2026-09-20 10:00:00+00', NULL)
-                """, obligationId, GROUP, debtor, creditor, baseMinor, "key-" + obligationId, quoteId);
+                """, obligationId, GROUP, debtor, creditor, baseMinor, "key-" + obligationId, quote.id());
 
-        return obligationId;
+        return quote;
     }
 
     /** How many rows a table holds, for the tests that assert nothing was written. */
@@ -219,6 +263,23 @@ abstract class WorkerDatabaseTest {
     /** One member's answer, insisting that it was accepted. */
     protected ComputedRun decided(UUID runId, UUID memberId, RunDecision.Decision decision) {
         return ok(decideOnRun.decide(new RunDecision(runId, memberId, decision)));
+    }
+
+    /** Every member of the run approves it, which is more than S1 needs and never less. */
+    protected void approveEveryone(ComputedRun run) {
+        for (UUID member : run.quorum().members()) {
+            decided(run.run().id(), member, RunDecision.Decision.APPROVE);
+        }
+    }
+
+    /** Every currency the run needs is funded, in one arrival each. */
+    protected void fundEveryRequirement(ComputedRun run) {
+        int index = 0;
+
+        for (Money requirement : run.funding().required()) {
+            ok(recordFxFunding.fund(new FundingRequest(
+                    run.run().id(), requirement.currency(), requirement, "funding-" + (index++))));
+        }
     }
 
     /** The value of a call that had to succeed. */

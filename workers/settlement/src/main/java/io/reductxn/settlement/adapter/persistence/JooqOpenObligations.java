@@ -51,19 +51,38 @@ import java.util.UUID;
 @Component
 public class JooqOpenObligations implements OpenObligations {
 
-    private static final Table<Record> OBLIGATIONS = DSL.table("obligations");
+    // The obligations table is aliased, and its columns are qualified, because this query now carries a
+    // correlated subquery over two more of this module's tables - and an unqualified `id` inside it would
+    // resolve against the wrong table rather than fail loudly. JooqChainHeads holds the long version of that
+    // argument; the short one is that jOOQ's `DSL.field(String, Class)` returns null on a table built by
+    // `DSL.table(String)`, so a qualifier has to be written out.
+    private static final Table<Record> OBLIGATIONS = DSL.table("obligations").as("obligation");
     private static final Table<Record> FX_QUOTES = DSL.table("fx_quotes");
 
-    private static final Field<UUID> ID = DSL.field("id", UUID.class);
-    private static final Field<UUID> GROUP_ID = DSL.field("group_id", UUID.class);
-    private static final Field<UUID> DEBTOR_ID = DSL.field("debtor_id", UUID.class);
-    private static final Field<UUID> CREDITOR_ID = DSL.field("creditor_id", UUID.class);
-    private static final Field<Long> AMOUNT_MINOR = DSL.field("amount_minor", Long.class);
-    private static final Field<String> CURRENCY_CODE = DSL.field("currency_code", String.class);
-    private static final Field<Short> CURRENCY_EXPONENT = DSL.field("currency_exponent", Short.class);
-    private static final Field<UUID> QUOTE_ID = DSL.field("quote_id", UUID.class);
-    private static final Field<OffsetDateTime> INCURRED_AT = DSL.field("incurred_at", OffsetDateTime.class);
-    private static final Field<OffsetDateTime> VOIDED_AT = DSL.field("voided_at", OffsetDateTime.class);
+    private static final Field<UUID> ID = DSL.field(DSL.name("obligation", "id"), UUID.class);
+    private static final Field<UUID> GROUP_ID = DSL.field(DSL.name("obligation", "group_id"), UUID.class);
+    private static final Field<UUID> DEBTOR_ID = DSL.field(DSL.name("obligation", "debtor_id"), UUID.class);
+    private static final Field<UUID> CREDITOR_ID = DSL.field(DSL.name("obligation", "creditor_id"), UUID.class);
+    private static final Field<Long> AMOUNT_MINOR = DSL.field(DSL.name("obligation", "amount_minor"), Long.class);
+    private static final Field<String> CURRENCY_CODE =
+            DSL.field(DSL.name("obligation", "currency_code"), String.class);
+    private static final Field<Short> CURRENCY_EXPONENT =
+            DSL.field(DSL.name("obligation", "currency_exponent"), Short.class);
+    private static final Field<UUID> QUOTE_ID = DSL.field(DSL.name("obligation", "quote_id"), UUID.class);
+    private static final Field<OffsetDateTime> INCURRED_AT =
+            DSL.field(DSL.name("obligation", "incurred_at"), OffsetDateTime.class);
+    private static final Field<OffsetDateTime> VOIDED_AT =
+            DSL.field(DSL.name("obligation", "voided_at"), OffsetDateTime.class);
+
+    /** The run's link table and the runs themselves, for the "already settled" exclusion. */
+    private static final Table<Record> SETTLED = DSL.table("settlement_run_obligations").as("settled");
+    private static final Field<UUID> SETTLED_RUN = DSL.field(DSL.name("settled", "run_id"), UUID.class);
+    private static final Field<UUID> SETTLED_OBLIGATION =
+            DSL.field(DSL.name("settled", "obligation_id"), UUID.class);
+
+    private static final Table<Record> RUNS = DSL.table("settlement_runs").as("settled_run");
+    private static final Field<UUID> RUN_ID = DSL.field(DSL.name("settled_run", "id"), UUID.class);
+    private static final Field<String> RUN_STATUS = DSL.field(DSL.name("settled_run", "status"), String.class);
 
     private static final Field<UUID> Q_ID = DSL.field("id", UUID.class);
     private static final Field<String> Q_BASE_CODE = DSL.field("base_code", String.class);
@@ -93,7 +112,7 @@ public class JooqOpenObligations implements OpenObligations {
     }
 
     @Override
-    public List<CycleObligation> openFor(UUID groupId, Instant asOf) {
+    public List<OpenCommitment> openFor(UUID groupId, Instant asOf) {
         Objects.requireNonNull(groupId, "groupId");
         Objects.requireNonNull(asOf, "asOf");
 
@@ -105,6 +124,20 @@ public class JooqOpenObligations implements OpenObligations {
                 .where(GROUP_ID.eq(groupId))
                 .and(INCURRED_AT.le(asOfUtc))
                 .and(VOIDED_AT.isNull().or(VOIDED_AT.gt(asOfUtc)))
+                // What a settled run has already discharged is not open any more. Without this, a later cycle
+                // would net the same commitments again and the group would move money twice for one promise -
+                // which is the whole reason `settlement_run_obligations` exists.
+                //
+                // "Settled" is the run's status rather than a column on the obligation: a run that is `failed`
+                // moved some of the group's money and settled nothing (RULE S3, in the spec's own words), so the
+                // status is the fact and a flag copied onto the obligation would be a second copy of it. The
+                // link is a table rather than a derivation from instants because `incurred_at` is client-supplied
+                // and may be backdated - V504 sets that argument out.
+                .andNotExists(dsl.selectOne()
+                        .from(SETTLED)
+                        .join(RUNS).on(RUN_ID.eq(SETTLED_RUN))
+                        .where(SETTLED_OBLIGATION.eq(ID))
+                        .and(RUN_STATUS.eq("done")))
                 .orderBy(INCURRED_AT.asc(), ID.asc())
                 .fetch());
 
@@ -121,12 +154,14 @@ public class JooqOpenObligations implements OpenObligations {
         // cycle N+1 - the same reasoning, and the same two queries, as the API's read model.
         Map<UUID, FxQuote> quotes = quotesById(quoteIds);
 
-        List<CycleObligation> obligations = new ArrayList<>(rows.size());
+        List<OpenCommitment> cycle = new ArrayList<>(rows.size());
         for (Record row : rows) {
-            obligations.add(toObligation(row, quotes));
+            // The identity travels with the commitment: a run records which obligations it settled, and an
+            // obligation whose id was dropped on the way in cannot be referred to on the way out.
+            cycle.add(new OpenCommitment(row.get(ID), toObligation(row, quotes)));
         }
 
-        return List.copyOf(obligations);
+        return List.copyOf(cycle);
     }
 
     /**
