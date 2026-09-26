@@ -104,4 +104,32 @@ leave the group short. Mitigations, in order of preference:
 - How a group funds an external FX requirement operationally, and who is permitted to do it.
 - Whether `awaiting_fx_funding` should expire and re-compute, since rates move while a group waits.
 - Whether per-currency partitions may be executed independently once approved, which would let a
+## 8. Implementation status
+
+**Implemented in `workers/settlement`, tested against a container (5 tests):** opening a run for a
+`(group, as-of)` pair, computing the plan through `libs/planning`, and recording it as rows - one partition per
+currency, one net position per participant per currency, one transfer per movement with its RULE S2 rail
+reference. The run's status is decided in the use case, not the adapter: `awaiting_approval`, or
+`awaiting_fx_funding` when any currency's `fx_clearing` position is non-zero (RULE S4).
+
+The tests verify the *stored* plan rather than the call: per-currency zero-sum read back from `net_positions`
+(N1), every participant zeroed by applying the plan's own transfers (N2), the clearing account's residual, and
+that a retry returns the same run and writes no second plan.
+
+**Not implemented, and each for a stated reason:**
+
+| Missing | Why it is not here |
+|---|---|
+| Quorum and approval (RULE S1) | Needs member confirmations, which are a group-membership concern owned by `apps/api`; the run's table holds the status it would move |
+| Execution, and with it the funding gate's other side (RULE S4) | Nothing executes, so no run can be *stopped* from executing, and "funded" has no way to become true. The blocking state is real; the gate needs something to block |
+| Rail submission and partial application (RULE S2, S3) | Needs `libs/rails` adapters. Until then every transfer row is `pending`, and `failed (partial)` is unreachable vocabulary rather than a state anything can reach |
+| Reconciliation sweep (section 4.4) | Needs a submitted transfer to reconcile against, which needs a rail |
+| Cycle frequency and closing (section 7) | A cycle is keyed by `(group, as-of)` today: an operator or a scheduler chooses the instant. Whether cycles close on a schedule, per group, or manually is an open question in section 7, and the current shape does not foreclose any of the three |
+| Per-currency execution (section 7) | Would let a funded currency settle while another waits. Tempting for latency and risky for consistency, and the question is open |
+
+**Deliberately not this worker's:** the plan itself (RULE B21, `libs/planning`), the entries a run books when it
+executes (RULE B22, `libs/booking`), and anything a client reads. The worker has no public surface, so a run's
+report reaches a group through `apps/api`'s read model over these tables - which is RULE B17's arrangement and
+the reason the API and this module never depend on each other (RULE B6).
+
   funded currency settle while another waits. Tempting for latency, and risky for consistency.
