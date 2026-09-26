@@ -98,10 +98,10 @@ class ContractCoverageTest {
     /**
      * The operations the contract promises, the controllers do not serve, and somebody owns.
      *
-     * <p>These are the fourteen left when ADR 0040 served the two tax reads - the last screen of section 6's route
-     * tree besides the group's invites. Each entry names the screen, slice or decision that would close it: members,
-     * cycles, runs, decisions, transfers, netting, obligations, currencies, rates, balances and now tax have all left
-     * this list, and the three reads the last-but-one audit found left it within two slices of being found.
+     * <p>These are the twelve left when ADR 0041 served the invite flow - which closes the route tree's screens. Each
+     * entry names the screen, slice or decision that would close it: members, cycles, runs, decisions, transfers,
+     * netting, obligations, currencies, rates, balances, tax and now the invites have all left this list, and the three
+     * reads the last-but-one audit found left it within two slices of being found.
      *
      * <p>The {@code POST /fx/quotes} entry is not a screen. It is recorded as a candidate for removal, and it is in
      * this map for the same reason the others are: an operation with no handler and no owner is the state that
@@ -133,12 +133,6 @@ class ContractCoverageTest {
                     "removal candidate rather than a screen: the recording path locks its own quote and the "
                             + "obligation response carries it, so nothing calls this. ADR 0033 removed three "
                             + "operations for the same reason - this one should be decided, not owned"),
-            Map.entry("POST /groups/{groupId}/invites",
-                    "invites - asking somebody to join. The table and the acceptance rules are the slice's real work; "
-                            + "this operation is the way in"),
-            Map.entry("POST /invites/{code}/accept",
-                    "invites - the other half, and the one with a decision in it: what accepting a code does to "
-                            + "somebody who already has a membership"),
             Map.entry("POST /obligations/{obligationId}/void",
                     "void - recording that an obligation should never have been written. The plan lists it beside "
                             + "execute because both are transitions rather than new rows"),

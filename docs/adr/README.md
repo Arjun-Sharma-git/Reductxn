@@ -46,3 +46,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0038 | Every promise is either served or owned | accepted |
 | 0039 | A balance is the plan's positions, as of now | accepted |
 | 0040 | A tax report is about plans, not about money that moved | accepted |
+| 0041 | An invitation is spent by joining somebody, not by asking | accepted |
