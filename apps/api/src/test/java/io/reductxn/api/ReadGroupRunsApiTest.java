@@ -95,17 +95,21 @@ class ReadGroupRunsApiTest extends DatabaseTest {
         // cycles of one group at one instant (`settlement_cycles_are_unique_per_group_and_instant`), so a tie on the
         // run's own created_at is reachable only across cycles. Which is exactly the case a page has to survive: a
         // worker that computed two cycles in the same second, or two rows written by one batch.
-        UUID first = run(GROUP, "awaiting_approval", AS_OF, AS_OF);
-        UUID second = run(GROUP, "awaiting_approval", AS_OF.plusSeconds(1), AS_OF);
+        //
+        // The ids are given rather than random, and that is a correction this test needed. The first version drew two
+        // random UUIDs and predicted the page's order with `UUID.compareTo` - but Java's comparison is *signed* over
+        // the two halves while PostgreSQL's `uuid` comparison is unsigned byte order, so the prediction was right
+        // about half the time and the test passed or failed by luck. It failed on the first cold clone and nowhere
+        // else. Small ids compare the same way under both rules, so the expectation is now a fact rather than a
+        // guess - and what the test is about is the tie-break existing at all, not which of two random ids is
+        // greater.
+        UUID first = run(GROUP, "awaiting_approval", AS_OF, AS_OF, new UUID(0L, 101L));
+        UUID second = run(GROUP, "awaiting_approval", AS_OF.plusSeconds(1), AS_OF, new UUID(0L, 102L));
 
-        // A page whose order depended on which row the database returned first would show a member a different list
-        // on every read.
-        String lowest = first.compareTo(second) < 0 ? first.toString() : second.toString();
-        String highest = first.compareTo(second) < 0 ? second.toString() : first.toString();
-
+        // `id DESC`, as the database orders it: the higher id first.
         mvc.perform(get("/v1/groups/{groupId}/runs", GROUP))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[*].id", contains(highest, lowest)));
+                .andExpect(jsonPath("$[*].id", contains(second.toString(), first.toString())));
     }
 
     @Test
@@ -158,8 +162,11 @@ class ReadGroupRunsApiTest extends DatabaseTest {
      * produce the tie the ordering test needs, and could not tell a correct order from an arbitrary one.
      */
     private UUID run(UUID groupId, String status, Instant cycleAsOf, Instant runCreatedAt) {
+        return run(groupId, status, cycleAsOf, runCreatedAt, UUID.randomUUID());
+    }
+
+    private UUID run(UUID groupId, String status, Instant cycleAsOf, Instant runCreatedAt, UUID runId) {
         UUID cycleId = UUID.randomUUID();
-        UUID runId = UUID.randomUUID();
         OffsetDateTime cycleAt = cycleAsOf.atOffset(ZoneOffset.UTC);
         OffsetDateTime createdAt = runCreatedAt.atOffset(ZoneOffset.UTC);
 
