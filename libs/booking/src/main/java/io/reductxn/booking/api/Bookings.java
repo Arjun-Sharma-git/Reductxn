@@ -45,6 +45,7 @@ public final class Bookings {
 
     /** The role suffixes entry ids are derived from. Distinct, so one commitment's two entries differ. */
     private static final String SINGLE_CURRENCY_ROLE = "obligation";
+    private static final String SETTLEMENT_ROLE = "settlement";
     private static final String BASE_ROLE = "base";
     private static final String QUOTE_ROLE = "quote";
     private static final String LINK_ROLE = "fx-link";
@@ -87,6 +88,55 @@ public final class Bookings {
                         new Posting(obligation.debtorId(), Direction.CREDIT, obligation.owed()),
                         new Posting(obligation.creditorId(), Direction.DEBIT, obligation.owed())),
                 chainHeads.hashFor(obligation.owed().currency()));
+    }
+
+    /**
+     * Books a movement a run has made: one entry, payer to payee, no conversion and no link.
+     *
+     * <p><strong>It is the mirror of {@link #singleCurrency}, and that is the whole point.</strong> A
+     * commitment credits the debtor and debits the creditor - the creditor holds a claim, which is an asset.
+     * Discharging it does the opposite: the payer is debited and the payee is credited, so applying a run's
+     * transfers to the postings its obligations produced leaves every position flat. That is not a
+     * coincidence of the two methods: a run's transfers are computed to zero every participant's position
+     * (N2), and they zero the ledger's positions for the same reason.
+     *
+     * <p><strong>One entry per transfer, and the entry's id is derived from the transfer.</strong> A
+     * settlement is not one big entry for a run: each transfer is an independent movement with its own rail
+     * reference, and a run that partially fails has moved some of them - so the entries that exist are
+     * exactly the movements that happened, and nothing has to be undone when one of them does not (RULE S3,
+     * which is why "no silent rollback" is expressible at all).
+     *
+     * <p>{@code railPerformedFx} is false, and here that is a statement rather than a default: this entry
+     * records a transfer the plan produced, and the conversion that produced a cross-currency plan's amounts
+     * happened when the quote was locked, not when the money moved. The rail moving currency on a group's
+     * behalf is a different fact with its own entry.
+     *
+     * @param chainHeads the head of the chain this entry appends to, for the transfer's currency
+     * @param transfer   the movement: parties, amount, when it was confirmed, and the rail's reference
+     */
+    public static JournalEntry settlement(ChainHead chainHeads, SettledTransfer transfer) {
+        Objects.requireNonNull(chainHeads, "chainHeads");
+        Objects.requireNonNull(transfer, "transfer");
+
+        requirePostable(transfer.transferId(), transfer.amount());
+
+        return new JournalEntry(
+                entryId(transfer.transferId(), SETTLEMENT_ROLE),
+                transfer.groupId(),
+                transfer.amount().currency(),
+                transfer.occurredAt(),
+                EntryKind.SETTLEMENT,
+                // No member caused this entry: a rail confirmed it. `createdBy` is for the person who asked
+                // for something, and the run that asked is not a member.
+                null,
+                transfer.railReference(),
+                null,
+                null,
+                false,
+                List.of(
+                        new Posting(transfer.fromUserId(), Direction.DEBIT, transfer.amount()),
+                        new Posting(transfer.toUserId(), Direction.CREDIT, transfer.amount())),
+                chainHeads.hashFor(transfer.amount().currency()));
     }
 
     /**

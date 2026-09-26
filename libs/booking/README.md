@@ -34,7 +34,8 @@ Everything callers may touch lives in `io.reductxn.booking.api` (RULE B10).
 |---|---|
 | `Commitment` | A commitment's provenance: id, group, instant, idempotency key, author |
 | `ChainHead` | Port: where a chain ends, asked per currency. The caller serialises and reads it |
-| `Bookings` | The operation: `singleCurrency` books one entry, `crossCurrency` books a linked pair |
+| `Bookings` | The operation: `singleCurrency` books one entry, `crossCurrency` books a linked pair, `settlement` books a movement a run has made |
+| `SettledTransfer` | A movement a settlement run has confirmed: parties, amount, when, and the rail's reference |
 | `Booking` | A cross-currency result: both entries, the link, and the residual nothing can post |
 
 ## The three things worth knowing before changing anything here
@@ -42,7 +43,9 @@ Everything callers may touch lives in `io.reductxn.booking.api` (RULE B10).
 1. **The debtor is credited and the creditor is debited.** A debit is positive, and a position's meaning
    depends on the account's type, so the question is which side holds a claim. The creditor does, and a
    claim is an asset. `Balances.netDebitOf` on the debtor therefore returns a negative figure, which reads
-   correctly as "this member owes".
+   correctly as "this member owes". **A settlement is the mirror**: the payer is debited and the payee is
+   credited, so a commitment plus its settlement leaves every position flat - which is what makes a settled
+   cycle's balances readable at all.
 2. **Entry ids are derived from the commitment, not random.** A re-booked commitment produces the same ids
    and the same content, so it collides on the primary key instead of appending a second entry for a
    commitment nobody made twice. The ledger is append-only (L3) and cannot take an entry back.
@@ -72,6 +75,7 @@ by the rule even though `libs/planning` re-exports it.
 
 L9 is asserted with `FxLinkage` - the verifier that will run against the stored entries - rather than by
 comparing link ids, so the test cannot agree with a broken verifier. L7's accounting half is asserted with
-`Balances`, for the same reason.
+`Balances`, for the same reason, and so is the settlement's: 300 generated amounts confirm that a commitment
+and its settlement leave both parties flat, which is N2 measured on the ledger rather than on the plan.
 
 **Spec:** `docs/specs/booking.md`. **Owner:** ledger reviewer.

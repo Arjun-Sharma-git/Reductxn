@@ -4,16 +4,19 @@ import io.reductxn.booking.api.Booking;
 import io.reductxn.booking.api.Bookings;
 import io.reductxn.booking.api.ChainHead;
 import io.reductxn.booking.api.Commitment;
+import io.reductxn.booking.api.SettledTransfer;
 import io.reductxn.fx.api.AmountTooSmallToConvertException;
 import io.reductxn.fx.api.FxQuote;
 import io.reductxn.fx.api.FxRate;
 import io.reductxn.ledger.api.Balances;
 import io.reductxn.ledger.api.Currency;
 import io.reductxn.ledger.api.FxLinkage;
+import io.reductxn.ledger.api.JournalEntry;
 import io.reductxn.ledger.api.Money;
 import io.reductxn.ledger.api.Posting;
 import io.reductxn.planning.api.CrossCurrencyObligation;
 import io.reductxn.planning.api.FxClearing;
+import io.reductxn.planning.api.SingleCurrencyObligation;
 
 import net.jqwik.api.Arbitraries;
 import net.jqwik.api.Arbitrary;
@@ -23,6 +26,7 @@ import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -47,6 +51,8 @@ class BookingsPropertyTest {
     private static final UUID GROUP = new UUID(0L, 1L);
     private static final UUID ALICE = new UUID(0L, 10L);
     private static final UUID BORIS = new UUID(0L, 11L);
+    private static final UUID OBLIGATION = new UUID(0L, 2L);
+    private static final UUID TRANSFER = new UUID(0L, 3L);
 
     private static final Instant MADE_AT = Instant.parse("2026-09-20T10:00:00Z");
     private static final Instant LOCKED_AT = Instant.parse("2026-09-20T09:59:00Z");
@@ -148,5 +154,54 @@ class BookingsPropertyTest {
         }
 
         return total;
+    }
+
+    /**
+     * A commitment and its settlement leave both parties flat, for any amount.
+     *
+     * <p>This is N2 measured on the ledger rather than on the plan's own rows: the plan says which transfers
+     * zero every position, and this says that booking those transfers does it for real. The two together are
+     * what makes a settled cycle's balances readable - a group whose member still shows the debt after the
+     * money moved is the failure this property rules out.
+     *
+     * <p>Generated over amounts rather than asserted for one, because the interesting cases are the edges:
+     * one minor unit, a large amount, and a currency with no minor unit at all. The currencies are chosen to
+     * include one of each exponent, since a posting's amount is in the currency's own units.
+     */
+    @Property(tries = 300)
+    void aCommitmentAndItsSettlementLeaveEveryPartyFlat(
+            @ForAll("amounts") Money amount) {
+
+        SingleCurrencyObligation owed = new SingleCurrencyObligation(ALICE, BORIS, amount);
+
+        JournalEntry commitment = Bookings.singleCurrency(HEADS, new Commitment(
+                OBLIGATION, GROUP, MADE_AT, null, null), owed);
+
+        JournalEntry settlement = Bookings.settlement(
+                HEADS,
+                new SettledTransfer(TRANSFER, GROUP, ALICE, BORIS, amount, MADE_AT, "reductxn/property/INR"));
+
+        List<Posting> postings = new ArrayList<>(commitment.postings());
+        postings.addAll(settlement.postings());
+
+        assertThat(Balances.netDebitOf(ALICE, amount.currency(), postings))
+                .as("the payer lands on zero: what they promised is exactly what they paid")
+                .isEqualTo(Money.zero(amount.currency()));
+        assertThat(Balances.netDebitOf(BORIS, amount.currency(), postings))
+                .as("and so does the payee")
+                .isEqualTo(Money.zero(amount.currency()));
+
+        assertThat(net(settlement.postings()))
+                .as("L1: the settlement entry balances on its own, like every entry")
+                .isEqualTo(Money.zero(amount.currency()));
+    }
+
+    /** Amounts in currencies with different exponents, including the smallest postable amount. */
+    @Provide
+    Arbitrary<Money> amounts() {
+        Arbitrary<Currency> currencies = Arbitraries.of(JPY, INR, USD, RUB);
+
+        return Combinators.combine(currencies, Arbitraries.longs().between(1L, 10_000_000_000L))
+                .as((currency, minor) -> Money.of(minor, currency));
     }
 }

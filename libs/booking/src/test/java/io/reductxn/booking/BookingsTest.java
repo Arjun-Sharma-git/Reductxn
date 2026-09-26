@@ -4,6 +4,7 @@ import io.reductxn.booking.api.Booking;
 import io.reductxn.booking.api.Bookings;
 import io.reductxn.booking.api.ChainHead;
 import io.reductxn.booking.api.Commitment;
+import io.reductxn.booking.api.SettledTransfer;
 import io.reductxn.fx.api.FxQuote;
 import io.reductxn.fx.api.FxRate;
 import io.reductxn.ledger.api.Balances;
@@ -22,10 +23,12 @@ import io.reductxn.planning.api.SingleCurrencyObligation;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * What a commitment books.
@@ -42,8 +45,12 @@ class BookingsTest {
 
     private static final UUID GROUP = new UUID(0L, 1L);
     private static final UUID OBLIGATION = new UUID(0L, 2L);
+    private static final UUID TRANSFER = new UUID(0L, 3L);
     private static final UUID ALICE = new UUID(0L, 10L);
     private static final UUID BORIS = new UUID(0L, 11L);
+
+    /** RULE S2's reference for a transfer, which becomes the settlement entry's idempotency key. */
+    private static final String RAIL_REFERENCE = "reductxn/run/INR/alice/boris/10000";
 
     private static final Instant MADE_AT = Instant.parse("2026-09-20T10:00:00Z");
     private static final Instant LOCKED_AT = Instant.parse("2026-09-20T09:59:00Z");
@@ -208,6 +215,79 @@ class BookingsTest {
         return new Commitment(OBLIGATION, GROUP, MADE_AT, "idem-1", null);
     }
 
+    @Test
+    void aSettlementIsTheMirrorOfTheCommitmentItDischarges() {
+        // The ledger's own projection is what is asserted, not the postings: what matters is that the two
+        // bookings together leave every account flat, and `Balances` is the function a reader uses to ask.
+        SingleCurrencyObligation owed = new SingleCurrencyObligation(ALICE, BORIS, Money.of(10_000L, INR));
+
+        JournalEntry commitment = Bookings.singleCurrency(HEADS, commitment(), owed);
+        JournalEntry settlement = Bookings.settlement(
+                HEADS, new SettledTransfer(TRANSFER, GROUP, ALICE, BORIS, owed.owed(), MADE_AT, RAIL_REFERENCE));
+
+        List<Posting> postings = new java.util.ArrayList<>(commitment.postings());
+        postings.addAll(settlement.postings());
+
+        assertThat(Balances.netDebitOf(ALICE, INR, postings))
+                .as("the debtor was credited when they promised and is debited when they pay, so their "
+                        + "position lands on zero - N2's statement, measured on the ledger rather than on the "
+                        + "plan's own rows")
+                .isEqualTo(Money.zero(INR));
+        assertThat(Balances.netDebitOf(BORIS, INR, postings))
+                .as("and the creditor's claim is discharged by the credit they receive")
+                .isEqualTo(Money.zero(INR));
+    }
+
+    @Test
+    void aSettlementEntryIsKindSettlementAndCarriesTheRailReference() {
+        JournalEntry entry = Bookings.settlement(
+                HEADS,
+                new SettledTransfer(TRANSFER, GROUP, ALICE, BORIS, Money.of(10_000L, INR), MADE_AT,
+                        RAIL_REFERENCE));
+
+        assertThat(entry.kind())
+                .as("what moved is not what was promised: the ledger's `kind` is what tells them apart, and a "
+                        + "settlement booked as an obligation would double the debt it discharged")
+                .isEqualTo(EntryKind.SETTLEMENT);
+        assertThat(entry.idempotencyKey())
+                .as("the rail's reference, so an auditor can connect a posting to the instruction that caused it")
+                .isEqualTo(RAIL_REFERENCE);
+        assertThat(entry.createdBy())
+                .as("no member asked for this - a rail confirmed it")
+                .isNull();
+        assertThat(entry.isFxLinked()).isFalse();
+        assertThat(entry.currency()).isEqualTo(INR);
+        assertThat(entry.prevHash()).isEqualTo(INR_HEAD);
+        assertThat(entry.postings()).extracting(Posting::accountId, Posting::direction)
+                .containsExactly(
+                        tuple(ALICE, Direction.DEBIT),
+                        tuple(BORIS, Direction.CREDIT));
+    }
+
+    @Test
+    void theSameTransferAlwaysBooksTheSameEntry() {
+        SettledTransfer transfer =
+                new SettledTransfer(TRANSFER, GROUP, ALICE, BORIS, Money.of(10_000L, INR), MADE_AT,
+                        RAIL_REFERENCE);
+
+        JournalEntry first = Bookings.settlement(HEADS, transfer);
+        JournalEntry again = Bookings.settlement(HEADS, transfer);
+
+        assertThat(again.id())
+                .as("the id is derived from the transfer, so a replay collides on the primary key instead of "
+                        + "booking the movement twice - which is what makes re-running an execution safe")
+                .isEqualTo(first.id());
+        assertThat(again.hash()).isEqualTo(first.hash());
+    }
+
+    @Test
+    void aSettlementOfNothingIsRefused() {
+        assertThatThrownBy(() -> Bookings.settlement(HEADS, new SettledTransfer(
+                TRANSFER, GROUP, ALICE, BORIS, Money.zero(INR), MADE_AT, RAIL_REFERENCE)))
+                .as("a transfer of zero cannot be posted (L2) and would balance for free, which is how a "
+                        + "missing posting hides inside an entry that appears to balance")
+                .hasMessageContaining("zero");
+    }
     /** ADR 0013's worked example: 50,000 JPY at 0.55904 is exactly 27,952.00 INR. */
     private static FxQuote jpyToInr(long owedMinor) {
         FxRate rate = FxRate.ofMid(JPY, INR, 55_904L, 5, QUOTED_AT, EXPIRES_AT, "test");
