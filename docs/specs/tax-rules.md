@@ -87,3 +87,9 @@ figure is an opinion about history, and they are different things.
 withhold and remit, which changes the licensing posture entirely. Default posture is
 **compute and report**, with the rail remitting. This is an open legal item, not a settled
 engineering decision, and it is tracked as a Phase 0 blocker before any real-rail integration.
+
+The engineering half of that posture is now built, and it is deliberately only the *reporting* half: `GET /tax/reports`
+reports the tax a group's plans have assessed, per currency, and `GET /tax/rules` reports what they are assessed under -
+with no field anywhere that could be read as evidence of remittance (ADR 0040). Withholding and remitting stay unimplemented
+until this question is answered, because the answer decides whether the ledger must record a payment to a tax authority at
+all.

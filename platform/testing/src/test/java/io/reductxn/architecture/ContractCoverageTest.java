@@ -98,10 +98,10 @@ class ContractCoverageTest {
     /**
      * The operations the contract promises, the controllers do not serve, and somebody owns.
      *
-     * <p>These are the sixteen left when ADR 0039 served the balances read. Each entry names the screen, slice or
-     * decision that would close it: members, cycles, runs, decisions, transfers, netting, obligations, currencies,
-     * rates and now balances have all left this list, and the three reads the last-but-one audit found left it within
-     * two slices of being found.
+     * <p>These are the fourteen left when ADR 0040 served the two tax reads - the last screen of section 6's route
+     * tree besides the group's invites. Each entry names the screen, slice or decision that would close it: members,
+     * cycles, runs, decisions, transfers, netting, obligations, currencies, rates, balances and now tax have all left
+     * this list, and the three reads the last-but-one audit found left it within two slices of being found.
      *
      * <p>The {@code POST /fx/quotes} entry is not a screen. It is recorded as a candidate for removal, and it is in
      * this map for the same reason the others are: an operation with no handler and no owner is the state that
@@ -121,11 +121,6 @@ class ContractCoverageTest {
             Map.entry("GET /me",
                     "identity - the signed-in person. Without it the client falls back to a uuid, which is what made "
                             + "the missing-members read look deliberate for seven slices"),
-            Map.entry("GET /tax/rules",
-                    "tax - the other unbuilt screen of section 6's route tree. The rules are rows already; this read "
-                            + "is what the screen needs"),
-            Map.entry("GET /tax/reports",
-                    "tax - the same screen's report, which depends on the rules read above it"),
             Map.entry("POST /auth/otp/request",
                     "auth - sign-in, first step. A deployment with no identity provider has this as its whole "
                             + "authentication story"),
