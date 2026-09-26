@@ -162,6 +162,24 @@ than shown a number nobody could reproduce. One consequence is recorded rather t
 a position whose holder is the `fx_clearing` account, and the `NetPosition` schema carries no way to say so yet, so a
 client shows the identifier and the screen's footnote names both cases.
 
+`GET /v1/tax/rules` and `GET /v1/tax/reports` are the last two operations of MASTER-PLAN section 6's route tree besides
+the group's invites, and they are the only ones in the contract that had a path, a summary, parameters and **no response
+schema at all** (ADR 0040). The report is therefore a shape this slice chose: one line per currency, `grossTax` recovered
+as `netTax + taxSaved` (the same arithmetic the preview's mapper does for one partition), and `runCount` so a reader can
+tell one cycle's tax from a quarter's. **It is a report about plans, not about money that moved** - no run can reach
+`done` in this build, and what a group owes is what its plans assess - so it reads the stored plan rather than re-running
+the engine, over the cycle's `as_of` with the end day included in full, and counts every computed plan except the two
+states that mean it did not happen: `rejected` and `failed` release what they held (ADR 0036), and their tax with it. It
+has **no headline figure**, because a total across currencies needs a reporting currency the operation deliberately does
+not offer (ADR 0012), and because `docs/specs/tax-rules.md` section 7 leaves the withholding question open with a
+posture of compute-and-report - a figure here is never evidence that tax was remitted.
+
+The rules read answers what is in force **now**, which is the same call the reference rate read makes (ADR 0037):
+a run stores the figures its own assessment produced, so what a cycle was taxed under is a fact about the run rather than
+something a reader reconstructs from the rules table. It resolves the window with the **same expression the settlement
+path uses** (`TaxRuleWindow`), because two copies of a condition agree everywhere except where it matters - and the test
+suite asserts end to end that the rule a group is shown is the rule its preview charges.
+
 `GET /v1/groups/{groupId}/cycles` is the read that makes it visible (ADR 0034). It exists for the reason
 `GET /v1/groups/{groupId}/runs` does, one act earlier: opening a cycle writes a claim about an instant, the plan over
 it is the worker's business a minute later, and without the list a member who asked and a member whose cycle the
