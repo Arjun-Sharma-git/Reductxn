@@ -58,6 +58,17 @@ honest about itself:
   explicitly deferred. Coverage is *detected*, not declared: a property counts as covered when a test
   labels an assertion `.as("X7: ...")`, so only the exceptions need maintaining.
 
+A third is about a contract rather than a document, and exists because of the one bug that made both
+suites agree a hole was fine:
+
+- **`ContractCoverageTest`** - every operation `contracts/openapi/reductxn-api.yaml` promises either has
+  a handler that matches it or appears in a map with the screen, slice or decision that owns it. The
+  client's browser suite stubs the API from the contract's own generated types, so a promise with no
+  handler passes both suites at once: `GET /groups/{groupId}/members` did exactly that for seven slices,
+  with three screens calling it. It reads both sides as text rather than by reflection (this module sees
+  other modules' published classes and none of their sources), it has seventeen recorded gaps, and an
+  entry whose handler has since landed fails the build so the list cannot stop describing the repository.
+
 `Repository` is the small shared helper they use to find the repository root from a test.
 
 Both fail the build when a rule or property is added without a decision about how it is checked, and
