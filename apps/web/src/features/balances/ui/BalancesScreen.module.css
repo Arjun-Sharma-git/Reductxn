@@ -1,0 +1,74 @@
+/* The balances screen: one table, which is the whole screen. The tokens and the shape are the members screen's, so
+   two lists of rows in one application do not look like two applications. */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-5);
+}
+
+.lede {
+  color: var(--rn-text-muted);
+  max-inline-size: 60ch;
+}
+
+.status {
+  color: var(--rn-text-muted);
+}
+
+.table {
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+
+.caption {
+  text-align: start;
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-xs);
+  padding-block-end: var(--rn-space-2);
+}
+
+.table th,
+.table td {
+  text-align: start;
+  padding: var(--rn-space-2) var(--rn-space-3);
+  border-block-end: 1px solid var(--rn-border);
+}
+
+/* A member's name is the row's header, and a name that is really an identifier reads as one. */
+.rowHeader {
+  font-family: var(--rn-font-amount);
+  font-weight: var(--rn-weight-medium);
+}
+
+/* Amounts align on the right, which is only meaningful because the amount face has tabular figures. */
+.numeric {
+  text-align: end !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Direction is a word with weight and colour, never colour alone. */
+.pay,
+.receive,
+.flat {
+  font-weight: var(--rn-weight-medium);
+}
+
+.pay {
+  color: var(--rn-danger-text);
+}
+
+.receive {
+  color: var(--rn-positive-text);
+}
+
+.flat {
+  color: var(--rn-text-muted);
+}
+
+.footnote {
+  margin-block: var(--rn-space-3) 0;
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-xs);
+  max-inline-size: 70ch;
+}
