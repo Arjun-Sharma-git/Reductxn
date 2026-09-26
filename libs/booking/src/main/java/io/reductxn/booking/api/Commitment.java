@@ -1,6 +1,7 @@
 package io.reductxn.booking.api;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -32,5 +33,21 @@ public record Commitment(
         Objects.requireNonNull(obligationId, "obligationId");
         Objects.requireNonNull(groupId, "groupId");
         Objects.requireNonNull(occurredAt, "occurredAt");
+
+        // Truncated to microseconds, because that is what the ledger can store and the hash has to be a
+        // function of what is stored.
+        //
+        // This is not tidiness. `occurredAt` becomes the entry's `occurred_at` (a Postgres timestamptz,
+        // microsecond precision) and it is also part of the canonical encoding the entry's hash covers (L4).
+        // An instant with nanoseconds therefore produces an entry whose stored row rehashes to a *different*
+        // value - so the chain an offline verifier recomputes from the rows would not match the hashes in
+        // them, and the ledger's central claim, that it can be verified from its own rows, would be false.
+        // Keeping the nanoseconds in Java and losing them in the database is the shape of bug that only
+        // appears when someone verifies history.
+        //
+        // Truncating rather than refusing, because the two are the same commitment: nothing ends a commitment
+        // in the nanosecond after the microsecond it was recorded in. Refusing would also make a client's
+        // timestamp with more digits than the ledger needs into a failed request.
+        occurredAt = occurredAt.truncatedTo(ChronoUnit.MICROS);
     }
 }
