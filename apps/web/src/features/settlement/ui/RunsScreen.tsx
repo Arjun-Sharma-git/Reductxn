@@ -8,6 +8,7 @@ import { useTranslations } from '@/shared/i18n';
 import { Amount, Card, Notice, ProblemNotice } from '@/shared/ui';
 
 import { StatusBadge } from './parts';
+import { CyclesCard } from './CyclesCard';
 import styles from './SettlementScreens.module.css';
 
 /**
@@ -43,6 +44,10 @@ export function RunsScreen({ groupId }: { readonly groupId: string }) {
       </header>
 
       {runs.isError ? <ProblemNotice fault={runs.error} /> : null}
+
+      {/* The cycles come first: a run is what a *computed* cycle produced, so the thing a member can act on - asking
+          for one - belongs above the plans that already exist. */}
+      <CyclesCard groupId={groupId} />
 
       <Card title={t('settlement.runs.cardTitle')} description={t('settlement.runs.cardDescription')}>
         {runs.isPending ? (

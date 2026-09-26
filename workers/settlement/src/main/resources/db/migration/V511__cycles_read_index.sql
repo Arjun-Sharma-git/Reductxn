@@ -1,0 +1,13 @@
+-- The index the cycles read was designed around.
+--
+-- `GET /groups/{groupId}/cycles` is `WHERE group_id = ? ORDER BY created_at DESC LIMIT ?`, and the contract
+-- names this index, which makes it a promise rather than a hint: without it Postgres sorts the group's whole
+-- history to answer the first page. `settlement_cycles` had only the unique constraint on (group_id, as_of),
+-- which serves the lookups the worker does - the pair, which is what opening and computing are keyed by - and
+-- not this ordering.
+--
+-- `created_at DESC` matches the runs index for the same read shape, so a page is "the most recently opened
+-- cycles" without a sort. Note what this is *not*: an index on `as_of` order. A cycle opened today for last
+-- quarter is the one a member is looking for after asking for it, and the pair (group_id, as_of) is unique, so
+-- the id in the ORDER BY's tie-break is a formality rather than a reordering (ADR 0034).
+CREATE INDEX settlement_cycles_by_group ON settlement_cycles (group_id, created_at DESC);

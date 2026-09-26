@@ -1,5 +1,6 @@
 package io.reductxn.api.adapter.persistence;
 
+import io.reductxn.api.port.in.CycleReport;
 import io.reductxn.api.port.in.OpenedCycle;
 import io.reductxn.api.port.out.CycleToOpen;
 import io.reductxn.api.port.out.Cycles;
@@ -14,7 +15,9 @@ import org.springframework.stereotype.Repository;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -41,10 +44,31 @@ public class JooqCycles implements Cycles {
     /** The cycle rows. Owned by {@code workers/settlement}; written here and computed there. */
     private static final Table<Record> CYCLES = DSL.table("settlement_cycles");
 
-    private static final Field<UUID> CYCLE_ID = DSL.field("id", UUID.class);
-    private static final Field<UUID> CYCLE_GROUP = DSL.field("group_id", UUID.class);
-    private static final Field<OffsetDateTime> CYCLE_AS_OF = DSL.field("as_of", OffsetDateTime.class);
-    private static final Field<OffsetDateTime> CYCLE_CREATED = DSL.field("created_at", OffsetDateTime.class);
+    /** The plan rows: read for {@code runId} only, and joined rather than queried per cycle. */
+    private static final Table<Record> PLANS = DSL.table("settlement_runs").as("plan");
+
+    /**
+     * The reads' columns, qualified by the cycle table because the join makes `id` and `cycle_id` share a name with
+     * columns on the other side. An unqualified field here compiles and fails at the first query with
+     * {@code column reference "id" is ambiguous}, which is the kind of mistake a test catches and a reviewer cannot.
+     */
+    private static final String CYCLES_TABLE = "settlement_cycles";
+
+    private static final Field<UUID> CYCLE_ID = DSL.field(DSL.name(CYCLES_TABLE, "id"), UUID.class);
+    private static final Field<UUID> CYCLE_GROUP = DSL.field(DSL.name(CYCLES_TABLE, "group_id"), UUID.class);
+    private static final Field<OffsetDateTime> CYCLE_AS_OF =
+            DSL.field(DSL.name(CYCLES_TABLE, "as_of"), OffsetDateTime.class);
+    private static final Field<OffsetDateTime> CYCLE_CREATED =
+            DSL.field(DSL.name(CYCLES_TABLE, "created_at"), OffsetDateTime.class);
+
+    private static final Field<UUID> PLAN_ID = DSL.field(DSL.name("plan", "id"), UUID.class);
+    private static final Field<UUID> PLAN_CYCLE = DSL.field(DSL.name("plan", "cycle_id"), UUID.class);
+
+    /** The insert's columns, unqualified because the statement names the table once and PostgreSQL takes no alias. */
+    private static final Field<UUID> INSERT_ID = DSL.field("id", UUID.class);
+    private static final Field<UUID> INSERT_GROUP = DSL.field("group_id", UUID.class);
+    private static final Field<OffsetDateTime> INSERT_AS_OF = DSL.field("as_of", OffsetDateTime.class);
+    private static final Field<OffsetDateTime> INSERT_CREATED = DSL.field("created_at", OffsetDateTime.class);
 
     private final DSLContext dsl;
 
@@ -59,14 +83,18 @@ public class JooqCycles implements Cycles {
         OffsetDateTime asOf = toOffset(cycle.asOf());
 
         int inserted = dsl.insertInto(CYCLES)
-                .columns(CYCLE_ID, CYCLE_GROUP, CYCLE_AS_OF, CYCLE_CREATED)
+                .columns(INSERT_ID, INSERT_GROUP, INSERT_AS_OF, INSERT_CREATED)
                 .values(cycle.id(), cycle.groupId(), asOf, toOffset(cycle.at()))
-                .onConflict(CYCLE_GROUP, CYCLE_AS_OF)
+                .onConflict(INSERT_GROUP, INSERT_AS_OF)
                 .doNothing()
                 .execute();
 
-        Record row = dsl.select(CYCLE_ID, CYCLE_GROUP, CYCLE_AS_OF, CYCLE_CREATED)
+        // The plan is read with the row rather than looked up afterwards, so a cycle that was already open and
+        // already computed is reported as what it is. `one_run_per_cycle` makes this a left join and not a
+        // multiplication: at most one plan can answer, whatever the worker has been doing.
+        Record row = dsl.select(CYCLE_ID, CYCLE_GROUP, CYCLE_AS_OF, CYCLE_CREATED, PLAN_ID)
                 .from(CYCLES)
+                .leftJoin(PLANS).on(PLAN_CYCLE.eq(CYCLE_ID))
                 .where(CYCLE_GROUP.eq(cycle.groupId()))
                 .and(CYCLE_AS_OF.eq(asOf))
                 .fetchOne();
@@ -78,12 +106,32 @@ public class JooqCycles implements Cycles {
                             + "means the row went somewhere else");
         }
 
-        return new OpenedCycle(
+        return new OpenedCycle(toReport(row), inserted > 0);
+    }
+
+    @Override
+    public List<CycleReport> listByGroup(UUID groupId, int limit) {
+        Objects.requireNonNull(groupId, "groupId");
+
+        return dsl.select(CYCLE_ID, CYCLE_GROUP, CYCLE_AS_OF, CYCLE_CREATED, PLAN_ID)
+                .from(CYCLES)
+                .leftJoin(PLANS).on(PLAN_CYCLE.eq(CYCLE_ID))
+                .where(CYCLE_GROUP.eq(groupId))
+                // The index the migration created for this read, and the tie-break is a formality: the pair
+                // (group_id, as_of) is unique, so no two of a group's cycles share an instant either.
+                .orderBy(CYCLE_CREATED.desc(), CYCLE_ID.desc())
+                .limit(limit)
+                .fetch()
+                .map(JooqCycles::toReport);
+    }
+
+    private static CycleReport toReport(Record row) {
+        return new CycleReport(
                 row.get(CYCLE_ID),
                 row.get(CYCLE_GROUP),
                 row.get(CYCLE_AS_OF).toInstant(),
                 row.get(CYCLE_CREATED).toInstant(),
-                inserted > 0);
+                Optional.ofNullable(row.get(PLAN_ID)));
     }
 
     private static OffsetDateTime toOffset(Instant instant) {

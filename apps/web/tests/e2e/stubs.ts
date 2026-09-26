@@ -291,8 +291,33 @@ export type TransferStub = {
   failureReason?: string | null;
 };
 
+export type CycleStub = paths['/groups/{groupId}/cycles']['get']['responses']['200']['content']['application/json'][number];
+
 const RUN_ID = '77777777-7777-4777-8777-777777777777';
 const CYCLE_ID = '88888888-8888-4888-8888-888888888888';
+
+/**
+ * Two cycles: the one the waiting run is the plan for, and one nobody has computed.
+ *
+ * Both states a row can be in, because the screen's whole job is to tell them apart - and the second one is the
+ * interesting case, since "waiting to be computed" is what a member sees between asking for a settlement and the
+ * worker's cadence reaching it.
+ */
+export const CYCLES: CycleStub[] = [
+  {
+    id: CYCLE_ID,
+    groupId: '3f7c1c1e-0d2a-4a5e-9a6f-6c1d2f4b8e10',
+    asOf: '2026-09-30T23:59:59Z',
+    createdAt: '2026-09-30T12:00:00Z',
+    runId: RUN_ID,
+  },
+  {
+    id: '99999999-9999-4999-8999-999999999999',
+    groupId: '3f7c1c1e-0d2a-4a5e-9a6f-6c1d2f4b8e10',
+    asOf: '2026-08-31T23:59:59Z',
+    createdAt: '2026-09-26T09:00:00Z',
+  },
+];
 
 /** A run waiting for answers, with a currency gap as well, so the gates have something to say. */
 export const WAITING_RUN: RunStub = {
@@ -348,6 +373,8 @@ export type SettlementRecorder = {
   readonly posted: readonly Record<string, unknown>[];
   /** The answers the endpoint has recorded, so a test can see that one was stored. */
   readonly answers: readonly { readonly memberId: string; readonly decision: string }[];
+  /** The cycle requests, so a test can see the instant that was sent rather than the one that was typed. */
+  readonly opened: readonly Record<string, unknown>[];
 };
 
 /**
@@ -368,11 +395,14 @@ export async function stubSettlementApi(
     readonly run?: RunStub;
     readonly transfers?: readonly TransferStub[];
     readonly decision?: DecisionBehaviour;
+    readonly cycles?: readonly CycleStub[];
   } = {},
 ): Promise<SettlementRecorder> {
   const posted: Record<string, unknown>[] = [];
   const answers: { memberId: string; decision: string }[] = [];
+  const opened: Record<string, unknown>[] = [];
   const base = options.run ?? WAITING_RUN;
+  const cycles: CycleStub[] = [...(options.cycles ?? CYCLES)];
 
   await page.route('**/v1/currencies', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CURRENCIES) }),
@@ -389,6 +419,35 @@ export async function stubSettlementApi(
       body: JSON.stringify([{ ...base, answers: withDates(answers) }, ...(options.runs ?? [])]),
     }),
   );
+
+  // The cycles: read the list, and open one. A POST answers with the row it wrote and appends it to what the list
+  // serves, so a test can watch the member's own request come back as a row - which is the whole point of the read.
+  await page.route('**/v1/groups/*/cycles', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(cycles) });
+
+      return;
+    }
+
+    const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+
+    opened.push(body);
+
+    const written: CycleStub = {
+      id: `0000000${opened.length}-0000-4000-8000-000000000000`,
+      groupId: base.groupId,
+      asOf: String(body['asOf']),
+      createdAt: '2026-09-26T10:00:00Z',
+    };
+
+    cycles.unshift(written);
+
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify(written),
+    });
+  });
 
   await page.route('**/v1/runs/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -451,7 +510,7 @@ export async function stubSettlementApi(
     });
   });
 
-  return { posted, answers };
+  return { posted, answers, opened };
 }
 
 /** Answers as the read model serves them, so the screen's answer table has a row per answer. */

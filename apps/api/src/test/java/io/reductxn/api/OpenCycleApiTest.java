@@ -170,6 +170,29 @@ class OpenCycleApiTest extends DatabaseTest {
                 .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("groupId")));
     }
 
+    @Test
+    void aCycleJustOpenedHasNoPlanYetAndLeavesItOut() throws Exception {
+        open(GROUP, AS_OF)
+                .andExpect(status().isCreated())
+                // Absent rather than null: the contract marks it nullable, and Jackson is configured not to serialize
+                // nulls, so a client's `cycle.runId` is undefined until a plan exists - which is what "waiting since
+                // createdAt" is drawn from.
+                .andExpect(jsonPath("$.runId").doesNotExist());
+    }
+
+    @Test
+    void aCycleThatAlreadyHadAPlanIsReportedWithItWhenAskedForAgain() throws Exception {
+        // The `200` case, and why the open response resolves the plan rather than reporting "waiting": a member
+        // asking for an instant that was settled last month should not be told nothing has happened.
+        UUID cycleId = cycleOpenedAt(GROUP, AS_OF, AS_OF);
+        UUID runId = planOver(cycleId);
+
+        open(GROUP, AS_OF)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(cycleId.toString()))
+                .andExpect(jsonPath("$.runId").value(runId.toString()));
+    }
+
     private ResultActions open(UUID groupId, Instant asOf) throws Exception {
         return mvc.perform(post("/v1/groups/{groupId}/cycles", groupId)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -187,5 +210,30 @@ class OpenCycleApiTest extends DatabaseTest {
         Integer count = jdbc.queryForObject("SELECT count(*) FROM " + table, Integer.class);
 
         return count == null ? 0 : count;
+    }
+
+    private UUID cycleOpenedAt(UUID groupId, Instant asOf, Instant openedAt) {
+        UUID cycleId = UUID.randomUUID();
+
+        jdbc.update("""
+                INSERT INTO settlement_cycles (id, group_id, as_of, created_at)
+                VALUES (?, ?, ?::timestamptz, ?::timestamptz)
+                """, cycleId, groupId, asOf.atOffset(java.time.ZoneOffset.UTC),
+                openedAt.atOffset(java.time.ZoneOffset.UTC));
+
+        return cycleId;
+    }
+
+    /** A plan row over a cycle: this module cannot compute one and may not ask the module that can (RULE B6). */
+    private UUID planOver(UUID cycleId) {
+        UUID runId = UUID.randomUUID();
+        var at = AS_OF.atOffset(java.time.ZoneOffset.UTC);
+
+        jdbc.update("""
+                INSERT INTO settlement_runs (id, group_id, cycle_id, status, computed_at, created_at)
+                VALUES (?, ?, ?, 'awaiting_approval', ?::timestamptz, ?::timestamptz)
+                """, runId, GROUP, cycleId, at, at);
+
+        return runId;
     }
 }

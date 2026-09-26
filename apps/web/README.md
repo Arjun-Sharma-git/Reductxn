@@ -21,8 +21,8 @@ today (the netting preview, ADR 0028); the rest of the plan's route tree arrives
 |---|---|
 | `src/app` | The composition root: the router, the query client, the providers. No business logic and no screens |
 | `src/routes` | TanStack Router file-based routes, and **thin** (RULE F4): validate search parameters, wrap the screen in its locale, render one feature |
-| `src/features/<name>` | One vertical capability. Public surface is `index.ts`; everything else is private (RULE F8). `obligations` owns the list, the filters' UI and the recording form; `netting` owns the preview; `settlement` owns the group's runs, one run and the answer form |
-| `src/entities/<name>` | Domain-shaped client models and their `queryOptions` factories: `currency`, `member`, `obligation`, `netting`, `fx`, `run` |
+| `src/features/<name>` | One vertical capability. Public surface is `index.ts`; everything else is private (RULE F8). `obligations` owns the list, the filters' UI and the recording form; `netting` owns the preview; `settlement` owns the group's runs, one run, the answer form, and closing the books at an instant |
+| `src/entities/<name>` | Domain-shaped client models and their `queryOptions` factories: `currency`, `member`, `obligation`, `netting`, `fx`, `run`, `cycle` |
 | `src/shared/api` | The generated contract (`schema.d.ts`) and the only `fetch` in the app (RULE F5) |
 | `src/shared/money` | Integer minor units, formatted and parsed for a locale. The P1 boundary in the client |
 | `src/shared/i18n` | Locale resolution, ICU catalogs, the direction token, the review-state rule |

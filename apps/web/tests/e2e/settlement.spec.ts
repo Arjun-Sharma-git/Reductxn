@@ -23,6 +23,39 @@ async function open(page: Page, member = ASHA): Promise<void> {
   await page.getByLabel('Answering as').selectOption(member);
 }
 
+test('closes the group’s books and sees the cycle waiting to be computed', async ({ page }) => {
+  const api = await stubSettlementApi(page);
+  await page.goto(RUNS);
+
+  await page.getByLabel('Close the books at').fill('2026-10-31T23:59');
+  await page.getByRole('button', { name: 'Open a cycle' }).click();
+
+  // The member's own request, back as a row - which is what the read exists for. Before it, asking for a settlement
+  // and being refused by the worker looked identical from here: nothing.
+  await expect(page.getByText(/^Cycle opened for/)).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Waiting to be computed' }).first()).toBeVisible();
+
+  // The wire carries an instant, not the wall clock the member typed: the control has no timezone and the ledger
+  // stores UTC, so a form that sent the local string would record a settlement hours out.
+  expect(api.opened).toHaveLength(1);
+  expect(String(api.opened[0]!.asOf)).toMatch(/Z$/);
+  expect(new Date(String(api.opened[0]!.asOf)).getTime()).toBe(new Date('2026-10-31T23:59').getTime());
+});
+
+test('a cycle with a plan links to it, and one without says it is waiting', async ({ page }) => {
+  await stubSettlementApi(page);
+  await page.goto(RUNS);
+
+  await expect(page.getByRole('cell', { name: 'Waiting to be computed' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open the plan' })).toHaveAttribute(
+    'href',
+    new RegExp(WAITING_RUN.id),
+  );
+
+  await page.getByRole('link', { name: 'Open the plan' }).click();
+  await expect(page.getByRole('heading', { name: 'Settlement plan' })).toBeVisible();
+});
+
 test('lists the group’s runs with what each one moves, per currency', async ({ page }) => {
   await stubSettlementApi(page);
   await page.goto(RUNS);
