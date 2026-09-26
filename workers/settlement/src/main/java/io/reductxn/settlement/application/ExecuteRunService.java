@@ -383,25 +383,11 @@ public class ExecuteRunService implements ExecuteRun {
     /**
      * Where the run stands, given every transfer's state.
      *
-     * <p><strong>A run with nothing to move is done</strong>, and that is not a special case bolted on: a cycle
-     * whose obligations cancel out produces no transfers, and refusing to finish it would leave a group unable to
-     * close a cycle in which nothing was owed. {@code allMatch} on an empty stream is true, so this falls out of
-     * the arithmetic rather than being written twice.
-     *
-     * <p>A terminal failure makes the run {@code failed} even if other transfers are still in flight, because the
-     * run's report has to say that the settlement did not happen (S3). The in-flight ones are still polled by a
-     * later pass, and the run stays failed when they resolve.
+     * <p>The rule lives in {@link RunOutcome} rather than here, because a person's resolution of a silent transfer
+     * writes a run's fate too (ADR 0025) and two copies of it would be two answers waiting to disagree.
      */
     private static RunStatus outcomeOf(ComputedRun run) {
-        if (run.transfers().stream().allMatch(transfer -> transfer.status() == TransferStatus.CONFIRMED)) {
-            return RunStatus.DONE;
-        }
-
-        if (run.transfers().stream().anyMatch(transfer -> transfer.status() == TransferStatus.FAILED)) {
-            return RunStatus.FAILED;
-        }
-
-        return RunStatus.EXECUTING;
+        return RunOutcome.of(run);
     }
 
     /** The run as stored, with the write just made included. */

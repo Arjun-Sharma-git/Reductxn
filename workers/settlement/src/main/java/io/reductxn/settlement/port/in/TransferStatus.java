@@ -60,6 +60,21 @@ public enum TransferStatus {
     }
 
     /**
+     * Whether a rail has been asked about this transfer at least once.
+     *
+     * <p>{@code authorized} is written <em>before</em> the call is made (section 4.2, so that a worker that dies
+     * mid-submission leaves a readable trail), which is why it means "the rail has been asked" rather than "the rail
+     * has not". Both it and {@code submitted} answer yes; {@code pending} - a transfer recorded with a plan and never
+     * offered - answers no.
+     *
+     * <p>The distinction matters outside execution: a person may resolve a transfer the rail was asked about and may
+     * not resolve one it never saw, because a resolution records what a rail did and nothing was ever put to it.
+     */
+    public boolean isOffered() {
+        return this == AUTHORIZED || this == SUBMITTED;
+    }
+
+    /**
      * Whether the rail has this transfer and is being asked for it again would be a duplicate.
      *
      * <p>{@code submitted} is the "at the rail, not yet answered" state: a re-submission would be a no-op by

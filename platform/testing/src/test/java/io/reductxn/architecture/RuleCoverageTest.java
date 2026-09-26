@@ -128,6 +128,12 @@ class RuleCoverageTest {
                     "io.reductxn.settlement.RecordFxFundingTest#aCrossCurrencyRunStaysBlockedUntilEveryCurrencyIsCovered")),
             Map.entry("S5", List.of(
                     "io.reductxn.settlement.ComputeRunTest#aCrossCurrencyCycleWaitsForFundingAndReportsTheRequirementPerCurrency")),
+            // The rule that answers "who may assert that money moved": a person may, and only in a form that names
+            // them and says what they looked at. Enforced in the value type (no attribution, no resolution) and in
+            // the use case (the state, the booking and the run's fate together).
+            Map.entry("S6", List.of(
+                    "io.reductxn.settlement.ResolveTransferTest#anAssertionWithNoNameOrNoBasisIsNotAResolution",
+                    "io.reductxn.settlement.ResolveTransferTest#aPersonWhoFoundOutTheMoneyMovedBooksItAndCompletesTheRun")),
             // A principle that also has a mechanical guard: money is an integer minor unit, and no
             // floating-point type may appear in domain code.
             Map.entry("P1", List.of("build-logic#forbidFloatingPointMoney")),

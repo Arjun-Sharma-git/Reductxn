@@ -36,6 +36,10 @@ import java.util.UUID;
  *                   attempts that follow it and cleared by any answer. Null when the rail has answered or has not
  *                   been asked. This is what an escalation policy measures patience against, because a count of
  *                   tries means a different duration whenever the backoff is retuned (see {@code V508})
+ * @param resolvedAt when a person asserted this transfer's fate, or null when a rail answered it - see
+ *                   {@code TransferResolution}
+ * @param resolvedBy who asserted it, when it was not a rail. Null when a rail answered
+ * @param resolvedBasis what they looked at when they did
  */
 public record PlannedTransfer(
         UUID id,
@@ -48,7 +52,10 @@ public record PlannedTransfer(
         String railDetail,
         int unansweredAttempts,
         Instant nextAttemptAt,
-        Instant unansweredSince) {
+        Instant unansweredSince,
+        Instant resolvedAt,
+        String resolvedBy,
+        String resolvedBasis) {
 
     public PlannedTransfer {
         Objects.requireNonNull(id, "id");
@@ -75,9 +82,24 @@ public record PlannedTransfer(
         if (status.isResolved() && unansweredSince != null) {
             throw new IllegalArgumentException(
                     "transfer " + id + " is " + status.wireName() + " and says a rail has been silent since "
-                            + unansweredSince + ". A resolved transfer has been decided by a rail that answered, "
-                            + "so either the status or the silence is wrong - one of them describes another "
-                            + "transfer");
+                            + unansweredSince + ". A resolved transfer has had an answer - from a rail, or from a "
+                            + "person who found out - so either the status or the silence is wrong: one of them "
+                            + "describes another transfer");
+        }
+
+        if ((resolvedBy == null) != (resolvedAt == null) || (resolvedBy == null) != (resolvedBasis == null)) {
+            throw new IllegalArgumentException(
+                    "transfer " + id + " has a resolution attributed to " + resolvedBy + " at " + resolvedAt
+                            + " on the basis of " + resolvedBasis + ". A resolution is all three of those facts or "
+                            + "none of them: an attribution with no basis cannot be checked, and one with no instant "
+                            + "cannot be placed against the run it decided");
+        }
+
+        if (resolvedBy != null && !status.isResolved()) {
+            throw new IllegalArgumentException(
+                    "transfer " + id + " is " + status.wireName() + " and names " + resolvedBy + " as having "
+                            + "decided it. A person may only answer what a rail was asked, and their answer is a "
+                            + "resolved state - anything else is a decision the rows do not hold");
         }
 
         if (fromUserId.equals(toUserId)) {

@@ -206,8 +206,10 @@ class SettlementCommandTest extends WorkerDatabaseTest {
                 .contains("authorized")
                 .contains("unanswered call(s) for")
                 .contains("the rail last said")
-                .as("and the boundary, stated rather than implied: this is a report, not a resolution")
-                .contains("The worker cannot resolve these");
+                .as("and the way back from the report, named with the options that make it a claim somebody owns")
+                .contains("Whether the money moved is the rail's answer to give")
+                .contains("--reductxn.command=resolve")
+                .contains("--reductxn.by=<you>");
 
         // Two transfers are stuck and the operator asked for one.
         assertThat(command.execute(args("--reductxn.command=escalations", "--reductxn.limit=1"), terminal()))
@@ -244,6 +246,108 @@ class SettlementCommandTest extends WorkerDatabaseTest {
                         + "would train whoever reads the alerts to ignore them")
                 .hasValue(SettlementCommand.OK);
         assertThat(text()).contains("0 run(s) considered");
+    }
+
+    @Test
+    void resolveRecordsWhatAPersonFoundOutAndCompletesTheRun() {
+        ComputedRun run = aRunTheRailWillNotAnswer();
+        PlannedTransfer transfer = run.transfers().get(0);
+
+        assertThat(command.execute(args("--reductxn.command=drive", "--reductxn.run=" + run.run().id()), terminal()))
+                .hasValue(SettlementCommand.OK);
+
+        OptionalInt code = command.execute(args(
+                "--reductxn.command=resolve",
+                "--reductxn.run=" + run.run().id(),
+                "--reductxn.transfer=" + transfer.id(),
+                "--reductxn.outcome=confirmed",
+                "--reductxn.by=priya@acme.example",
+                "--reductxn.basis=rail statement 2026-09-27/4417"), terminal());
+
+        assertThat(code).hasValue(SettlementCommand.OK);
+        assertThat(text())
+                .as("the operator is told what the write is attributed to and what the ledger did with it")
+                .contains("resolve: transfer " + transfer.railRef() + " is confirmed")
+                .contains("asserted by priya@acme.example")
+                .contains("rail statement 2026-09-27/4417")
+                .contains("the ledger now holds the movement")
+                .contains("is done: 1 of 1 transfer(s) answered");
+
+        assertThat(countIn("journal_entries")).isEqualTo(1);
+        assertThat(storedRunStatus(run.run().id())).isEqualTo("done");
+    }
+
+    @Test
+    void resolveWithoutANameOrWithAStateAPersonCannotKnowIsAUsageError() {
+        ComputedRun run = aRunTheRailWillNotAnswer();
+        PlannedTransfer transfer = run.transfers().get(0);
+
+        assertThat(command.execute(args(
+                "--reductxn.command=resolve",
+                "--reductxn.run=" + run.run().id(),
+                "--reductxn.transfer=" + transfer.id(),
+                "--reductxn.outcome=confirmed",
+                "--reductxn.basis=rail statement 2026-09-27/4417"), terminal()))
+                .as("an unattributed claim about money is the one thing this module will not record, and the shell "
+                        + "says so before the domain is asked")
+                .hasValue(SettlementCommand.USAGE);
+
+        assertThat(command.execute(args(
+                "--reductxn.command=resolve",
+                "--reductxn.run=" + run.run().id(),
+                "--reductxn.transfer=" + transfer.id(),
+                "--reductxn.outcome=submitted",
+                "--reductxn.by=priya@acme.example",
+                "--reductxn.basis=rail statement 2026-09-27/4417"), terminal()))
+                .as("a person cannot report that a transfer is submitted: that is a fact about what the worker has "
+                        + "done, and the rows already hold it")
+                .hasValue(SettlementCommand.USAGE);
+
+        assertThat(countIn("journal_entries")).isZero();
+    }
+
+    @Test
+    void resolveRefusesToRewriteAnAnswerThatHasArrived() {
+        ComputedRun run = aRunTheRailWillNotAnswer();
+        PlannedTransfer transfer = run.transfers().get(0);
+
+        assertThat(command.execute(args("--reductxn.command=drive", "--reductxn.run=" + run.run().id()), terminal()))
+                .hasValue(SettlementCommand.OK);
+
+        String[] settlement = {
+                "--reductxn.command=resolve",
+                "--reductxn.run=" + run.run().id(),
+                "--reductxn.transfer=" + transfer.id(),
+                "--reductxn.outcome=confirmed",
+                "--reductxn.by=priya@acme.example",
+                "--reductxn.basis=rail statement 2026-09-27/4417"};
+
+        assertThat(command.execute(args(settlement), terminal())).hasValue(SettlementCommand.OK);
+
+        // The same command with the opposite answer - what a second operator, or the same one with new information,
+        // would type. The refusal is the domain's, and it exits 1 like every other refusal.
+        String[] different = settlement.clone();
+        different[3] = "--reductxn.outcome=failed";
+
+        assertThat(command.execute(args(different), terminal())).hasValue(SettlementCommand.REFUSED);
+        assertThat(text()).contains("refused: settlement.transfer_already_resolved");
+        assertThat(countIn("journal_entries"))
+                .as("and no second movement was booked on the way to the refusal")
+                .isEqualTo(1);
+    }
+
+    /** A run with one transfer, approved and funded, whose rail never answers anything. */
+    private ComputedRun aRunTheRailWillNotAnswer() {
+        obligation(ALICE, BORIS, 10_000L, "INR", 2);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+        approveEveryone(run);
+        fundEveryRequirement(run);
+
+        for (PlannedTransfer transfer : run.transfers()) {
+            rail.scripting(transfer.railRef(), StubRail.Behaviour.UNREACHABLE);
+        }
+
+        return run;
     }
 
     private PrintStream terminal() {

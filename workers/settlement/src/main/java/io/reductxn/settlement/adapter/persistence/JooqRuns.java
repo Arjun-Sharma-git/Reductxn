@@ -138,6 +138,11 @@ public class JooqRuns implements Runs {
             DSL.field("next_attempt_at", OffsetDateTime.class);
     private static final Field<OffsetDateTime> TRANSFER_UNANSWERED_SINCE =
             DSL.field("unanswered_since", OffsetDateTime.class);
+    // Who decided a transfer when it was not a rail that did (V509). Kept beside the columns above rather than in a
+    // table of their own: they are three facts about one transfer row, written by one statement.
+    private static final Field<String> TRANSFER_RESOLVED_BY = DSL.field("resolved_by", String.class);
+    private static final Field<String> TRANSFER_RESOLVED_BASIS = DSL.field("resolved_basis", String.class);
+    private static final Field<OffsetDateTime> TRANSFER_RESOLVED_AT = DSL.field("resolved_at", OffsetDateTime.class);
 
     /**
      * The three transfer columns whose names {@code settlement_runs} also has, written out qualified.
@@ -452,6 +457,30 @@ public class JooqRuns implements Runs {
     }
 
     @Override
+    public void resolveTransfer(UUID transferId, TransferStatus status, Instant at, String by, String basis) {
+        Objects.requireNonNull(transferId, "transferId");
+        Objects.requireNonNull(status, "status");
+        Objects.requireNonNull(at, "at");
+        Objects.requireNonNull(by, "by");
+        Objects.requireNonNull(basis, "basis");
+
+        // The same shape as `markTransfer`: an answer arrived, so the state is written, the retry counter goes back to
+        // zero and the wait and the spell of silence are over. What differs is where the answer came from, so it is
+        // recorded in the three columns of its own - and `rail_detail` is left untouched, because it is the last thing
+        // the rail said rather than a claim about who decided.
+        dsl.update(TRANSFERS)
+                .set(TRANSFER_STATUS, status.wireName())
+                .set(TRANSFER_UNANSWERED, 0)
+                .set(TRANSFER_NEXT_ATTEMPT, (OffsetDateTime) null)
+                .set(TRANSFER_UNANSWERED_SINCE, (OffsetDateTime) null)
+                .set(TRANSFER_RESOLVED_BY, by)
+                .set(TRANSFER_RESOLVED_BASIS, basis)
+                .set(TRANSFER_RESOLVED_AT, at.atOffset(ZoneOffset.UTC))
+                .where(TRANSFER_ID.eq(transferId))
+                .execute();
+    }
+
+    @Override
     public void markTransferAttempted(UUID transferId, TransferStatus status, Instant at) {
         Objects.requireNonNull(transferId, "transferId");
         Objects.requireNonNull(status, "status");
@@ -643,7 +672,8 @@ public class JooqRuns implements Runs {
         Map<String, List<PlannedTransfer>> transfersByCurrency = new HashMap<>();
         for (Record row : dsl.select(TRANSFER_ID, TRANSFER_CURRENCY, TRANSFER_EXPONENT, TRANSFER_FROM, TRANSFER_TO,
                         TRANSFER_AMOUNT, TRANSFER_RAIL_REF, TRANSFER_STATUS, TRANSFER_DETAIL, TRANSFER_UNANSWERED,
-                        TRANSFER_NEXT_ATTEMPT, TRANSFER_UNANSWERED_SINCE)
+                        TRANSFER_NEXT_ATTEMPT, TRANSFER_UNANSWERED_SINCE, TRANSFER_RESOLVED_AT, TRANSFER_RESOLVED_BY,
+                        TRANSFER_RESOLVED_BASIS)
                 .from(TRANSFERS)
                 .where(TRANSFER_RUN.eq(runId))
                 .orderBy(TRANSFER_RAIL_REF.asc())
@@ -652,6 +682,7 @@ public class JooqRuns implements Runs {
             Currency currency = Currency.of(row.get(TRANSFER_CURRENCY), row.get(TRANSFER_EXPONENT));
             OffsetDateTime nextAttempt = row.get(TRANSFER_NEXT_ATTEMPT);
             OffsetDateTime unansweredSince = row.get(TRANSFER_UNANSWERED_SINCE);
+            OffsetDateTime resolvedAt = row.get(TRANSFER_RESOLVED_AT);
             PlannedTransfer transfer = new PlannedTransfer(
                     row.get(TRANSFER_ID),
                     currency,
@@ -663,7 +694,10 @@ public class JooqRuns implements Runs {
                     row.get(TRANSFER_DETAIL),
                     row.get(TRANSFER_UNANSWERED),
                     nextAttempt == null ? null : nextAttempt.toInstant(),
-                    unansweredSince == null ? null : unansweredSince.toInstant());
+                    unansweredSince == null ? null : unansweredSince.toInstant(),
+                    resolvedAt == null ? null : resolvedAt.toInstant(),
+                    row.get(TRANSFER_RESOLVED_BY),
+                    row.get(TRANSFER_RESOLVED_BASIS));
 
             transfers.add(transfer);
             transfersByCurrency.computeIfAbsent(currency.code(), ignored -> new ArrayList<>()).add(transfer);

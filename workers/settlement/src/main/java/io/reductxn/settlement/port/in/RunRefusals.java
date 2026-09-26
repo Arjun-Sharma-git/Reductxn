@@ -367,4 +367,106 @@ public final class RunRefusals {
                     + "through moving the group's money";
         }
     }
+
+    /**
+     * The run the caller named has no such transfer in it.
+     *
+     * <p>One refusal rather than two for "no such transfer" and "that transfer is in another run", because from the
+     * caller's side they are the same mistake: a transfer id that does not belong to the run they named. Answering
+     * with an empty result would let a resolution be attempted against a run nobody checked.
+     */
+    public record NoSuchTransfer(UUID runId, UUID transferId) implements DomainError {
+
+        public static final String CODE = "settlement.transfer_not_found";
+
+        public NoSuchTransfer {
+            DomainCodes.requireWellFormed(CODE);
+            Objects.requireNonNull(runId, "runId");
+            Objects.requireNonNull(transferId, "transferId");
+        }
+
+        @Override
+        public String code() {
+            return CODE;
+        }
+
+        @Override
+        public String message() {
+            return "run " + runId + " has no transfer " + transferId + ". A resolution names both, so a transfer "
+                    + "id from another run is answered rather than applied";
+        }
+    }
+
+    /**
+     * A transfer that no rail has ever been asked about, so there is no answer to have found out.
+     *
+     * <p>{@code pending} is the state a transfer is recorded in with its plan and offered in never: it stays there
+     * when the run is rejected before anything is submitted, or when the worker died between writing the plan and
+     * its first call. A person cannot have learned what a rail did with an instruction the rail never saw - and if
+     * money moved anyway, the missing fact is that a submission happened, which is a different repair.
+     */
+    public record TransferNotOffered(UUID runId, UUID transferId, TransferStatus status) implements DomainError {
+
+        public static final String CODE = "settlement.transfer_not_offered";
+
+        public TransferNotOffered {
+            DomainCodes.requireWellFormed(CODE);
+            Objects.requireNonNull(runId, "runId");
+            Objects.requireNonNull(transferId, "transferId");
+            Objects.requireNonNull(status, "status");
+        }
+
+        @Override
+        public String code() {
+            return CODE;
+        }
+
+        @Override
+        public String message() {
+            return "transfer " + transferId + " of run " + runId + " is " + status.wireName() + ": no rail has "
+                    + "ever been asked to move it, so there is no rail's answer for a person to report. A "
+                    + "resolution records what a rail did";
+        }
+    }
+
+    /**
+     * The transfer already has an answer, so this assertion would rewrite one.
+     *
+     * <p><strong>The refusal carries the attribution it is protecting</strong> - who decided, when, and on what
+     * basis - because the case this refusal actually meets is an operator re-running a command after a slow
+     * response. Erroring with "already resolved" alone would leave them wondering whether the first run wrote
+     * anything, or whether somebody else did; naming the answer lets them see that it was their own command, or that
+     * a colleague got there first. A no-op instead would hide the second case, which is worse.
+     *
+     * <p>A transfer resolved by a rail is refused the same way and names nobody, because there was no person - and
+     * that is the honest answer to "who decided this": the rail, which is what {@code rail_detail} holds.
+     */
+    public record TransferAlreadyResolved(
+            UUID runId, UUID transferId, TransferStatus status, String resolvedBy, Instant resolvedAt,
+            String resolvedBasis) implements DomainError {
+
+        public static final String CODE = "settlement.transfer_already_resolved";
+
+        public TransferAlreadyResolved {
+            DomainCodes.requireWellFormed(CODE);
+            Objects.requireNonNull(runId, "runId");
+            Objects.requireNonNull(transferId, "transferId");
+            Objects.requireNonNull(status, "status");
+        }
+
+        @Override
+        public String code() {
+            return CODE;
+        }
+
+        @Override
+        public String message() {
+            String decided = resolvedBy == null
+                    ? "a rail answered it"
+                    : "resolved by " + resolvedBy + " at " + resolvedAt + " on the basis of " + resolvedBasis;
+
+            return "transfer " + transferId + " of run " + runId + " is already " + status.wireName() + " (" + decided
+                    + "). An answer that has arrived is a fact about money, and a second answer would rewrite it";
+        }
+    }
 }
