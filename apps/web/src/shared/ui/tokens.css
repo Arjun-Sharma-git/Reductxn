@@ -1,0 +1,117 @@
+/*
+ * The design tokens, in one file, with the reasoning that produced them.
+ *
+ * They come from the ui-ux-pro-max design intelligence query for this product ("fintech settlement ledger
+ * dashboard", category *Financial Dashboard*), which returned a corporate navy/grey strategy - "high integrity,
+ * conservative accents" - a high-contrast dark palette, and Fira Sans with Fira Code. Two of its rules decide
+ * what is below and are the skill's first two priority categories:
+ *
+ *   - **Contrast 4.5:1 for text, visible focus, keyboard navigation** (priority 1, CRITICAL)
+ *   - **No instant state changes, and a reduced-motion branch** (priority 2 and 7)
+ *
+ * Every colour pair used for text carries its *measured* WCAG ratio in a comment. They were computed, not
+ * asserted - the same discipline the Java modules apply to money - and `tests/e2e/accessibility.spec.ts`
+ * re-measures them in a real browser with axe, so a token edited to something prettier fails a test rather than
+ * shipping unreadable text.
+ *
+ * Two deliberate departures from what the query returned:
+ *
+ *   1. **Not dark-only.** The query's style is "Dark Mode (OLED)" with light mode not recommended, and for a
+ *      ledger read on a desktop in daylight that is a style choice rather than a requirement. Both themes come
+ *      from the same navy/grey strategy, `prefers-color-scheme` decides by default, and either can be pinned.
+ *   2. **Fira Sans for prose, Fira Code only for amounts.** The query pairs Fira Code as the heading face, and
+ *      a code font for headings in a settlement report reads as a terminal. Where a monospaced face genuinely
+ *      earns its place is on *numbers*: tabular figures align columns of money, which is the whole problem with
+ *      a table of amounts. So it is the amount face, and the body face is the body face.
+ */
+
+:root {
+  /* --- Type --------------------------------------------------------------------------------------- */
+  --rn-font-body: 'Fira Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --rn-font-amount: 'Fira Code', ui-monospace, 'SFMono-Regular', monospace;
+
+  /* 16px is the skill's floor for body text, not a default: anything smaller on a money screen is a defect. */
+  --rn-text-xs: 0.75rem;
+  --rn-text-sm: 0.875rem;
+  --rn-text-base: 1rem;
+  --rn-text-lg: 1.125rem;
+  --rn-text-xl: 1.375rem;
+  --rn-text-2xl: 1.75rem;
+
+  --rn-leading-tight: 1.25;
+  --rn-leading-normal: 1.5;
+  --rn-leading-loose: 1.7;
+
+  --rn-weight-normal: 400;
+  --rn-weight-medium: 500;
+  --rn-weight-bold: 600;
+
+  /* --- Space, shape, depth (4px base) ------------------------------------------------------------- */
+  --rn-space-1: 0.25rem;
+  --rn-space-2: 0.5rem;
+  --rn-space-3: 0.75rem;
+  --rn-space-4: 1rem;
+  --rn-space-5: 1.5rem;
+  --rn-space-6: 2rem;
+  --rn-space-8: 3rem;
+  --rn-space-10: 4rem;
+
+  --rn-radius-sm: 4px;
+  --rn-radius-md: 8px;
+  --rn-radius-lg: 12px;
+
+  --rn-shadow-card: 0 1px 2px rgb(15 23 42 / 6%), 0 1px 3px rgb(15 23 42 / 10%);
+
+  /* --- Motion ------------------------------------------------------------------------------------- */
+  /* Durations are named for what they do, not for how long they are, because "300ms" is not a reason. */
+  --rn-motion-fast: 120ms;
+  --rn-motion-base: 200ms;
+  --rn-motion-slow: 320ms;
+  --rn-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --rn-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* --- Light theme (the default) ------------------------------------------------------------------- */
+  color-scheme: light;
+
+  --rn-bg: #f6f7f9;
+  --rn-surface: #ffffff;
+  --rn-surface-muted: #eef1f5;
+
+  --rn-text: #0f172a; /* on --rn-bg: 16.65:1; on --rn-surface: 17.85:1 */
+  --rn-text-muted: #475569; /* on --rn-bg: 7.07:1; on --rn-surface: 7.58:1 */
+
+  /* Separators only. A border conveys no meaning, so it is not held to 4.5:1 - anything that conveys state
+     (a status, a direction, a currency) uses a text or badge token instead. */
+  --rn-border: #d7dce4;
+  --rn-border-strong: #b6bfcd;
+
+  --rn-accent: #22c55e; /* the skill's accent, kept for fills */
+  --rn-accent-ink: #0f172a; /* on --rn-accent: 7.83:1 */
+  --rn-positive-text: #15803d; /* on --rn-surface: 5.02:1 */
+  --rn-danger-text: #b91c1c; /* on --rn-surface: 6.47:1 */
+  --rn-danger-surface: #fef2f2;
+
+  --rn-focus-ring: #0f172a; /* against --rn-bg: 16.65:1 */
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --rn-bg: #020617;
+  --rn-surface: #0e1223;
+  --rn-surface-muted: #1a1e2f;
+
+  --rn-text: #f8fafc; /* on --rn-bg: 19.28:1; on --rn-surface: 17.77:1 */
+  --rn-text-muted: #94a3b8; /* on --rn-bg: 7.87:1 */
+
+  --rn-border: #334155;
+  --rn-border-strong: #475569;
+
+  --rn-accent: #22c55e;
+  --rn-accent-ink: #0f172a;
+  --rn-positive-text: #22c55e; /* on --rn-bg: 8.85:1 */
+  --rn-danger-text: #ef4444; /* on --rn-surface: 4.94:1 */
+  --rn-danger-surface: #2a1417;
+
+  --rn-focus-ring: #ffffff; /* against --rn-bg: 20.17:1 */
+}

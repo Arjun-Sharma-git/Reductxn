@@ -1,0 +1,23 @@
+.header {
+  margin-block-end: var(--rn-space-5);
+}
+
+.lede {
+  margin: 0;
+  color: var(--rn-text-muted);
+  max-inline-size: 70ch;
+}
+
+/* Space is reserved while loading, so the first paint and the loaded paint have the same height. A layout that
+   jumps when data arrives is the CLS problem the skill's third priority names, and a settlement screen is read
+   while it loads far more often than a marketing page. */
+.status {
+  min-block-size: 6rem;
+  color: var(--rn-text-muted);
+}
+
+.asOf {
+  margin-block: var(--rn-space-5) 0;
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-xs);
+}

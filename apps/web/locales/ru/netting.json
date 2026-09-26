@@ -1,0 +1,9 @@
+{
+  "$comment": "A deliberately partial seed. The keys below are the ones where Russian proves something English cannot: four plural categories instead of two. Everything else falls back to English per key (shared/i18n/translate.ts), and _meta.json marks this locale incomplete so the catalog check reports rather than fails on it.",
+  "title": "Предварительный расчёт взаимозачёта",
+  "loading": "Считаем план…",
+  "partitions": {
+    "transferCounts": "{gross, number} → {net, number}",
+    "summary": "{count, plural, one {# перевод} few {# перевода} many {# переводов} other {# перевода}} в {currencies, plural, one {# валюте} few {# валютах} many {# валютах} other {# валютах}}"
+  }
+}

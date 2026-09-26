@@ -1,0 +1,8 @@
+.strong {
+  font-weight: var(--rn-weight-bold);
+}
+
+.unknown {
+  color: var(--rn-text-muted);
+  font-style: italic;
+}

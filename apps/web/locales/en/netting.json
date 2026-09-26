@@ -1,0 +1,52 @@
+{
+  "title": "Netting preview",
+  "lede": "What this group's open commitments would come to if they were settled now. Nothing here has happened yet, and nothing on this screen changes anything.",
+  "loading": "Working out the plan…",
+  "empty": "This group has no open commitments, so there is nothing to settle.",
+  "asOf": {
+    "now": "As of now.",
+    "at": "As of {instant}."
+  },
+  "partitions": {
+    "title": "What netting saves",
+    "description": "One plan per currency. Members are never netted across currencies, because a net across two currencies is a value that depends on a rate nobody agreed (ADR 0012).",
+    "caption": "Transfers and tax, before and after netting, per currency",
+    "currency": "Currency",
+    "transfers": "Transfers",
+    "tax": "Tax after netting",
+    "saved": "Saved",
+    "transferCounts": "{gross, number} → {net, number}",
+    "summary": "{count, plural, one {# transfer} other {# transfers}} across {currencies, plural, one {# currency} other {# currencies}}",
+    "perCurrencyNote": "Nothing is added up across currencies on this screen, and nothing should be: rupees and yen have no common total without a reporting currency and a rate."
+  },
+  "positions": {
+    "title": "What each member's position comes to",
+    "description": "After the plan, in the currency the member holds it in.",
+    "caption": "Each member's position in the plan",
+    "member": "Member",
+    "direction": "Direction",
+    "net": "Net"
+  },
+  "transfers": {
+    "title": "Who pays whom",
+    "description": "The movements the plan would make. A leg through the clearing account is the part that crosses currencies.",
+    "caption": "The plan's movements",
+    "payer": "Paying member",
+    "payee": "Receiving member",
+    "amount": "Amount",
+    "status": "Status",
+    "viaFxClearing": "Currency clearing, for {payee}"
+  },
+  "direction": {
+    "pay": "Pays",
+    "receive": "Receives",
+    "flat": "Settled up"
+  },
+  "status": {
+    "pending": "Not started",
+    "authorized": "Authorized",
+    "submitted": "Sent to the rail",
+    "confirmed": "Confirmed",
+    "failed": "Failed"
+  }
+}
