@@ -99,6 +99,8 @@ class RuleCoverageTest {
             Map.entry("B17", List.of(
                     "SchemaOwnershipTest#everyTableIsCreatedByExactlyOneModule",
                     "SchemaOwnershipTest#everyMigrationVersionIsInItsOwnersRange")),
+            Map.entry("B22", List.of(
+                    "ModuleBoundaryTest#b22_booking_depends_only_on_kernel_ledger_planning_and_fx")),
             Map.entry("B20", List.of("ModuleBoundaryTest#b20_api_has_no_way_to_localise")),
             Map.entry("B18", List.of("ModuleBoundaryTest#b18_fx_depends_only_on_kernel_and_ledger")),
             Map.entry("B19", List.of("ModuleBoundaryTest#b19_no_other_domain_module_knows_about_fx")),

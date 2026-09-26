@@ -273,7 +273,11 @@ structured `params`; localization happens in the client (P13, ADR 0014).
 `libs/fx`. It is the only module permitted to compose per-currency plans, and the only place
 `fx_clearing` is modelled. It is pure: no I/O, no clock, no provider.
 
-**NOTE:** RULE B6 is the one people fight. When settlement needs "the same" logic as the API, the
+**RULE B22** - `libs/booking` depends only on `libs/kernel`, `libs/ledger`, `libs/planning` and
+`libs/fx`. It composes the entries a commitment books out of what planning already decided, so it may not
+run the netting engine, move anything on a rail, or reach into a deployable. Like B21 it exists because of
+B6: the API books an obligation when it is recorded and the worker books a run when it executes, and those
+two may never depend on each other.
 answer is never a `common` module containing everything - it is to extract the actual concept into
 `libs/*` under a name that describes it.
 
@@ -293,6 +297,7 @@ meant. The distinction that actually matters is **plan versus run**, and the nam
 | Module | Owns |
 |---|---|
 | `libs/planning` | **What** must be settled: the per-currency plan, the partitions, the `fx_clearing` position, the external FX requirement. Pure and deterministic |
+| `libs/booking` | **What that becomes in the ledger**: the entries a commitment produces, their currencies, their link and their chain. Pure, and one more example of RULE B6 |
 | `workers/settlement` | **Executing** it: the run lifecycle, quorum, idempotency, rail submission, funding state |
 
 **The worker kept the name, because "settlement" already meant the run everywhere it appeared.** The
@@ -669,7 +674,7 @@ Modularity that is not checked is not real. Every pull request runs:
 
 | Gate | Tool | Fails when |
 |---|---|---|
-| Module graph | ArchUnit + Spring Modulith | RULE B1-B21 violated. **Live**: 23 ArchUnit rules plus the schema-ownership test, all verified non-vacuous. Spring Modulith is not wired: ArchUnit covers the module graph, but the living documentation it would generate does not exist |
+| Module graph | ArchUnit + Spring Modulith | RULE B1-B22 violated. **Live**: 24 ArchUnit rules plus the schema-ownership test, all verified non-vacuous. Spring Modulith is not wired: ArchUnit covers the module graph, but the living documentation it would generate does not exist |
 | Rule coverage | `RuleCoverageTest` - **live** | A RULE declared in this plan *or in `docs/specs`* is neither enforced nor explicitly deferred, a coverage entry is stale, or a claimed enforcement does not resolve to something that runs |
 | Property coverage | `PropertyCoverageTest` - **live** | A property declared in a spec has no assertion labelled with its id and no recorded reason, or a test labels a property that no spec defines |
 | Import boundaries | `eslint-plugin-boundaries` | RULE F1-F12 violated |
@@ -935,7 +940,7 @@ lives in a document is no longer the situation for either.
 
 ## Appendix B - Verified state
 
-**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 162 tests, none failing:
+**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 169 tests, none failing:
 
 | Suite | Tests | What it proves |
 |---|---|---|
@@ -958,14 +963,16 @@ lives in a document is no longer the situation for either.
 | `NettingPreviewApiTest` | 5 | The contract's preview through every layer, over rows written with SQL and read back through jOOQ: the single-currency shape, a multicurrency group reported as partitions rather than collapsed into one, an empty plan, framework errors as problem+json, and `asOf` meaning "open at that instant" rather than "created before it" |
 | `ProblemTranslatorTest` | 2 | B20: the response carries the domain's code and nothing a client should render, and an un-namespaced code cannot reach a client |
 | `DomainErrorResolverTest` | 2 | That the resolver claims domain failures and declines everything else, so a bad request keeps its own status |
-| `ModuleBoundaryTest` | 23 | RULEs B1-B5, B8, B10-B16, B18-B21 |
+| `ModuleBoundaryTest` | 24 | RULEs B1-B5, B8, B10-B16, B18-B22 |
 | `SchemaOwnershipTest` | 2 | RULE B17: no table is created by two modules, and no migration version falls outside its owner's range |
+| `BookingsTest` | 5 | Both booking shapes, the direction convention asserted through `Balances`, the two derived-id guarantees, and the two refusals |
+| `BookingsPropertyTest` | 1 | 300 generated rates and amounts: every booking pairs its link (asserted with `FxLinkage`) and leaves the clearing account holding exactly the two amounts |
 | `ArchUnitVisibilityTest` | 1 | That the architecture rules above are not vacuous |
 | `DomainErrorCodeTest` | 1 | That every error code is well formed, namespaced by its own module, unique, and declared as a constant |
 | `RuleCoverageTest` | 3 | That every RULE in the plan *or the specs* is enforced or explicitly deferred, that every claimed enforcement resolves to something that runs, and that no rule is both |
 | `PropertyCoverageTest` | 3 | That every property in the specs is labelled by a test assertion or explicitly deferred, and that no test labels a property no spec defines |
 
-All 23 architecture rules are verified non-vacuous, and that verification is automated rather than
+All 24 architecture rules are verified non-vacuous, and that verification is automated rather than
 something a reviewer has to notice. See the constraint table below.
 
 **Coverage is checked for behaviour as well as structure.** `S1-S5` - quorum, idempotency, partial
@@ -1002,30 +1009,27 @@ change, so it is stated explicitly:
 | Journal entries and the hash chain | ADR 0004, 0012 | **Model implemented and tested; no write path** | 41 tests green, plus the 7 for `Money` counted above. `JournalEntry` and `Posting` enforce L1, L2 and L6 on construction; the hash is derived rather than stored, so an entry whose hash disagrees with its content cannot be constructed at all; `EntryChain` and `FxLinkage` verify a chain and its FX pairing as pure functions an offline job can run. Five of the nine ledger invariants are asserted, and the four that are not name the mechanism they wait on |
 | FX rates and the residual | ADR 0013 | **Implemented, tested** | 35 tests green. `libs/fx` owns the rate type, the exact conversion and `FxQuote` |
 | Per-currency composition | ADR 0012 | **Implemented, tested** | 20 tests green. `libs/planning` partitions a cycle, composes the per-currency plans, and derives the external FX requirement |
-| RULEs B3, B4, B5, B10-B17, B18-B21 | ADR 0012, 0013 | **Enforced** | 23 ArchUnit rules plus `SchemaOwnershipTest`, all verified non-vacuous. B3 and B4 had been stated in section 5.1 and never enforced; B11 was described as enforced and did not exist; B12-B15 had no subject until `apps/api` had sources; B16 and B17 needed a persistence adapter and a schema |
+| RULEs B3, B4, B5, B10-B17, B18-B22 | ADR 0012, 0013 | **Enforced** | 24 ArchUnit rules plus `SchemaOwnershipTest`, all verified non-vacuous. B3 and B4 had been stated in section 5.1 and never enforced; B11 was described as enforced and did not exist; B12-B15 had no subject until `apps/api` had sources; B16 needed a persistence adapter and B17 a schema; B22 needed the module it constrains |
 | `apps/api` preview over real persistence | ADR 0009, 0004 | **Implemented and tested** | 10 tests green against a container: the hexagonal layers, the RFC 9457 error path, the contract's preview reading `obligations` through jOOQ, and the `asOf` semantics that make a past preview reproducible |
 | `platform/persistence` | - | **Implemented and tested** | 2 tests green. jOOQ and Flyway wiring, PgBouncer-compatible JDBC settings, and a guard that refuses to start when Flyway finds no migrations |
+| `libs/booking` | ADR 0012, 0013; L7, L9; RULE B6, B22 | **Implemented and tested; nothing calls it yet** | 6 tests green, one of them a 300-case property. Both shapes book correctly, L9 is asserted with the verifier that will run against the stored entries, and L7's accounting half moved out of the deferral map. It has no consumer until `POST /obligations` is wired, which is the next slice |
 | `fx_clearing` postings | ADR 0012 | **Not implemented** | Nothing books the entry pair to the ledger. The plan computes the clearing position and the ledger can now express, balance and verify the entries, but no code writes one - that is `apps/api`'s record-obligation use case |
 | Funding state, per-currency runs | ADR 0012 | **Not implemented** | Needs `workers/settlement`, which has no sources |
 | Localization | ADR 0014 | **Not implemented** | No catalogs, no `shared/i18n`, no locale resolution |
 | RULEs F10-F12 | ADR 0014 | **Not enforced** | Listed in section 8 as gates, not yet written. B20 was in this row and is enforced now |
 
-So the honest position is narrower than "multicurrency is done": **the plan is done and proven, the ledger
-can express and verify its entries, and the API reads real obligations from a real database, while nothing
-writes one.** A cycle can be partitioned, netted per currency and reported with its external FX requirement
-quantified per currency, with X7 asserted against generated cycles. A linked entry pair is expressible,
-balances and chains. `apps/api` maps a plan onto the contract's response shape over rows in `obligations`,
-in a schema that two owning modules migrate.
+So the honest position is narrower than "multicurrency is done": **the decision about what a commitment
+books now exists and is proven, and nothing calls it yet.** That gap is worth stating plainly rather than
+burying. `libs/booking` decides which entries a commitment produces, in both shapes, with L9 asserted against
+the verifier that will run on the stored entries - and no deployable invokes it, so no entry has ever been
+written by this codebase. The API reads real obligations from a real database; the tests write them with SQL.
 
-What is still missing is the write path (and it is now only the write path): `SettlementPlan` says what must
-move and no code turns it into `JournalEntry` rows, nothing consumes the residual fraction across a cycle,
-and no run can be gated on funding. Nothing in the repository writes an obligation either - the tests do it
-with SQL, which is the honest way to state that the API is read-only today.
-
-The next implementation step is therefore booking: the two linked entries per cross-currency obligation, the
-cycle's residual booked to `fx_clearing`, and a run gated on its funding. Cross-currency obligations need
-columns the table does not have yet - a locked quote per obligation - so the schema and the booking land
-together. For localization it is the Phase 1 scaffolding, before the first screen exists to retrofit.
+What is still missing is the wire from the decision to the record. `POST /obligations` is fully specified in
+the contract, including the `settleInCurrency` case and the `fx.rate_stale` failure it fails closed with, and
+it is unimplemented - which is the same slice as the ledger's tables, the append path, and the chain-head
+adapter that has to serialise appends before reading. After that the run: the cycle's residual against
+`fx_clearing` per currency (L8), and a run gated on its funding. For localization it is the Phase 1
+scaffolding, before the first screen exists to retrofit.
 
 
 Toolchain constraints discovered by actually running the build. All are now pinned with reasons:
@@ -1050,6 +1054,9 @@ Toolchain constraints discovered by actually running the build. All are now pinn
 | **A `Location[]` concatenated into a message is an object identity** | The guard's refusal message ended "...Flyway read from `[Lorg.flywaydb.core.api.Location;@797fcf9`". The message exists to say *where* Flyway looked, and that was the one thing it no longer said. Caught by an integration test asserting the message names the location it was pointed at, which is a reason to assert on messages and not only on types. |
 | **Gradle fails a build whose task input could contain another task's output** | `fileTree(root){ include("**/src/main/resources/db/migration/*.sql") }` resolves the whole repository - including every `build` directory - and Gradle reported an implicit dependency on `:apps:api:test`. Fair: an input that claims to look everywhere cannot be ordered against. Module-anchored patterns, as the neighbouring input already used, keep the same files. |
 | **A sabotage harness that searches for the wrong string certifies the rule it failed to break** | The first run of the B16/B17 sabotage reported all three rules inert. ArchUnit *rules* are fields and report as `name FAILED`, while JUnit *methods* carry `name() FAILED` - the harness looked for the field form and never matched a method. The rules were working: an unforced run failed correctly, and `--rerun-tasks` proved it. The harness now accepts both, because a check that cannot see its own failure is worse than none - it signs off on the thing it was supposed to question. |
+| **A new module's rule fails as vacuous, and only `emptyShould` catches it before the visibility guard does** | RULE B22 names `io.reductxn.booking..`, and `platform/testing` did not depend on `libs/booking`, so ArchUnit imported none of its classes: the rule reported "failed to check any classes". `ArchUnitVisibilityTest` exists for exactly this and did not catch it, because its list of modules is hand-maintained too - the list had no entry for the new module either. What saved it was `failOnEmptyShould`, which is on. Two hand-maintained lists, and the guard that watches the first is not watched by anything; that is worth knowing rather than fixing with a third list. |
+| **jqwik's `Combinators.combine` returns a combinator, not an arbitrary** | So `filter` and `map` do not exist on it - only `as` and `flatAs` - and the compile error names an inference variable rather than the method that is missing. The generator has to materialise its terms before filtering. The same file also found that `Arbitraries.nothing()` carries a Void that must be disambiguated at every call site, which is why the filter version reads better. |
+| **Two coverage maps, and a rule can be decided by the wrong one** | A new MASTER-PLAN row named booking's coverage with the literal word RULE in front of "L7, L9", and RuleCoverageTest then demanded a decision for L7 in *its* map - which is for B/S/R/P/N rules. The L-properties are declared in `docs/specs/ledger.md` and decided in PropertyCoverageTest, which had just moved L7 out of its deferral because a test labels it. The two maps disagreed about who owned L7, and wording caused it: a prefix that reads as a rule declaration is one. Widening the reference format to cite a guard in another module was tried first and abandoned - a Gradle dependency exposes main classes, not another module's tests, so the cite could not resolve - and the abandoned mechanism was reverted rather than left in place unused. This paragraph was then rewritten to describe the offending text instead of quoting it, because quoting it produced a fresh declaration and the same failure: the checker cannot tell a mention from a claim, which is a limitation worth knowing before writing prose about it. |
 
 The pure core also still compiles standalone with plain `javac` (no Gradle, no Spring), which is the
 property that lets an auditor reproduce a settlement in isolation (principle P4).

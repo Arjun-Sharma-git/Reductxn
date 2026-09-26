@@ -75,10 +75,16 @@ class PropertyCoverageTest {
             Map.entry("N5", "the optimizer is never worse than the baseline. Tier 2 (ADR 0005) does not "
                     + "exist, so there is nothing to compare against. Testable the day one lands"),
 
-            // Ledger. Five of the nine gained tests when the entry, posting and hash-chain types landed;
-            // the four below are what remains, and each names the mechanism the spec relies on rather
-            // than merely the work. That distinction is the point of this map: L3 and L5 are waiting on
-            // a schema, L7 and L8 on a write path, and none of them is waiting on more domain types.
+            // Ledger. Six of the nine gained tests as the entry, posting and hash-chain types landed and as
+            // booking arrived; the three below are what remains, and each names the mechanism the spec
+            // relies on rather than merely the work. That distinction is the point of this map: L3 and L5
+            // are waiting on a schema, L8 on the run that executes a cycle, and none of them on more types.
+            //
+            // L7 left this map when booking landed. It used to say the booking half needed a write path;
+            // what booking can assert, it now does - each side posts the exact amount, and the residual
+            // leaves the booking attached to its quote instead of being rounded into a posting. The half
+            // that remains is the cycle sum, which is L8's question rather than a separate one, so it moved
+            // there rather than being restated.
             Map.entry("L3", "entries are immutable and corrections are compensating entries. The model "
                     + "half is done - an entry is an immutable record over an unmodifiable posting list, "
                     + "and a compensating entry returns an account to zero - but the spec names the "
@@ -88,11 +94,6 @@ class PropertyCoverageTest {
                     + "Balances.netDebitOf sums signed postings, order-independently, and a compensated "
                     + "entry returns zero. The 'never stored' half claims that no balance column exists "
                     + "anywhere, which is a property of a schema rather than of this module"),
-            Map.entry("L7", "the rounding residual is booked to fx_clearing, never dropped. The "
-                    + "conversion half is X2 and passes. The booking half needs the write path: the "
-                    + "residual is sub-minor and accumulates, so booking it is the cycle sum of "
-                    + "residuals against the fx_clearing delta - the check docs/specs/fx.md already "
-                    + "lists as landing with the ledger write path - and no code writes postings yet"),
             Map.entry("L8", "fx_clearing is zero per currency at the end of every cycle, or the run is "
                     + "flagged externally_funded. The measurement is built: Balances.netDebitOf over the "
                     + "clearing account reports a non-zero position per currency, and BalancesTest does "

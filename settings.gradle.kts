@@ -17,6 +17,7 @@ include(":libs:ledger")
 include(":libs:netting")
 include(":libs:fx")
 include(":libs:planning")
+include(":libs:booking")
 include(":libs:rails")
 
 // --- Deployables ---
