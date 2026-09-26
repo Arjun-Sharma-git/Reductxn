@@ -64,20 +64,11 @@ public final class ObligationMapper {
      * says it is true when the rail performed the conversion, so false is the default a client already has.
      */
     private static FxQuoteDto quote(FxQuote quote) {
-        FxRate rate = quote.rate();
-
         return new FxQuoteDto(
                 quote.id(),
-                new FxQuoteDto.RateDto(
-                        rate.base().code(),
-                        rate.quote().code(),
-                        rate.rateScaled(),
-                        rate.rateScale(),
-                        rate.midRateScaled(),
-                        rate.spreadBps(),
-                        rate.quotedAt(),
-                        rate.expiresAt(),
-                        rate.source()),
+                // The rate is the contract's own schema type, shared with `GET /fx/rates` (ADR 0037), so a locked
+                // quote and a reference rate cannot end up describing a rate differently.
+                FxRateResponse.of(quote.rate()),
                 money(quote.baseAmount()),
                 money(quote.convertedAmount()),
                 quote.residualScaled(),

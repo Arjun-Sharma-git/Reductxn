@@ -144,6 +144,15 @@ money rendering anywhere. It serves a code and an exponent, ordered by code, and
 `GET /v1/fx/rates` - the third - is not here. It needs a decision first: the rate provider judges staleness and
 throws `fx.rate_stale`, a 422 the contract's response list for that endpoint does not have.
 
+`GET /v1/fx/rates` is the third, and it is where the module's only *business* decision about a read lives (ADR 0037):
+it answers the rate a pair converts at **and applies the same freshness policy as locking**, so a pair whose newest
+rate has expired is refused with `fx.rate_stale` (422, final) rather than answered with a stale number — because the
+recording path would refuse that same submission, and showing the number would invite a member to fill in the form
+and be refused later. A pair nothing has quoted is `503 fx.rate_unavailable`, which is retryable and a different
+answer; both codes are the provider's own, so the read and the write fail identically. The response is the contract's
+whole `FxRate` schema — `quotedAt` and `expiresAt` included, so a screen never presents an old number as current — and
+`FxRateResponse` is now the one type that describes a rate anywhere, shared with a locked quote (ADR 0037).
+
 `GET /v1/groups/{groupId}/cycles` is the read that makes it visible (ADR 0034). It exists for the reason
 `GET /v1/groups/{groupId}/runs` does, one act earlier: opening a cycle writes a claim about an instant, the plan over
 it is the worker's business a minute later, and without the list a member who asked and a member whose cycle the
