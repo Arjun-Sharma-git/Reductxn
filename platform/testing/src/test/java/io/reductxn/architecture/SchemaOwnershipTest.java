@@ -40,7 +40,9 @@ class SchemaOwnershipTest {
      */
     private static final Map<String, Integer> VERSION_RANGE_BY_MODULE = Map.of(
             "apps/api", 1,
-            "libs/netting", 2
+            "libs/netting", 2,
+            "libs/ledger", 3,
+            "libs/fx", 4
     );
 
     private static final Pattern CREATE_TABLE =
