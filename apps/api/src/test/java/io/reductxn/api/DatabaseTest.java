@@ -7,6 +7,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -50,6 +51,22 @@ abstract class DatabaseTest {
 
         // Required with no default in the application, so every test has to say which jurisdiction it is in.
         registry.add("reductxn.tax.jurisdiction", () -> "IN");
+
+        // The settlement worker's migrations, by path rather than by dependency.
+        //
+        // This module reads the worker's tables in one read model - the preview excludes commitments a settled
+        // run has already discharged - and `apps/api` may not depend on `workers/settlement` (RULE B6), so
+        // those migrations are not on this classpath. Pointing Flyway at the directory gives the test database
+        // the schema a deployment has (where whichever deployable starts first applies every migration) without
+        // adding an edge to the module graph that must not exist. It is the exact mirror of what the worker's
+        // tests do with `V101__obligations.sql`.
+        Path workerMigrations = Path.of("..", "..", "workers", "settlement", "src", "main", "resources", "db",
+                        "migration")
+                .toAbsolutePath()
+                .normalize();
+
+        registry.add("spring.flyway.locations",
+                () -> "classpath:db/migration,filesystem:" + workerMigrations);
     }
 
     @Autowired
@@ -68,6 +85,12 @@ abstract class DatabaseTest {
         jdbc.execute("DELETE FROM fx_quotes");
         jdbc.execute("DELETE FROM fx_rates");
         jdbc.execute("DELETE FROM tax_rules");
+
+        // The settlement worker's rows, for the one read model that reads them: children before parents, and
+        // after the obligations they point at.
+        jdbc.execute("DELETE FROM settlement_run_obligations");
+        jdbc.execute("DELETE FROM settlement_runs");
+        jdbc.execute("DELETE FROM settlement_cycles");
 
         // A flat charge per transfer, in both currencies these tests use. Deliberately the same amount in
         // each: it is a per-transfer charge, not a value, so the same number in a coarser currency is a

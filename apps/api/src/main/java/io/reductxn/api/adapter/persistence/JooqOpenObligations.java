@@ -53,18 +53,34 @@ import java.util.UUID;
 @Component
 public class JooqOpenObligations implements OpenObligations {
 
-    private static final Table<Record> OBLIGATIONS = DSL.table("obligations");
-    private static final Field<UUID> ID = DSL.field("id", UUID.class);
-    private static final Field<UUID> GROUP_ID = DSL.field("group_id", UUID.class);
-    private static final Field<UUID> DEBTOR_ID = DSL.field("debtor_id", UUID.class);
-    private static final Field<UUID> CREDITOR_ID = DSL.field("creditor_id", UUID.class);
-    private static final Field<Long> AMOUNT_MINOR = DSL.field("amount_minor", Long.class);
-    private static final Field<String> CURRENCY_CODE = DSL.field("currency_code", String.class);
-    private static final Field<Short> CURRENCY_EXPONENT = DSL.field("currency_exponent", Short.class);
-    private static final Field<UUID> QUOTE_ID = DSL.field("quote_id", UUID.class);
+    // Aliased, with qualified columns, because the query below carries a correlated subquery over the
+    // settlement worker's tables (RULE B17's arrangement - this is a read model over another module's rows, not
+    // a dependency on it): an unqualified `id` inside that subquery would resolve against the wrong table.
+    private static final Table<Record> OBLIGATIONS = DSL.table("obligations").as("obligation");
+    private static final Field<UUID> ID = DSL.field(DSL.name("obligation", "id"), UUID.class);
+    private static final Field<UUID> GROUP_ID = DSL.field(DSL.name("obligation", "group_id"), UUID.class);
+    private static final Field<UUID> DEBTOR_ID = DSL.field(DSL.name("obligation", "debtor_id"), UUID.class);
+    private static final Field<UUID> CREDITOR_ID = DSL.field(DSL.name("obligation", "creditor_id"), UUID.class);
+    private static final Field<Long> AMOUNT_MINOR = DSL.field(DSL.name("obligation", "amount_minor"), Long.class);
+    private static final Field<String> CURRENCY_CODE =
+            DSL.field(DSL.name("obligation", "currency_code"), String.class);
+    private static final Field<Short> CURRENCY_EXPONENT =
+            DSL.field(DSL.name("obligation", "currency_exponent"), Short.class);
+    private static final Field<UUID> QUOTE_ID = DSL.field(DSL.name("obligation", "quote_id"), UUID.class);
     private static final Field<OffsetDateTime> INCURRED_AT =
-            DSL.field("incurred_at", OffsetDateTime.class);
-    private static final Field<OffsetDateTime> VOIDED_AT = DSL.field("voided_at", OffsetDateTime.class);
+            DSL.field(DSL.name("obligation", "incurred_at"), OffsetDateTime.class);
+    private static final Field<OffsetDateTime> VOIDED_AT =
+            DSL.field(DSL.name("obligation", "voided_at"), OffsetDateTime.class);
+
+    /** The settlement worker's link table and runs, for the "already settled" exclusion. */
+    private static final Table<Record> SETTLED = DSL.table("settlement_run_obligations").as("settled");
+    private static final Field<UUID> SETTLED_RUN = DSL.field(DSL.name("settled", "run_id"), UUID.class);
+    private static final Field<UUID> SETTLED_OBLIGATION =
+            DSL.field(DSL.name("settled", "obligation_id"), UUID.class);
+
+    private static final Table<Record> RUNS = DSL.table("settlement_runs").as("settled_run");
+    private static final Field<UUID> RUN_ID = DSL.field(DSL.name("settled_run", "id"), UUID.class);
+    private static final Field<String> RUN_STATUS = DSL.field(DSL.name("settled_run", "status"), String.class);
 
     private final DSLContext dsl;
 
@@ -88,6 +104,16 @@ public class JooqOpenObligations implements OpenObligations {
                 .where(GROUP_ID.eq(groupId))
                 .and(INCURRED_AT.le(asOfUtc))
                 .and(VOIDED_AT.isNull().or(VOIDED_AT.gt(asOfUtc)))
+                // A commitment a settled run has already discharged is not open: the money for it has moved,
+                // and a preview that still counted it would offer the group a cycle that would move it again.
+                // The rule is the settlement worker's (`docs/specs/settlement.md`), read here because this
+                // module's preview has to give the same answer the worker's own compute does - otherwise a
+                // group previews one thing and the run that follows settles another.
+                .andNotExists(dsl.selectOne()
+                        .from(SETTLED)
+                        .join(RUNS).on(RUN_ID.eq(SETTLED_RUN))
+                        .where(SETTLED_OBLIGATION.eq(ID))
+                        .and(RUN_STATUS.eq("done")))
                 .orderBy(INCURRED_AT.asc(), ID.asc())
                 .fetch());
 

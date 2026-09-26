@@ -36,6 +36,11 @@ the rest are performed by the use cases rather than by the states themselves:
 | `executing --> done` | `ExecuteRun.execute`, when every transfer is confirmed |
 | `executing --> failed` | `ExecuteRun.execute`, when any transfer was refused terminally (section 4) |
 
+**Settling is terminal.** A run records the commitments it nets when it is computed, and a run that reaches
+`done` has discharged them: neither reader's "open" obligations include them again, whatever instant is asked
+about. A `failed` run settles nothing - its money has partly moved and its commitments stay open, so the group
+can settle them again once the cause is dealt with (section 4, RULE S3).
+
 ## 2. Quorum before real money moves
 
 **RULE S1** - a run may only execute after quorum approval. Default policy: majority of members,
@@ -79,6 +84,11 @@ both were wrong in the same way. The same property is asserted of the funding pa
 is keyed by the caller's `funding_ref`) and of `MockRail` itself, which answers a re-submission with the
 state it already holds.
 
+**And it holds at the ledger**, which is where a second movement would be recorded: a confirmed transfer's
+entry id is derived from the transfer, so a replay books nothing - the second attempt collides on the primary
+key instead of posting the movement twice. `SettlementBookkeepingTest` asserts the entry count is unchanged
+after a replay rather than trusting the worker's own rows to say so.
+
 ## 4. Rail interaction
 
 Execution flows through `libs/rails`. Required behaviours of every adapter:
@@ -113,6 +123,27 @@ former. Backoff, a circuit breaker and a classification on the port are the next
 logic a sweep would run on a timer; what is missing is the timer, the threshold and the job. `V503`
 deliberately does not add a `submitted_at` column for it yet - a column nothing reads is a claim rather than
 a fact.
+
+## 4a. What execution writes to the ledger
+
+Each transfer that a rail confirms is booked as one `settlement` entry - payer debited, payee credited, in the
+transfer's currency - and the entry commits in the same transaction as the transfer's status. The consequences
+worth stating:
+
+- **A partial failure books what moved and nothing else** (RULE S3). There is no compensating entry, because
+  there is nothing to compensate: the money that did not move has no posting.
+- **A replay books nothing**, because the entry id is derived from the transfer.
+- **`fx_clearing` ends a cycle at zero per currency** (L8): the commitment booked the group's currency gap into
+  the account and the settlement's legs pay it back. What the group brings in from outside is not in the ledger
+  at all, because reductxn never held it (P2) - L8's other branch, a run flagged `externally_funded`, is the
+  rail-performed-FX case.
+- **Nothing is posted for a funding.** A funding is recorded as a fact about the run; the entry that would show
+  the group's own contribution arriving needs an account for the group (`owner_type = 'group'`), and the ledger
+  spec's account-typing question is open (section 8 records it as this area's remaining gap).
+
+The booking *shape* is `libs/booking`'s (RULE B22, `Bookings.settlement`), so the entry a run writes and the
+entry the API writes when an obligation is recorded cannot disagree about what an entry is. The *append* is this
+worker's: it is the only process that knows a movement happened. ADR 0017 records why.
 
 **RULE S3** - reduction partially applied. If some transfers confirm and others fail, the run is
 `failed (partial)`, net positions are **not** marked settled, and the shortfall is surfaced to the
@@ -173,10 +204,11 @@ leave the group short. Mitigations, in order of preference:
 - Whether per-currency partitions may be executed independently once approved, which would let a
 ## 8. Implementation status
 
-**Implemented in `workers/settlement`, tested against a container (47 tests across six classes):** opening a run
-for a `(group, as-of)` pair, computing the plan through `libs/planning`, and recording it as rows - one partition
-per currency, one net position per participant per currency, one transfer per movement with its RULE S2 rail
-reference. The run's status is decided in the use case, not the adapter: `awaiting_approval`, or
+**Implemented in `workers/settlement`, tested against a container (53 tests across seven classes):** opening a
+run for a `(group, as-of)` pair, computing the plan through `libs/planning`, and recording it as rows - one
+partition per currency, one net position per participant per currency, one transfer per movement with its RULE
+S2 rail reference, and the identities of the commitments it nets. The run's status is decided in the use case,
+not the adapter: `awaiting_approval`, or
 `awaiting_fx_funding` when any currency's `fx_clearing` position is non-zero (RULE S4).
 
 On top of that, the run's whole lifecycle:
@@ -194,6 +226,10 @@ On top of that, the run's whole lifecycle:
 - **A rail** - `libs/rails` has its first adapter, `MockRail`, reached through `Rails.mock()` and wired by
   configuration (`reductxn.rail.name`), which refuses an unknown name at startup rather than falling back. It
   moves nothing, confirms what it accepts, and is the deployment this project has.
+- **The ledger** - every confirmed transfer is booked as a `settlement` entry (section 4a), so a settled cycle
+  leaves every member flat and `fx_clearing` at zero per currency. The commitment an obligation recorded and the
+  entry a run writes are the two halves of one verifiable chain, and the tests hand the rebuilt entries to
+  `EntryChain` rather than comparing fields. Section 4a has what this does and does not cover.
 
 The tests verify the *stored* plan and stored state rather than the call: per-currency zero-sum read back from
 `net_positions` (N1), every participant zeroed by applying the plan's own transfers (N2), the clearing account's
@@ -205,7 +241,7 @@ funding never reaches it at all.
 
 | Missing | Why it is not here |
 |---|---|
-| Posting a settled run to the ledger | A run that reaches `done` has had its transfers confirmed by the rail, and the obligations the cycle netted are still open. This is a boundary question rather than an omission: discharging them means writing `apps/api`'s rows or publishing an event, and the worker writing another module's tables is what RULE B6 and B17 forbid. Until it is decided, L8's end-of-cycle claim cannot be asserted at all - `PropertyCoverageTest` names that |
+| Posting the currency a group brings in from outside | A funding is recorded as a fact about the run and moves no ledger entry, so nothing shows the group's own contribution arriving. The entry needs an account for the group itself, and what kind of account that is (`owner_type = 'group'`, and which of asset/liability/income) is open in `docs/specs/ledger.md` section 6 - guessing it here would have invented typing the ledger has deliberately not chosen |
 | A scheduler, or any other trigger | The tests call the use cases. Nothing computes a run, moves an approved one on, or resolves a transfer left in flight without a caller - which is the honest form of "nothing schedules anything" |
 | Retryable-vs-terminal classification, backoff, circuit breaker (section 4.3) | `PaymentRail.submit` returns a `Result` with nowhere to put the classification the spec requires, so the port needs a change before the behaviour can exist. The worker fails safe meanwhile: an unreachable rail leaves the transfer `authorized` and the run `executing`, and a later pass offers it again |
 | Reconciliation sweep (section 4.4) | Needs a submitted transfer to reconcile against. A later `execute` polls one today, so the logic exists and the job, the threshold and the timer do not |

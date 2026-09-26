@@ -53,6 +53,12 @@ belong to `libs/ledger` (`V301`), `currencies`, `fx_rates` and `fx_quotes` to `l
 `tax_rules` to `libs/netting` (`V201`), read through read models. `platform/persistence` runs every migration
 and owns none.
 
+**One read model crosses the other way.** The preview excludes commitments a settled run has already discharged,
+so it reads `workers/settlement`'s `settlement_run_obligations` and `settlement_runs` - as a projection over its
+tables, never as a dependency on the module (RULE B6, RULE B17). Those migrations are not on this module's
+classpath, so this module's *tests* take them by filesystem path; a deployment needs no such arrangement,
+because whichever deployable starts first applies every migration to the one schema.
+
 ## What is not here yet
 
 Identity, groups, and three of the five controllers the plan names. An obligation's `group_id` has no foreign
