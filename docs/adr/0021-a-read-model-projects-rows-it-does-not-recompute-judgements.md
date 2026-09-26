@@ -82,7 +82,7 @@ so that a missing field reads as a decision instead of a bug.
   ADR does not pre-empt: it would be a stored fact rather than a recomputation.
 - **`GET /runs/{runId}` answers `404` for an unknown run**, which the contract's `200`-only response list did not.
   A read of something that does not exist is not an empty success.
-- **Two refusals moved.** `api.approval_no_such_run` and `api.approval_incomplete` became `api.no_such_run` and
+- **Two refusals moved.** `api.no_such_run` and `api.request_incomplete` became `api.no_such_run` and
   `api.request_incomplete`, because the second caller showed that neither is about approving - a code identifies the
   *condition*, not the endpoint (RULE B20), and two codes for one condition is a client branching on both. No code
   has been released, so nothing depended on the old names.

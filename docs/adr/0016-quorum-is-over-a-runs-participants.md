@@ -89,3 +89,22 @@ becomes a word in the spec with no meaning in the code.
 
 **Count `fx_clearing` as a member.** Rejected: a quorum satisfied by the group's own account is not an agreement,
 and it would be easiest to reach in exactly the runs where the amounts are largest.
+
+## Amendment, 2026-09-26: the intersection had to cover refusals too
+
+This ADR's rule is "quorum is over a run's participants", and it was applied to approvals and **not to refusals**:
+`Quorum.countedApprovals()` intersected the answers with the run's own members, while `rejected()` read the raw
+rejecter rows. A test written to assert the symmetry (`RecordedDecisionsTest`, this slice) failed on the first run
+and showed what the gap meant: with `memberId` a client-supplied claim rather than a fact the server knows
+(the same identity gap this ADR's implementation notes describe), **one decision row from anybody could end any
+group's run**. An unguarded approval is inert - the run still needs its own members - while an unguarded rejection is
+terminal. The asymmetry is why the guard matters more here, not less.
+
+`Quorum.countedRejections()` now applies the same intersection, and `rejected()` is defined over it. The raw rows
+stay visible in `rejecters()`, for the reason `countedApprovals()` gives about strangers: a fact that is hidden is a
+fact nobody fixes.
+
+The existing unit test that asserted "a rejection is a state rather than the absence of an approval" had used a
+rejecter who was not one of the run's members, so it was pinning the hole. It now builds the honest version of the
+same case - three members, two approvals and a refusal from the third, who owes nothing - which is exactly the state
+where quorum is met *and* the run must not execute.

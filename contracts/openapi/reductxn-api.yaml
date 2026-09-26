@@ -422,22 +422,31 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
 
-  /runs/{runId}/approve:
+  /runs/{runId}/decisions:
     post:
       tags: [settlement]
-      summary: Approve a computed run (quorum enforced server-side)
+      summary: Record a member's answer (quorum enforced server-side)
       description: |
-        Records one member's approval of a run. The answer is stored where the run can read it, and the
-        run's own quorum arithmetic over its participants decides what it means - so this operation
-        answers `Approval recorded` rather than `Approved`, and a `200` does not mean the run will execute.
+        Records one member's answer - an approval or a refusal. The answer is stored where the run can
+        read it, and the run's own arithmetic over its participants decides what it means: an approval
+        counts toward quorum, and a refusal ends the run. So this operation answers `Decision recorded`
+        rather than `Approved` or `Rejected`, and a `200` says nothing about what the run will do.
 
         A member has one answer per run: answering twice is a `409`, and the stored answer is never
-        overwritten. Whether an approval counts is not visible here; `GET /runs/{runId}` is where a
-        member can see who has answered (not implemented yet).
+        overwritten. Whether an answer counted is not visible here; `GET /runs/{runId}` is where a member
+        sees the answers on the record, and a refusal's effect is visible in the run's `status` after the
+        worker's next look - this operation records a row and does not move the run's lifecycle.
+
+        The operation is named for the answer rather than for one of them, and the path was
+        `/runs/{runId}/approve` until refusals were expressible. The request body keeps its meaning:
+        an absent `decision` is an approval, so a client that sent the old body still sends what it
+        meant.
 
         `memberId` is client-supplied, as an obligation's `debtorId` is: this build has no identity, and
-        the field is `required` so that an approval by nobody is refused rather than attributed to
-        nobody. Requiring it is the honest shape until authentication exists.
+        the field is `required` so that an answer by nobody is refused rather than attributed to nobody.
+        Requiring it is the honest shape until authentication exists - and it is why a refusal is read
+        through the run's own membership rather than taken at face value: the member is whoever the
+        client says, so only the run decides whether that member's answer counts.
       parameters:
         - $ref: '#/components/parameters/RunId'
       requestBody:
@@ -445,13 +454,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ApprovalRequest'
+              $ref: '#/components/schemas/DecisionRequest'
       responses:
         '200':
-          description: Approval recorded
+          description: Decision recorded
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Approval' }
+              schema: { $ref: '#/components/schemas/Decision' }
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
@@ -978,26 +987,39 @@ components:
               type: array
               items: { $ref: '#/components/schemas/TransferInstruction' }
 
-    ApprovalRequest:
+    DecisionRequest:
       type: object
       description: |
-        One member's approval. The member is named by the client until this build has identity - the
-        same arrangement an obligation's `debtorId` has - and the server records who the client says
-        answered, while the run decides whether that member's answer counts.
+        One member's answer. The member is named by the client until this build has identity - the same
+        arrangement an obligation's `debtorId` has - and the server records who the client says answered,
+        while the run decides whether that member's answer counts.
       required: [memberId]
       properties:
         memberId: { type: string, format: uuid }
+        decision:
+          type: string
+          enum: [approve, reject]
+          description: |
+            The answer. Absent means `approve`, which is what this operation meant before refusals were
+            expressible, so a request that omits it is still the request it always was.
 
-    Approval:
+            A word outside this enum is refused by the run's own rows with a `422`, not passed through:
+            the vocabulary is the run's, fixed by the migration's check constraint and read by the run's
+            quorum, and this API holds no copy of the list to validate against.
+
+    Decision:
       type: object
       description: |
         An answer as it now stands on the record. There is no `counted` field, deliberately: whether an
-        answer reaches quorum is the run's arithmetic over its own participants, computed in the module
-        that owns the run, and a boolean here would be this API answering a question it does not compute.
-      required: [runId, memberId, recordedAt]
+        answer reaches quorum - or ends the run - is the run's arithmetic over its own participants,
+        computed in the module that owns the run, and a boolean here would be this API answering a
+        question it does not compute. A refusal's effect is visible in the run's `status` once the worker
+        has looked at it.
+      required: [runId, memberId, decision, recordedAt]
       properties:
         runId: { type: string, format: uuid }
         memberId: { type: string, format: uuid }
+        decision: { type: string, enum: [approve, reject] }
         recordedAt: { type: string, format: date-time }
 
     SettlementRun:
