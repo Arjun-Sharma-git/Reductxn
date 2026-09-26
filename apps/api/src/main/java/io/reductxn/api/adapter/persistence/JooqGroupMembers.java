@@ -91,6 +91,19 @@ public class JooqGroupMembers implements GroupMembers {
         return new AddedMember(toMember(row), inserted > 0);
     }
 
+    @Override
+    public boolean has(UUID groupId, UUID userId) {
+        Objects.requireNonNull(groupId, "groupId");
+        Objects.requireNonNull(userId, "userId");
+
+        // One statement, and the primary key `(group_id, user_id)` serves it: this is a lookup on the key rather than a
+        // scan of the group, which is the same reason `add` can rely on the pair being unique.
+        return 0 < dsl.fetchCount(dsl.selectOne()
+                .from(MEMBERS)
+                .where(GROUP_ID.eq(groupId))
+                .and(USER_ID.eq(userId)));
+    }
+
     private static GroupMember toMember(Record row) {
         return new GroupMember(row.get(USER_ID), row.get(DISPLAY_NAME), row.get(ROLE));
     }
