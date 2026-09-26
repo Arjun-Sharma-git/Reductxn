@@ -85,6 +85,13 @@ class PropertyCoverageTest {
             // leaves the booking attached to its quote instead of being rounded into a posting. The half
             // that remains is the cycle sum, which is L8's question rather than a separate one, so it moved
             // there rather than being restated.
+            // L8 left this map when the settlement worker arrived. It said the gate was missing; the gate is
+            // still missing, but the *measurement and the flag* are not - `ComputeRunTest` labels an assertion
+            // that a non-zero clearing position flags the run `awaiting_fx_funding` and reports the requirement
+            // per currency, and another that the ordinary case leaves it zero. What remains of L8 is the
+            // end-of-cycle claim ("zero at the end of every cycle"), which needs a run that has settled -
+            // execution, not computation. Named here rather than restated as an entry, because the map's keys
+            // are property ids and a property cannot be half-deferred.
             Map.entry("L3", "entries are immutable and corrections are compensating entries. The model "
                     + "half is done - an entry is an immutable record over an unmodifiable posting list, "
                     + "and a compensating entry returns an account to zero - but the spec names the "
@@ -94,11 +101,6 @@ class PropertyCoverageTest {
                     + "Balances.netDebitOf sums signed postings, order-independently, and a compensated "
                     + "entry returns zero. The 'never stored' half claims that no balance column exists "
                     + "anywhere, which is a property of a schema rather than of this module"),
-            Map.entry("L8", "fx_clearing is zero per currency at the end of every cycle, or the run is "
-                    + "flagged externally_funded. The measurement is built: Balances.netDebitOf over the "
-                    + "clearing account reports a non-zero position per currency, and BalancesTest does "
-                    + "exactly that on ADR 0012's example. The gate is what is missing - the run "
-                    + "transitioning to awaiting_fx_funding still needs workers/settlement"),
 
             Map.entry("I1", "every en key exists in every shipped locale. There is no catalog and no "
                     + "second locale yet; ADR 0014 scaffolding is unstarted"),
