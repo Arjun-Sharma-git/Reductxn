@@ -141,9 +141,6 @@ client needs the exponent to render a `Money` at all, so its absence did not mak
 money rendering anywhere. It serves a code and an exponent, ordered by code, and deliberately not the two columns
 (`is_cbdc`, `jurisdiction`) that no consumer reads yet.
 
-`GET /v1/fx/rates` - the third - is not here. It needs a decision first: the rate provider judges staleness and
-throws `fx.rate_stale`, a 422 the contract's response list for that endpoint does not have.
-
 `GET /v1/fx/rates` is the third, and it is where the module's only *business* decision about a read lives (ADR 0037):
 it answers the rate a pair converts at **and applies the same freshness policy as locking**, so a pair whose newest
 rate has expired is refused with `fx.rate_stale` (422, final) rather than answered with a stale number — because the
@@ -152,6 +149,18 @@ and be refused later. A pair nothing has quoted is `503 fx.rate_unavailable`, wh
 answer; both codes are the provider's own, so the read and the write fail identically. The response is the contract's
 whole `FxRate` schema — `quotedAt` and `expiresAt` included, so a screen never presents an old number as current — and
 `FxRateResponse` is now the one type that describes a rate anywhere, shared with a locked quote (ADR 0037).
+
+`GET /v1/groups/{groupId}/balances` is one of ADR 0038's recorded gaps now served, and the only one this module could
+close without a decision belonging elsewhere (ADR 0039). It is **the netting preview's own computation**: the same
+open obligations through the same port, the same planner, the same positions - flattened into one entry per member per
+currency, with the partitions and transfers nobody asked for left out of the response rather than out of the work.
+That is what stops two screens disagreeing about what somebody owes, which is ADR 0036's argument applied to a second
+pair of endpoints. It has no `asOf` (a balance is "now"; a past instant is the preview's own question), it includes a
+`flat` member rather than dropping the row, and it **needs a tax rule exactly as the plan does**, because the engine
+assesses tax on the transfers it emits - so a group holding a currency with no rule in force is told that here rather
+than shown a number nobody could reproduce. One consequence is recorded rather than hidden: a cross-currency group has
+a position whose holder is the `fx_clearing` account, and the `NetPosition` schema carries no way to say so yet, so a
+client shows the identifier and the screen's footnote names both cases.
 
 `GET /v1/groups/{groupId}/cycles` is the read that makes it visible (ADR 0034). It exists for the reason
 `GET /v1/groups/{groupId}/runs` does, one act earlier: opening a cycle writes a claim about an instant, the plan over

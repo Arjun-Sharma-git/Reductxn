@@ -53,11 +53,7 @@ public record NettingPreviewResponse(
      * its own currency, so no base currency has to be chosen to read it. Collapsing it into one currency
      * is what {@code reportingTotals} is for, and that needs a reporting rate.
      */
-    public record BestCase(List<Position> positions, List<Transfer> transfers) {
-    }
-
-    /** A member's position. {@code direction} is {@code pay}, {@code receive} or {@code flat}. */
-    public record Position(UUID userId, String direction, MoneyDto net) {
+    public record BestCase(List<NetPositionResponse> positions, List<Transfer> transfers) {
     }
 
     /**
