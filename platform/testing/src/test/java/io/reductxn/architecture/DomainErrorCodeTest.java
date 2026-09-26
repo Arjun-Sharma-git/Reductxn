@@ -63,8 +63,13 @@ class DomainErrorCodeTest {
      * is not a wrong rule but an invisible one - a rule whose subject was never imported, which reports
      * green while checking nothing. If a dependency is dropped from {@code platform/testing}, the
      * enumeration below quietly shrinks and every assertion still passes.
+     *
+     * <p>{@code rails} joined the list when the port grew its refusal classification: before that, the
+     * only rail refusal in the repository lived in a worker's test sources, which this test cannot see -
+     * so the two codes a rail adapter needs to speak were convention-checked by nobody.
      */
-    private static final Set<String> MODULES_THAT_DECLARE_CODES = Set.of("fx", "ledger", "api", "settlement");
+    private static final Set<String> MODULES_THAT_DECLARE_CODES =
+            Set.of("fx", "ledger", "rails", "api", "settlement");
 
     @Test
     void everyDomainErrorHasAConventionAbidingUniqueCode() {
