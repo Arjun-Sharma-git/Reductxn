@@ -22,6 +22,7 @@ dependencies {
     testImplementation(project(":libs:netting"))
     testImplementation(project(":libs:fx"))
     testImplementation(project(":libs:planning"))
+    testImplementation(project(":libs:booking"))
     testImplementation(project(":libs:rails"))
     testImplementation(project(":apps:api"))
 

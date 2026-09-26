@@ -322,11 +322,32 @@ class ModuleBoundaryTest {
                             "io.reductxn.platform..")
                     .because("RULE B21: settlement owns what must be settled, not how it moves");
 
+    /**
+     * RULE B22: booking depends only on kernel, ledger, planning and fx.
+     *
+     * <p>It composes ledger entries out of what planning already decided, so it may not run the netting
+     * engine, move anything on a rail, or reach into a deployable. Netting is the interesting exclusion:
+     * {@code libs/planning} re-exports it, so it is on booking's compile classpath and the build file cannot
+     * keep it out. A rule can, and the boundary is worth stating - a module that books what was settled has
+     * no business computing what should be settled.
+     */
+    @ArchTest
+    static final ArchRule b22_booking_depends_only_on_kernel_ledger_planning_and_fx =
+            noClasses().that().resideInAPackage("io.reductxn.booking..")
+                    .should().dependOnClassesThat().resideInAnyPackage(
+                            "io.reductxn.netting..",
+                            "io.reductxn.rails..",
+                            "io.reductxn.api..",
+                            "io.reductxn.settlement..",
+                            "io.reductxn.platform..")
+                    .because("RULE B22: booking records what was settled, it does not decide it");
+
     // --- apps/api: the hexagonal layers (B12-B15) and the localization boundary (B20) ---------------
     //
     // B12-B16 had no subject at all until apps/api had sources, so five rules waited rather than
-    // pretending. B16 still waits: it names jOOQ row types, and no row types exist until there is a
-    // persistence adapter. Each rule below is verified by sabotage, not by the green tick.
+    // pretending; B16 then waited longer, because it names jOOQ row types and none existed until there was
+    // a persistence adapter. All six are enforced now, and each is verified by sabotage rather than by the
+    // green tick.
 
     /**
      * RULE B12, first half: {@code web} never reaches an adapter.
