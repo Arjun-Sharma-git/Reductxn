@@ -66,16 +66,29 @@ and proves the run's arithmetic judges it. Those migrations are not on this modu
 *tests* take them by filesystem path; a deployment needs no such arrangement, because whichever deployable starts
 first applies every migration to the one schema.
 
+**The read side is a projection too, and it is drawn on the same line.** `GET /v1/runs/{runId}` and
+`GET /v1/runs/{runId}/transfers` read the worker's run, partition, transfer and decision rows and report them: the
+figures per currency, who pays whom (with the FX legs labelled from `libs/planning`'s own model of the clearing
+account), each movement's state, and every answer on the record. What they do *not* do is recompute what those rows
+mean - quorum, the group's external requirement and the reporting-currency totals are the worker's judgements, and a
+second implementation here would be the copy a member reads while the first one moves money (ADR 0021). Two of the
+contract's fields are therefore unpopulated with a stated reason, one requirement (`TransferInstruction.tax`) was
+relaxed, and the tests assert the absences so that filling one is a decision rather than an accident.
+
+Together the three endpoints are one story: read the plan, answer it, check the answers. A member cannot yet be told
+"you are one approval short" - the run's status and the answers as rows have to be read together - because that
+sentence is the run's arithmetic and nothing stores its conclusion yet.
+
 ## What is not here yet
 
-Identity, groups, and the run *read* endpoints. An obligation's `group_id` has no foreign key because `groups`
-does not exist yet, and a cross-currency obligation cannot be stored because the `obligations` table has no quote
-columns - both are stated in the migrations rather than left to be noticed.
+Identity, groups, and the rest of the settlement surface. An obligation's `group_id` has no foreign key because
+`groups` does not exist yet, and a cross-currency obligation cannot be stored because the `obligations` table has no
+quote columns - both are stated in the migrations rather than left to be noticed.
 
-`POST /v1/runs/{runId}/approve` records a member's approval; nothing here can reject one, and nothing here can
-read a run back, so the contract's `GET /runs/{runId}` and `GET /runs/{runId}/transfers` are the next slice and the
-thing that makes approving informed rather than blind. A rejection is not simple symmetry: it ends the run, that
-transition belongs to `workers/settlement`, and it needs a consumer over there (ADR 0020 says which one and why).
+`POST /v1/runs/{runId}/approve` records a member's approval and nothing here can reject one: a rejection ends the
+run, that transition belongs to `workers/settlement`, and it needs a consumer over there (ADR 0020 says which one and
+why). Nothing here computes a run either - `POST /cycles/{cycleId}/runs` and `/runs/{runId}/execute` are the
+operator's triggers, and the worker's driver performs both.
 
 The write path exists: `POST /v1/obligations` records a commitment and books the entry it produces, in one
 transaction - one entry for an ordinary commitment, a linked pair through `fx_clearing` for one whose creditor

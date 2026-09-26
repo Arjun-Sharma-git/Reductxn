@@ -91,6 +91,9 @@ abstract class DatabaseTest {
         jdbc.execute("DELETE FROM settlement_run_obligations");
         // A member's answers, which this module now writes: they point at a run, so they go before it.
         jdbc.execute("DELETE FROM settlement_decisions");
+        // And the plan's own rows, which the read models project: every one of them references the run.
+        jdbc.execute("DELETE FROM settlement_transfers");
+        jdbc.execute("DELETE FROM settlement_partitions");
         jdbc.execute("DELETE FROM settlement_runs");
         jdbc.execute("DELETE FROM settlement_cycles");
 

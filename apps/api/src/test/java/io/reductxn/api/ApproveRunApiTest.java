@@ -118,7 +118,7 @@ class ApproveRunApiTest extends DatabaseTest {
 
         approve(unknown, ALICE)
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("api.approval_no_such_run"));
+                .andExpect(jsonPath("$.code").value("api.no_such_run"));
 
         assertThat(countAnswersFor(unknown)).isZero();
     }
@@ -144,13 +144,13 @@ class ApproveRunApiTest extends DatabaseTest {
 
         mvc.perform(post("/v1/runs/{runId}/approve", runId).contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("api.approval_incomplete"));
+                .andExpect(jsonPath("$.code").value("api.request_incomplete"));
 
         mvc.perform(post("/v1/runs/{runId}/approve", "not-a-uuid")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"memberId\":\"" + ALICE + "\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("api.approval_incomplete"));
+                .andExpect(jsonPath("$.code").value("api.request_incomplete"));
     }
 
     private ResultActions approve(UUID runId, UUID memberId) throws Exception {
