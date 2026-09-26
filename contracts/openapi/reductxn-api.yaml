@@ -244,25 +244,88 @@ paths:
     post:
       tags: [groups]
       summary: Create an invite code
+      description: |
+        A code that lets somebody join this group, which is the only way anybody gets one.
+
+        **What the caller cannot choose, and why that is not a gap.** This operation has no request body, so there is
+        nowhere to ask for a shorter window or a one-time code - which makes both a decision of this deployment rather
+        than a default a caller could have overridden. A code lasts **seven days** and has **no use limit**: an
+        invitation is a link a group shares with somebody it trusts, and what stops it is time rather than a count. A
+        group that wants a one-time code needs an operation to ask for one; when that exists, this description and the
+        `maxUses` field it leaves absent are where it will show.
+
+        **The code is short enough to read out loud and cannot be guessed.** Eight characters from a thirty-two-symbol
+        alphabet (forty bits), excluding `0`, `1`, `I` and `O` because a code is transcribed by a person. It is unique
+        across the deployment rather than within the group, and the next operation's shape is why: acceptance is
+        addressed by the code alone, so the code has to say which group it is for.
+
+        **Anyone can create an invitation, and that is the recorded identity gap rather than a policy.** There is no
+        authentication in this build, so nothing here decides who may invite whom. Recorded, not papered over
+        (ADR 0020, 0035, 0041).
       responses:
         '201':
           description: Invite created
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Invite' }
+        '400': { $ref: '#/components/responses/Problem' }
 
   /invites/{code}/accept:
     post:
       tags: [groups]
       summary: Accept an invite and join the group
+      description: |
+        Somebody hands in a code and joins the group it is for.
+
+        **The body says who is joining, because nothing else can.** There is no `GET /me` and no authentication yet, so
+        the server cannot know who is holding the code - exactly as the decision endpoint works, where the member is
+        whoever the body says (ADR 0020). The alternative was to invent an identity and then trust it; naming who is
+        joining at least makes the trust explicit. When sign-in exists, this body disappears and the acceptance becomes
+        about the caller. The `userId` is therefore an assertion rather than a verified fact, and a client should not
+        present it as one.
+
+        **Accepting joins as an ordinary `member`.** The invitation carries no role, and a code that conferred `admin`
+        would be a privilege handed out by a default rather than decided by somebody.
+
+        **A code for a group you are already in is a success, not a conflict.** Membership is idempotent - a second
+        record for the same person in the same group changes nothing - so the answer is the member as they stand, and
+        the invitation is **not** spent: a use is spent by joining, and nobody joined. That is the case this operation
+        exists for as much as the first joining is, and answering it with an error would make the most benign request
+        look like a mistake.
+
+        **The code is read in the case it was typed.** The alphabet is uppercase and the store refuses anything else,
+        so a code typed in lowercase is trimmed and uppercased at the boundary rather than answered with a `404` whose
+        cause would be invisible in the request.
+
+        **A code that ran out is `410`, and a code that never existed is `404`.** The two are distinguished because
+        they are different questions: a mistyped code is a code for nothing, while an expired or exhausted invitation
+        existed and is finished. The `code` field of the problem body says which of the two it was, so a client can say
+        "that one has been used" rather than "that code is wrong".
       parameters:
         - name: code
           in: path
           required: true
+          description: The invitation's code, as it was created.
           schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcceptInvite' }
       responses:
-        '200': { description: Joined }
-        '410': { description: Invite expired or exhausted }
+        '201':
+          description: Joined
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '200':
+          description: Already a member of the group, so nothing changed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '410': { $ref: '#/components/responses/Problem' }
 
   /groups/{groupId}/balances:
     parameters:
@@ -1196,11 +1259,34 @@ components:
 
     Invite:
       type: object
+      description: |
+        A code that lets somebody join a group: the code itself, when it stops working, and - when the deployment sets
+        one - how many times it may be spent.
+
+        `maxUses` is absent when there is no limit, which is what this deployment's creation operation produces: a code
+        is stopped by its window rather than by a count. A client must read an absent `maxUses` as "no limit" rather
+        than as zero, which is a value the table refuses precisely so the two cannot be confused.
       required: [code, expiresAt]
       properties:
         code: { type: string }
         expiresAt: { type: string, format: date-time }
         maxUses: { type: integer }
+
+    AcceptInvite:
+      type: object
+      description: |
+        Who is accepting an invitation. There is no `role`: accepting joins as an ordinary member.
+
+        `userId` is an assertion rather than a verified fact - this build has no sign-in, so the caller says who they
+        are and the server has nothing to check it against (the identity gap, ADR 0020, 0041). A client should not
+        present membership as verified on the strength of it.
+      required: [userId, displayName]
+      properties:
+        userId: { type: string, format: uuid }
+        displayName:
+          type: string
+          maxLength: 120
+          description: What the group will call them - the same field, and the same limit, as recording a member.
 
     Obligation:
       type: object
