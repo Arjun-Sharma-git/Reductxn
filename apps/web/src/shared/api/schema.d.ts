@@ -1357,11 +1357,35 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Current reference rate (read-only, does not lock anything) */
+        /**
+         * Current reference rate (read-only, does not lock anything)
+         * @description What the pair converts at, for a screen that is about to record a cross-currency commitment.
+         *
+         *     **It is not the rate the obligation will be locked at.** The server locks its own quote from `fx_rates` at
+         *     the obligation's own instant when the request arrives, so this number may differ - which is why the screen
+         *     that shows it says "indicative" rather than promising a number a member can hold the group to.
+         *
+         *     **It applies the same freshness policy as locking, and that is the decision** (ADR 0037). A pair whose most
+         *     recent rate has already expired is answered `422 fx.rate_stale` rather than with a number: the question this
+         *     endpoint answers is "can this be settled in another currency, and at about what rate", and a rate the server
+         *     would refuse to lock answers a different one. Showing it would invite a member to fill in a form whose
+         *     submission the recording path then refuses - the same refusal, arrived at later and after more work. The
+         *     code is deliberately the recording path's own, so a client has one thing to branch on, and it is final
+         *     rather than retryable: `503 fx.rate_unavailable` is the retryable one, for a pair with no rate at all.
+         *
+         *     The response carries `quotedAt` and `expiresAt`, so a screen can say how old the rate it is showing is
+         *     instead of presenting it as current.
+         */
         get: {
             parameters: {
                 query: {
+                    /** @description The currency being converted from: a code in the currency catalogue. */
                     base: components["schemas"]["Currency"];
+                    /**
+                     * @description The currency being converted to: the one the creditor is paid in. A pair rather than one currency,
+                     *     because a conversion from a currency to itself is not a rate - it is refused rather than answered with
+                     *     one, since a fabricated identity rate is indistinguishable from a quoted one to everything downstream.
+                     */
                     quote: components["schemas"]["Currency"];
                 };
                 header?: never;
@@ -1379,6 +1403,8 @@ export interface paths {
                         "application/json": components["schemas"]["FxRate"];
                     };
                 };
+                400: components["responses"]["Problem"];
+                422: components["responses"]["Problem"];
                 503: components["responses"]["Problem"];
             };
         };

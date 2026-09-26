@@ -17,30 +17,11 @@ import java.util.UUID;
  */
 public record FxQuoteDto(
         UUID id,
-        RateDto rate,
+        FxRateResponse rate,
         MoneyDto baseAmount,
         MoneyDto convertedAmount,
         long residualScaled,
         int residualScale,
         Instant lockedAt,
         Boolean railPerformedFx) {
-
-    /**
-     * The contract's {@code FxRate} schema.
-     *
-     * <p>{@code base} and {@code quote} are currency codes, as the contract's {@code Currency} schema is. The
-     * exponents are not on the wire: the amounts carry codes too, and a client that needs to render them gets
-     * the exponent from the currency catalogue once and caches it, which is what {@code CurrencyInfo} is for.
-     */
-    public record RateDto(
-            String base,
-            String quote,
-            long rateScaled,
-            int rateScale,
-            long midRateScaled,
-            int spreadBps,
-            Instant quotedAt,
-            Instant expiresAt,
-            String source) {
-    }
 }
