@@ -74,6 +74,34 @@ public class JooqRuns implements Runs {
     private static final Field<String> RUN_STATUS = DSL.field("status", String.class);
     private static final Field<OffsetDateTime> RUN_COMPUTED = DSL.field("computed_at", OffsetDateTime.class);
     private static final Field<OffsetDateTime> RUN_CREATED = DSL.field("created_at", OffsetDateTime.class);
+    private static final Field<OffsetDateTime> RUN_DRIVEN = DSL.field("driven_at", OffsetDateTime.class);
+    // The due query joins runs to their cycles, so both tables are aliased and every column is qualified: the
+    // three names they have in common (`id`, `group_id`, `created_at`) are exactly the ones an unqualified field
+    // would resolve against the wrong table, or fail to resolve at all. JooqChainHeads sets out the reasoning
+    // for writing qualifiers out rather than relying on DSL.field(String, Class).
+    private static final Table<Record> DUE_RUN = DSL.table("settlement_runs").as("due_run");
+    private static final Table<Record> DUE_CYCLE = DSL.table("settlement_cycles").as("due_cycle");
+
+    private static final Field<UUID> DUE_RUN_ID = DSL.field(DSL.name("due_run", "id"), UUID.class);
+    private static final Field<String> DUE_RUN_STATUS = DSL.field(DSL.name("due_run", "status"), String.class);
+    private static final Field<OffsetDateTime> DUE_RUN_COMPUTED =
+            DSL.field(DSL.name("due_run", "computed_at"), OffsetDateTime.class);
+    private static final Field<OffsetDateTime> DUE_RUN_CREATED =
+            DSL.field(DSL.name("due_run", "created_at"), OffsetDateTime.class);
+    private static final Field<OffsetDateTime> DUE_RUN_DRIVEN =
+            DSL.field(DSL.name("due_run", "driven_at"), OffsetDateTime.class);
+    private static final Field<UUID> DUE_RUN_CYCLE = DSL.field(DSL.name("due_run", "cycle_id"), UUID.class);
+
+    private static final Field<UUID> DUE_CYCLE_ID = DSL.field(DSL.name("due_cycle", "id"), UUID.class);
+    private static final Field<UUID> DUE_CYCLE_GROUP = DSL.field(DSL.name("due_cycle", "group_id"), UUID.class);
+    private static final Field<OffsetDateTime> DUE_CYCLE_AS_OF =
+            DSL.field(DSL.name("due_cycle", "as_of"), OffsetDateTime.class);
+
+    /** The states a driver can act on, as {@code RunStatus.wireName()} spells them. */
+    private static final List<String> DRIVEABLE = List.of(
+            RunStatus.AWAITING_APPROVAL.wireName(),
+            RunStatus.AWAITING_FX_FUNDING.wireName(),
+            RunStatus.EXECUTING.wireName());
 
     private static final Field<UUID> PARTITION_RUN = DSL.field("run_id", UUID.class);
     private static final Field<String> PARTITION_CURRENCY = DSL.field("currency_code", String.class);
@@ -226,6 +254,43 @@ public class JooqRuns implements Runs {
         }
 
         return Optional.of(describe(cycle));
+    }
+
+    @Override
+    public List<SettlementRun> dueForDriving(Instant attemptedBefore, int batchSize) {
+        Objects.requireNonNull(attemptedBefore, "attemptedBefore");
+
+        return dsl.select(DUE_RUN_ID, DUE_RUN_STATUS, DUE_RUN_COMPUTED, DUE_RUN_CREATED, DUE_CYCLE_ID,
+                        DUE_CYCLE_GROUP, DUE_CYCLE_AS_OF)
+                .from(DUE_RUN)
+                .join(DUE_CYCLE).on(DUE_CYCLE_ID.eq(DUE_RUN_CYCLE))
+                .where(DUE_RUN_STATUS.in(DRIVEABLE))
+                // Null means never attempted, and it is due: a run opened a second ago has never been offered to
+                // a rail. `attemptedBefore` is the window's cut-off, computed by the caller.
+                .and(DUE_RUN_DRIVEN.isNull().or(DUE_RUN_DRIVEN.lt(attemptedBefore.atOffset(ZoneOffset.UTC))))
+                // Least recently attempted first, nulls first: a run a gate keeps refusing goes to the back of
+                // the queue, which is what keeps a backlog of waiting runs from starving one that is ready.
+                .orderBy(DUE_RUN_DRIVEN.asc().nullsFirst(), DUE_RUN_CREATED.asc())
+                .limit(batchSize)
+                .fetch(row -> new SettlementRun(
+                        row.get(DUE_RUN_ID),
+                        row.get(DUE_CYCLE_GROUP),
+                        row.get(DUE_CYCLE_ID),
+                        RunStatus.ofWireName(row.get(DUE_RUN_STATUS)),
+                        row.get(DUE_CYCLE_AS_OF).toInstant(),
+                        row.get(DUE_RUN_COMPUTED).toInstant(),
+                        row.get(DUE_RUN_CREATED).toInstant()));
+    }
+
+    @Override
+    public void markDriven(UUID runId, Instant attemptedAt) {
+        Objects.requireNonNull(runId, "runId");
+        Objects.requireNonNull(attemptedAt, "attemptedAt");
+
+        dsl.update(RUNS)
+                .set(RUN_DRIVEN, attemptedAt.atOffset(ZoneOffset.UTC))
+                .where(RUN_ID.eq(runId))
+                .execute();
     }
 
     @Override

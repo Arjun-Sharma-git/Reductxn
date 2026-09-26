@@ -50,6 +50,37 @@ public interface Runs {
     Optional<ComputedRun> findRun(UUID groupId, Instant asOf);
 
     /**
+     * The runs a driver may act on: those in a state where progress is possible, least recently attempted first.
+     *
+     * <p>The states are the three that wait on something - {@code awaiting_approval}, {@code awaiting_fx_funding}
+     * and {@code executing} - rather than everything that is not terminal. {@code pending} and {@code computing}
+     * exist only inside the transaction that opens a run, and {@code done}, {@code failed} and {@code rejected}
+     * are finished; driving any of those five would be asking a question whose answer cannot change.
+     *
+     * <p><strong>Ordered by {@code driven_at}, nulls first, and that ordering is the anti-starvation
+     * mechanism.</strong> A run a gate keeps refusing is attempted once per window and then goes to the back of
+     * the queue, so a group that never approves its run cannot keep a different run - one that is ready to settle
+     * - from ever being looked at. Ordering by creation would do exactly that.
+     *
+     * @param attemptedBefore a run attempted at or after this instant is not due
+     * @param batchSize       the most runs to return; a backlog drains over several passes rather than in one
+     */
+    List<SettlementRun> dueForDriving(Instant attemptedBefore, int batchSize);
+
+    /**
+     * Records that an attempt was made, before it is made.
+     *
+     * <p>Written first for the reason section 4.2 gives for every other write here: a driver that dies mid-pass
+     * leaves a mark rather than a run that looks untouched, so the next pass does not immediately re-attempt
+     * everything the dead one was in the middle of.
+     *
+     * <p>It records the attempt and not its outcome, deliberately. What happened is already recorded where it
+     * happened - the transfer's state, the run's status, the rail's own words in {@code rail_detail} - and a
+     * second copy here would be a claim that can disagree with them.
+     */
+    void markDriven(UUID runId, Instant attemptedAt);
+
+    /**
      * The run with this id, with its plan and its gates.
      *
      * <p>What the three commands that act on an existing run read first, and what each of them answers with. An

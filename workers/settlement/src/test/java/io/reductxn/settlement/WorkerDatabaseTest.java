@@ -86,6 +86,13 @@ abstract class WorkerDatabaseTest {
         // Required with no default in the application, so every test has to say which jurisdiction it is in.
         registry.add("reductxn.tax.jurisdiction", () -> "IN");
 
+        // The driver's cadence, off. The tests are the trigger here: a scheduler firing mid-test would drive
+        // exactly the run the test is halfway through asserting on, and its window would make the tests' own
+        // passes race with it. `DriveRunsTest` and `SettlementCommandTest` drive the port themselves, which is
+        // what the tests are for - and the cadence's own seam is covered without a database, in
+        // `ScheduledRunDriverTest`.
+        registry.add("reductxn.settlement.drive.enabled", () -> "false");
+
         // The worker's own migrations, plus the API's. The two deployables share one schema and each jar brings
         // only its own migrations (RULE B17), so `V101__obligations.sql` is not on this module's classpath - and
         // may not be, because the worker may not depend on apps/api (RULE B6). Pointing Flyway at the file
@@ -283,9 +290,19 @@ abstract class WorkerDatabaseTest {
     }
 
     /** The value of a call that had to succeed. */
-    protected static ComputedRun ok(Result<ComputedRun> result) {
+    protected static <T> T ok(Result<T> result) {
         assertThat(result.isOk()).as("expected success, got %s", result).isTrue();
-        return ((Result.Ok<ComputedRun>) result).value();
+        return result.orElseThrow();
+    }
+
+    /**
+     * A run's status as stored, so a test asserts what was written rather than what it was told.
+     *
+     * <p>Read from the column rather than from the answer a use case returned, because the answer is derived
+     * from the same rows a second time and would agree with itself: the question is whether the write happened.
+     */
+    protected String storedRunStatus(UUID runId) {
+        return jdbc.queryForObject("SELECT status FROM settlement_runs WHERE id = ?", String.class, runId);
     }
 
     /**
