@@ -42,6 +42,14 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>One container for the whole JVM, one schema, cleared between tests. Distinct group ids would work too;
  * clearing is simpler and impossible to forget.
+ *
+ * <p><strong>A note on state that is not in the database.</strong> The circuit breaker in front of the rail keeps
+ * its counters in memory for the life of a Spring context, and a context is shared by every class that declares
+ * the same configuration - so a failure count left behind by one class would silence the rail for the next. The
+ * shared context is safe because it uses the deployment's default policy (five consecutive unanswered calls), and
+ * no class that shares it fails the rail more than once; the class that does trip a breaker,
+ * {@code RailRetryTest}, gives itself a context of its own. That is a property to keep rather than a guard to
+ * rely on: a test class that starts failing a rail repeatedly should expect to own its context.
  */
 abstract class WorkerDatabaseTest {
 

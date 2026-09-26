@@ -1,6 +1,9 @@
 package io.reductxn.rails.api;
 
+import io.reductxn.rails.internal.breaker.GuardedRail;
 import io.reductxn.rails.internal.mock.MockRail;
+
+import java.time.Clock;
 
 /**
  * The way to obtain a rail implementation.
@@ -38,5 +41,24 @@ public final class Rails {
      */
     public static PaymentRail mock() {
         return new MockRail();
+    }
+
+    /**
+     * The same rail, with a circuit breaker in front of it.
+     *
+     * <p>A decorator rather than something a rail implementation does, because "stop calling it" is a decision
+     * about the <em>caller's</em> behaviour and not the rail's: an adapter should implement the rail's protocol,
+     * and nothing about the protocol says when to give up for a while. It also means the breaker is testable
+     * against any rail, including the mock, and that a future HTTP adapter gets it without being written twice.
+     *
+     * <p>The clock is passed in rather than read, so that a breaker's cooldown is testable without sleeping and
+     * so that this module never reads a clock of its own (the same rule the use cases follow).
+     *
+     * @param rail   the rail to guard
+     * @param policy when to open, and for how long
+     * @param clock  what "now" means for the cooldown
+     */
+    public static PaymentRail withCircuitBreaker(PaymentRail rail, BreakerPolicy policy, Clock clock) {
+        return new GuardedRail(rail, policy, clock);
     }
 }

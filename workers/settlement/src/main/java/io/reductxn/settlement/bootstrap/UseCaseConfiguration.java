@@ -2,8 +2,10 @@ package io.reductxn.settlement.bootstrap;
 
 import io.reductxn.planning.api.SettlementPlanner;
 import io.reductxn.planning.api.SettlementPlans;
+import io.reductxn.rails.api.BreakerPolicy;
 import io.reductxn.rails.api.PaymentRail;
 import io.reductxn.rails.api.Rails;
+import io.reductxn.settlement.application.Backoff;
 import io.reductxn.settlement.application.DriveRunsService;
 import io.reductxn.settlement.port.in.DriveRuns;
 import io.reductxn.settlement.port.in.ExecuteRun;
@@ -15,6 +17,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.time.Clock;
+import java.time.Duration;
 
 /**
  * Spring wiring only. No logic lives in this package - a class here that makes a decision is a class in the
@@ -70,7 +73,7 @@ public class UseCaseConfiguration {
     }
 
     /**
-     * The rail this worker submits settlement transfers to.
+     * The rail this worker submits settlement transfers to, with a circuit breaker in front of it.
      *
      * <p><strong>Named by configuration rather than chosen in code, and unknown names fail at startup.</strong> A
      * deployment that asked for a rail this build does not have must not silently get a different one: the only
@@ -82,15 +85,54 @@ public class UseCaseConfiguration {
      * <p>The mock is reached through {@link Rails#mock()} rather than by naming its class: implementations live in
      * {@code io.reductxn.rails.internal..}, which nothing outside that module may import (RULE B10), so the
      * factory in its {@code api} package is the only door.
+     *
+     * <p><strong>The breaker is applied here rather than in the rail.</strong> "Stop calling it for a while" is a
+     * decision about this deployable's behaviour towards a rail, not about the rail's protocol - so it decorates
+     * whatever rail the configuration names, and a future HTTP adapter inherits it without being written twice.
+     * It shares this module's clock, which is what makes its cooldown testable without sleeping.
      */
     @Bean
-    PaymentRail paymentRail(@Value("${reductxn.rail.name:mock}") String name) {
+    PaymentRail paymentRail(
+            @Value("${reductxn.rail.name:mock}") String name,
+            BreakerPolicy breakerPolicy,
+            Clock clock) {
+
         if (!"mock".equals(name)) {
             throw new IllegalStateException(
                     "no payment rail named '" + name + "' is in this build. Configured rails: mock. A worker that "
                             + "fell back to another rail would be moving money through something nobody chose");
         }
 
-        return Rails.mock();
+        return Rails.withCircuitBreaker(Rails.mock(), breakerPolicy, clock);
+    }
+
+    /**
+     * When the breaker in front of the rail opens, and for how long.
+     *
+     * <p>Configuration rather than a constant, because both numbers are properties of a deployment's relationship
+     * with its rail - how flaky it is, and how long an operator expects an outage to last - and neither is a
+     * statement about settlement.
+     */
+    @Bean
+    BreakerPolicy breakerPolicy(
+            @Value("${reductxn.rail.breaker.failures-before-opening:5}") int failuresBeforeOpening,
+            @Value("${reductxn.rail.breaker.cooldown:PT30S}") Duration cooldown) {
+
+        return new BreakerPolicy(failuresBeforeOpening, cooldown);
+    }
+
+    /**
+     * How long a transfer waits before the rail is offered it again.
+     *
+     * <p>This module's policy rather than the rail's: the port says whether a refusal is retryable, and *how long
+     * to wait* is a decision about this worker's behaviour. It is a bean so that the wait is visible in one place
+     * and configurable per deployment, and so that a test that is not about backoff can set it to zero.
+     */
+    @Bean
+    Backoff backoff(
+            @Value("${reductxn.settlement.retry.base:PT30S}") Duration base,
+            @Value("${reductxn.settlement.retry.cap:PT15M}") Duration cap) {
+
+        return new Backoff(base, cap);
     }
 }

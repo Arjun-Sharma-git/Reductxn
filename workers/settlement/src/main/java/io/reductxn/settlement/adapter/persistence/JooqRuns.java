@@ -103,6 +103,10 @@ public class JooqRuns implements Runs {
             RunStatus.AWAITING_FX_FUNDING.wireName(),
             RunStatus.EXECUTING.wireName());
 
+    /** The states a transfer never moves out of, so a run whose transfers are all here has nothing to attempt. */
+    private static final List<String> RESOLVED = List.of(
+            TransferStatus.CONFIRMED.wireName(), TransferStatus.FAILED.wireName());
+
     private static final Field<UUID> PARTITION_RUN = DSL.field("run_id", UUID.class);
     private static final Field<String> PARTITION_CURRENCY = DSL.field("currency_code", String.class);
     private static final Field<Short> PARTITION_EXPONENT = DSL.field("currency_exponent", Short.class);
@@ -127,6 +131,9 @@ public class JooqRuns implements Runs {
     private static final Field<String> TRANSFER_RAIL_REF = DSL.field("rail_ref", String.class);
     private static final Field<String> TRANSFER_STATUS = DSL.field("status", String.class);
     private static final Field<String> TRANSFER_DETAIL = DSL.field("rail_detail", String.class);
+    private static final Field<Integer> TRANSFER_UNANSWERED = DSL.field("unanswered_attempts", Integer.class);
+    private static final Field<OffsetDateTime> TRANSFER_NEXT_ATTEMPT =
+            DSL.field("next_attempt_at", OffsetDateTime.class);
     private static final Field<OffsetDateTime> TRANSFER_CREATED = DSL.field("created_at", OffsetDateTime.class);
 
     private static final Table<Record> RUN_OBLIGATIONS = DSL.table("settlement_run_obligations");
@@ -257,7 +264,8 @@ public class JooqRuns implements Runs {
     }
 
     @Override
-    public List<SettlementRun> dueForDriving(Instant attemptedBefore, int batchSize) {
+    public List<SettlementRun> dueForDriving(Instant now, Instant attemptedBefore, int batchSize) {
+        Objects.requireNonNull(now, "now");
         Objects.requireNonNull(attemptedBefore, "attemptedBefore");
 
         return dsl.select(DUE_RUN_ID, DUE_RUN_STATUS, DUE_RUN_COMPUTED, DUE_RUN_CREATED, DUE_CYCLE_ID,
@@ -268,6 +276,17 @@ public class JooqRuns implements Runs {
                 // Null means never attempted, and it is due: a run opened a second ago has never been offered to
                 // a rail. `attemptedBefore` is the window's cut-off, computed by the caller.
                 .and(DUE_RUN_DRIVEN.isNull().or(DUE_RUN_DRIVEN.lt(attemptedBefore.atOffset(ZoneOffset.UTC))))
+                // And something in it has to be attemptable: a run whose every unresolved transfer is waiting out
+                // a backoff has nothing to try, and driving it would mark it as attempted every window while
+                // nothing happened - a pass that reports "1 run moved" for a run standing still. This is the
+                // transfer-level wait seen from the run's side, and it is why this query takes two instants: one
+                // for the run's lease, one for the transfers' readiness.
+                .and(DSL.exists(dsl.selectOne()
+                        .from(TRANSFERS)
+                        .where(TRANSFER_RUN.eq(DUE_RUN_ID))
+                        .and(TRANSFER_STATUS.notIn(RESOLVED))
+                        .and(TRANSFER_NEXT_ATTEMPT.isNull()
+                                .or(TRANSFER_NEXT_ATTEMPT.le(now.atOffset(ZoneOffset.UTC))))))
                 // Least recently attempted first, nulls first: a run a gate keeps refusing goes to the back of
                 // the queue, which is what keeps a backlog of waiting runs from starving one that is ready.
                 .orderBy(DUE_RUN_DRIVEN.asc().nullsFirst(), DUE_RUN_CREATED.asc())
@@ -341,9 +360,47 @@ public class JooqRuns implements Runs {
         Objects.requireNonNull(status, "status");
         Objects.requireNonNull(at, "at");
 
+        // An answer: the transfer's state, and the retry counter back to zero because the rail is working. The
+        // wait is cleared with it - a transfer that has an answer is not waiting for anything.
         dsl.update(TRANSFERS)
                 .set(TRANSFER_STATUS, status.wireName())
                 .set(TRANSFER_DETAIL, railDetail)
+                .set(TRANSFER_UNANSWERED, 0)
+                .set(TRANSFER_NEXT_ATTEMPT, (OffsetDateTime) null)
+                .where(TRANSFER_ID.eq(transferId))
+                .execute();
+    }
+
+    @Override
+    public void markTransferAttempted(UUID transferId, TransferStatus status, Instant at) {
+        Objects.requireNonNull(transferId, "transferId");
+        Objects.requireNonNull(status, "status");
+        Objects.requireNonNull(at, "at");
+
+        // No counter and no wait: this write says what we are about to do, not what happened. The detail is
+        // cleared because it describes the previous attempt, and a stale reason beside a fresh attempt would be
+        // read as this one's.
+        dsl.update(TRANSFERS)
+                .set(TRANSFER_STATUS, status.wireName())
+                .set(TRANSFER_DETAIL, (String) null)
+                .where(TRANSFER_ID.eq(transferId))
+                .execute();
+    }
+
+    @Override
+    public void markTransferUnanswered(UUID transferId, TransferStatus status, String railDetail, Instant at,
+            int consecutiveUnanswered, Instant nextAttemptAt) {
+
+        Objects.requireNonNull(transferId, "transferId");
+        Objects.requireNonNull(status, "status");
+        Objects.requireNonNull(at, "at");
+        Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
+
+        dsl.update(TRANSFERS)
+                .set(TRANSFER_STATUS, status.wireName())
+                .set(TRANSFER_DETAIL, railDetail)
+                .set(TRANSFER_UNANSWERED, consecutiveUnanswered)
+                .set(TRANSFER_NEXT_ATTEMPT, nextAttemptAt.atOffset(ZoneOffset.UTC))
                 .where(TRANSFER_ID.eq(transferId))
                 .execute();
     }
@@ -450,13 +507,15 @@ public class JooqRuns implements Runs {
         List<PlannedTransfer> transfers = new ArrayList<>();
         Map<String, List<PlannedTransfer>> transfersByCurrency = new HashMap<>();
         for (Record row : dsl.select(TRANSFER_ID, TRANSFER_CURRENCY, TRANSFER_EXPONENT, TRANSFER_FROM, TRANSFER_TO,
-                        TRANSFER_AMOUNT, TRANSFER_RAIL_REF, TRANSFER_STATUS, TRANSFER_DETAIL)
+                        TRANSFER_AMOUNT, TRANSFER_RAIL_REF, TRANSFER_STATUS, TRANSFER_DETAIL, TRANSFER_UNANSWERED,
+                        TRANSFER_NEXT_ATTEMPT)
                 .from(TRANSFERS)
                 .where(TRANSFER_RUN.eq(runId))
                 .orderBy(TRANSFER_RAIL_REF.asc())
                 .fetch()) {
 
             Currency currency = Currency.of(row.get(TRANSFER_CURRENCY), row.get(TRANSFER_EXPONENT));
+            OffsetDateTime nextAttempt = row.get(TRANSFER_NEXT_ATTEMPT);
             PlannedTransfer transfer = new PlannedTransfer(
                     row.get(TRANSFER_ID),
                     currency,
@@ -465,7 +524,9 @@ public class JooqRuns implements Runs {
                     Money.of(row.get(TRANSFER_AMOUNT), currency),
                     row.get(TRANSFER_RAIL_REF),
                     TransferStatus.ofWireName(row.get(TRANSFER_STATUS)),
-                    row.get(TRANSFER_DETAIL));
+                    row.get(TRANSFER_DETAIL),
+                    row.get(TRANSFER_UNANSWERED),
+                    nextAttempt == null ? null : nextAttempt.toInstant());
 
             transfers.add(transfer);
             transfersByCurrency.computeIfAbsent(currency.code(), ignored -> new ArrayList<>()).add(transfer);
