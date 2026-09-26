@@ -1,0 +1,149 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-5);
+}
+
+.lede {
+  margin: 0;
+  color: var(--rn-text-muted);
+  max-inline-size: 70ch;
+}
+
+.table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--rn-text-sm);
+}
+
+.caption {
+  caption-side: top;
+  text-align: start;
+  padding-block-end: var(--rn-space-2);
+  color: var(--rn-text-muted);
+}
+
+.table th,
+.table td {
+  text-align: start;
+  padding-block: var(--rn-space-2);
+  padding-inline-end: var(--rn-space-4);
+  border-block-end: 1px solid var(--rn-border);
+  vertical-align: top;
+}
+
+.table thead th {
+  font-size: var(--rn-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--rn-text-muted);
+}
+
+.rowHeader {
+  font-weight: var(--rn-weight-medium);
+  white-space: nowrap;
+}
+
+.numeric {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.moves {
+  margin: 0 0 var(--rn-space-1);
+}
+
+/* A status word: the tone is decoration over a phrase, never the only carrier of meaning. The tones reuse the
+   tokens that exist rather than inventing a warning palette - "waiting" is an accent border and nothing more,
+   because a colour nobody has chosen as a token is a colour no contrast check has been run against. */
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--rn-radius-sm);
+  border: 1px solid var(--rn-border-strong);
+  font-size: var(--rn-text-xs);
+  white-space: nowrap;
+}
+
+.waiting {
+  background: var(--rn-surface-muted);
+  border-color: var(--rn-accent);
+}
+
+.working {
+  background: var(--rn-surface-muted);
+}
+
+.done {
+  background: var(--rn-surface-muted);
+  border-color: var(--rn-positive-text);
+  color: var(--rn-positive-text);
+}
+
+.stopped {
+  background: var(--rn-danger-surface);
+  border-color: var(--rn-danger-text);
+}
+
+/* An unknown state is a state, not an error: muted rather than alarming, and its message says what it is. */
+.unknown {
+  background: var(--rn-surface-muted);
+  border-style: dashed;
+}
+
+.gates {
+  padding: var(--rn-space-3) var(--rn-space-4);
+  background: var(--rn-surface-muted);
+  border-radius: var(--rn-radius-md);
+  margin-block: var(--rn-space-3) 0;
+}
+
+.gateLine {
+  margin: 0 0 var(--rn-space-1);
+  font-size: var(--rn-text-sm);
+}
+
+.gateAmounts {
+  margin: 0;
+  font-family: var(--rn-font-amount);
+  font-size: var(--rn-text-sm);
+}
+
+.gatesStale {
+  margin: var(--rn-space-2) 0 0;
+  font-size: var(--rn-text-xs);
+  color: var(--rn-text-muted);
+}
+
+.status {
+  color: var(--rn-text-muted);
+}
+
+.decision {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rn-space-3);
+  align-items: end;
+}
+
+.filterControl {
+  min-block-size: 44px;
+  padding-inline: var(--rn-space-2);
+  background: var(--rn-surface);
+  color: var(--rn-text);
+  border: 1px solid var(--rn-border-strong);
+  border-radius: var(--rn-radius-md);
+  font: inherit;
+}
+
+.actions {
+  display: flex;
+  gap: var(--rn-space-3);
+  flex-wrap: wrap;
+}
+
+.reject {
+  background: var(--rn-surface);
+  color: var(--rn-danger-text);
+  border: 1px solid var(--rn-danger-text);
+}

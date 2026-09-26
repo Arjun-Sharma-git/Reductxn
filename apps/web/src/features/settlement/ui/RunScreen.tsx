@@ -1,0 +1,210 @@
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+
+import { currencyCatalogQuery, indexByCode } from '@/entities/currency';
+import { membersQuery, type Member } from '@/entities/member';
+import { runQuery, runTransfersQuery } from '@/entities/run';
+import { useTranslations } from '@/shared/i18n';
+import { Card, Notice, ProblemNotice } from '@/shared/ui';
+
+import { alreadyAnswered } from '../model/decision';
+import { useDecide, type DecisionWord } from '../mutations';
+import { AnswerRows, Gates, PartitionRows, StatusBadge, TransferRows } from './parts';
+import styles from './SettlementScreens.module.css';
+
+/**
+ * One run: what the plan asks for, what it has concluded, who has answered, and the answer.
+ *
+ * <p>This is the screen the product's approval path was missing entirely. The endpoint that records a member's answer
+ * has existed since ADR 0020 and the report since ADR 0021; what did not exist was anywhere a member could read the
+ * plan and say yes or no. It is also where the two distinctions the contract is careful about become visible rather
+ * than theoretical:
+ *
+ *   - **An answer is recorded, and its effect is the run's.** The screen shows the answer on the record and the run's
+ *     *status* beside it, and it never says "approved": whether an answer counted is RULE S1's arithmetic in the
+ *     worker, and the API refuses to answer it (ADR 0020, 0021). Nothing is written optimistically, for the same
+ *     reason - a provisional answer in the cache would be this screen claiming an impact.
+ *   - **A refusal is an answer, not a failure.** The two buttons are equal in weight for the run's purposes, and the
+ *     screen does not warn that refusing ends the run: that is the run's own status change, and stating it here would
+ *     be predicting arithmetic this screen does not have.
+ *
+ * <p>The member is chosen rather than assumed. This build has no identity, so the answer names its member - the same
+ * honesty as an obligation's debtor (`DecisionRequest`'s own comment) - and the screen asks instead of guessing,
+ * because an answer attributed to nobody would be refused by the server anyway.
+ */
+/**
+ * The answer form: who is answering, and which way.
+ *
+ * <p>Both buttons are disabled until a member is chosen, and nothing else about the form is a rule. Absent a choice
+ * the screen cannot attribute an answer, and the server refuses an answer by nobody - so the choice is required here
+ * rather than learned from a refusal.
+ *
+ * <p>The recorded message repeats the server's word for the answer rather than the button's: the response echoes what
+ * the row holds (`DecisionResponse`), which is what tells a member that a rejection was recorded as a rejection.
+ */
+export function Decision({
+  members,
+  memberId,
+  onMember,
+  answered,
+  pending,
+  recorded,
+  fault,
+  onAnswer,
+}: {
+  readonly members: readonly Member[];
+  readonly memberId: string;
+  readonly onMember: (memberId: string) => void;
+  readonly answered: boolean;
+  readonly pending: boolean;
+  readonly recorded: string | undefined;
+  readonly fault: unknown;
+  readonly onAnswer: (decision: DecisionWord) => void;
+}) {
+  const { t } = useTranslations();
+
+  return (
+    <Card title={t('settlement.decision.title')} description={t('settlement.decision.description')}>
+      <div className={styles.decision}>
+        <label className={styles.decision}>
+          <span>{t('settlement.decision.member')}</span>
+          <select
+            aria-label={t('settlement.decision.member')}
+            className={styles.filterControl}
+            value={memberId}
+            onChange={(event) => onMember(event.target.value)}
+          >
+            <option value="">{t('settlement.decision.chooseMember')}</option>
+            {members.map((member) => (
+              <option key={member.userId} value={member.userId}>
+                {member.displayName}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {answered ? null : (
+          <div className={styles.actions}>
+            <button
+              className="rn-button"
+              type="button"
+              disabled={memberId === '' || pending}
+              onClick={() => onAnswer('approve')}
+            >
+              {t('settlement.decision.approve')}
+            </button>
+            <button
+              className={`rn-button ${styles.reject}`}
+              type="button"
+              disabled={memberId === '' || pending}
+              onClick={() => onAnswer('reject')}
+            >
+              {t('settlement.decision.reject')}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {pending ? (
+        <p className={styles.status} role="status">
+          {t('settlement.decision.recording')}
+        </p>
+      ) : null}
+
+      {recorded === undefined ? null : (
+        <p className={styles.status} role="status">
+          {t('settlement.decision.recorded', { decision: t(`settlement.answer.${recorded}`) })}
+        </p>
+      )}
+
+      {fault === undefined || fault === null ? null : <ProblemNotice fault={fault} />}
+      {answered ? <p className={styles.status}>{t('settlement.decision.alreadyAnswered')}</p> : null}
+    </Card>
+  );
+}
+
+export function RunScreen({ groupId, runId }: { readonly groupId: string; readonly runId: string }) {
+  const { t, dateTime } = useTranslations();
+
+  const run = useQuery(runQuery(runId));
+  const transfers = useQuery(runTransfersQuery(runId));
+  const members = useQuery(membersQuery(groupId));
+  const currencies = useQuery(currencyCatalogQuery());
+
+  const decide = useDecide(groupId, runId);
+  const [memberId, setMemberId] = useState('');
+
+  const catalog = useMemo(() => indexByCode(currencies.data ?? []), [currencies.data]);
+
+  // Once the server says this member has answered, the buttons go away: the answer is never overwritten, so offering
+  // them again would be inviting something the system will not do.
+  const answered = decide.isError && alreadyAnswered(decide.error);
+  const answer = (decision: DecisionWord) => decide.mutate({ memberId, decision });
+
+  return (
+    <div className={styles.screen}>
+      <header>
+        <h1>{t('settlement.run.title')}</h1>
+        {run.data === undefined ? null : (
+          <p className={styles.lede}>
+            <StatusBadge status={run.data.status} />{' '}
+            {run.data.computedAt
+              ? t('settlement.run.computedAt', { at: dateTime(run.data.computedAt) })
+              : null}
+          </p>
+        )}
+      </header>
+
+      {run.isError ? <ProblemNotice fault={run.error} /> : null}
+      {run.isPending ? (
+        <p className={styles.status} role="status">
+          {t('settlement.loading')}
+        </p>
+      ) : null}
+
+      {run.data === undefined ? null : (
+        <>
+          <Gates run={run.data} />
+
+          <Card title={t('settlement.partitions.title')} description={t('settlement.partitions.description')}>
+            <PartitionRows run={run.data} catalog={catalog} />
+          </Card>
+
+          <Card title={t('settlement.transfers.title')} description={t('settlement.transfers.description')}>
+            {transfers.isError ? <ProblemNotice fault={transfers.error} /> : null}
+            {transfers.isPending ? (
+              <p className={styles.status} role="status">
+                {t('settlement.loading')}
+              </p>
+            ) : null}
+            {transfers.isSuccess && transfers.data.length === 0 ? (
+              <Notice>{t('settlement.transfers.empty')}</Notice>
+            ) : null}
+            {transfers.isSuccess && transfers.data.length > 0 ? (
+              <TransferRows transfers={transfers.data} members={members.data ?? []} catalog={catalog} />
+            ) : null}
+          </Card>
+
+          <Card title={t('settlement.answers.title')} description={t('settlement.answers.description')}>
+            {(run.data.answers ?? []).length === 0 ? (
+              <Notice>{t('settlement.answers.empty')}</Notice>
+            ) : (
+              <AnswerRows run={run.data} members={members.data ?? []} />
+            )}
+          </Card>
+
+          <Decision
+            members={members.data ?? []}
+            memberId={memberId}
+            onMember={setMemberId}
+            answered={answered}
+            pending={decide.isPending}
+            recorded={decide.isSuccess ? decide.data.decision : undefined}
+            fault={decide.error}
+            onAnswer={answer}
+          />
+        </>
+      )}
+    </div>
+  );
+}

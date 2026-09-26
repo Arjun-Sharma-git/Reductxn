@@ -766,6 +766,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/groups/{groupId}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                groupId: components["parameters"]["GroupId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The group's settlement runs, newest first
+         * @description What a member has to decide about. The order is the schema's own - `settlement_runs_by_group
+         *     (group_id, created_at DESC)`, the index the migration created for exactly this read - so a page
+         *     is the group's most recent cycles and a tie is broken by the run's id rather than by whatever
+         *     order the rows came back in.
+         *
+         *     Each row is the same `SettlementRun` the read endpoint serves, minus `transfers` (which that
+         *     endpoint says are served separately): a member choosing whether to open a run needs to see what
+         *     it moves, and a list row that carried only an id and a status would make the client fetch each
+         *     one to draw a list. A separate summary schema was the alternative and it is the wrong shape -
+         *     two ways to describe one run is the second implementation of "what a run is" that ADR 0021
+         *     refuses, and the two would drift the first time a figure was added.
+         *
+         *     There is no `404` for a group nobody has heard of. Groups are not tables in this build, so "no
+         *     such group" and "a group with no runs" cannot be told apart here; the empty array is true of
+         *     both. Nor is there a `status` filter: newest-first puts what needs answering at the top of any
+         *     page, and a filtered query would need its own ordering guarantee. Both are recorded as gaps.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /**
+                     * @description How many runs one page may hold. The default is this contract's own for list endpoints; the
+                     *     maximum is the API's, because an unbounded read is a read whose cost grows with a group's
+                     *     history. Paging older than a hundred runs needs a cursor, which this endpoint does not have
+                     *     yet - a limit pretending to be paging is worse than a limit.
+                     */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    groupId: components["parameters"]["GroupId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Runs, most recently created first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SettlementRun"][];
+                    };
+                };
+                400: components["responses"]["Problem"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cycles/{cycleId}/runs": {
         parameters: {
             query?: never;

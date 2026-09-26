@@ -379,6 +379,48 @@ paths:
       responses:
         '201': { description: Cycle state changed }
 
+  /groups/{groupId}/runs:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [settlement]
+      summary: The group's settlement runs, newest first
+      description: |
+        What a member has to decide about. The order is the schema's own - `settlement_runs_by_group
+        (group_id, created_at DESC)`, the index the migration created for exactly this read - so a page
+        is the group's most recent cycles and a tie is broken by the run's id rather than by whatever
+        order the rows came back in.
+
+        Each row is the same `SettlementRun` the read endpoint serves, minus `transfers` (which that
+        endpoint says are served separately): a member choosing whether to open a run needs to see what
+        it moves, and a list row that carried only an id and a status would make the client fetch each
+        one to draw a list. A separate summary schema was the alternative and it is the wrong shape -
+        two ways to describe one run is the second implementation of "what a run is" that ADR 0021
+        refuses, and the two would drift the first time a figure was added.
+
+        There is no `404` for a group nobody has heard of. Groups are not tables in this build, so "no
+        such group" and "a group with no runs" cannot be told apart here; the empty array is true of
+        both. Nor is there a `status` filter: newest-first puts what needs answering at the top of any
+        page, and a filtered query would need its own ordering guarantee. Both are recorded as gaps.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+          description: |
+            How many runs one page may hold. The default is this contract's own for list endpoints; the
+            maximum is the API's, because an unbounded read is a read whose cost grows with a group's
+            history. Paging older than a hundred runs needs a cursor, which this endpoint does not have
+            yet - a limit pretending to be paging is worse than a limit.
+      responses:
+        '200':
+          description: Runs, most recently created first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SettlementRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+
   /cycles/{cycleId}/runs:
     post:
       tags: [settlement]
