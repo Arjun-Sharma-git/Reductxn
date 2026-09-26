@@ -126,6 +126,24 @@ asked for members, which is what made it a gap worth an ADR rather than a missin
 `admin only` claim on the write were removed rather than left unimplemented: nothing sets or consults a limit, and a
 build without identity has no admin whose word would authorise anything.
 
+`GET /v1/obligations` is the read that closes the largest of ADR 0035's four gaps, and the one the app's main screen
+has always called (ADR 0036): a page of a group's commitments, narrowed by status, member, dates and a two-word
+sort, with a clamped `limit` in place of the `cursor` the contract used to promise and never served. **The status is
+derived rather than stored** - `voided_at` for one word, the settlement worker's runs for two more, all four decided
+in one expression (`ObligationStatuses`) that the response's column and the `status=` filter both read, so a page
+cannot contain a row whose status it would not display. A run that *ended without settling* releases its
+commitments: a commitment nothing is settling is owed, which is the same reading the preview uses. The replay path
+(`JooqObligationStore.findExisting`) derives the status the same way, so a retry cannot call a settled commitment
+open.
+
+`GET /v1/currencies` is the second of those reads and the quietest, in the way that matters: the contract says a
+client needs the exponent to render a `Money` at all, so its absence did not make one screen show a uuid, it stopped
+money rendering anywhere. It serves a code and an exponent, ordered by code, and deliberately not the two columns
+(`is_cbdc`, `jurisdiction`) that no consumer reads yet.
+
+`GET /v1/fx/rates` - the third - is not here. It needs a decision first: the rate provider judges staleness and
+throws `fx.rate_stale`, a 422 the contract's response list for that endpoint does not have.
+
 `GET /v1/groups/{groupId}/cycles` is the read that makes it visible (ADR 0034). It exists for the reason
 `GET /v1/groups/{groupId}/runs` does, one act earlier: opening a cycle writes a claim about an instant, the plan over
 it is the worker's business a minute later, and without the list a member who asked and a member whose cycle the

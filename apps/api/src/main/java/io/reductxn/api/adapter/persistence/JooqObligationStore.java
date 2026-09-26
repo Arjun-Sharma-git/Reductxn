@@ -65,10 +65,19 @@ public class JooqObligationStore implements ObligationStore {
         Objects.requireNonNull(groupId, "groupId");
         Objects.requireNonNull(idempotencyKey, "idempotencyKey");
 
+        // The table is aliased here and nowhere else in this class, because the status derivation reaches
+        // `settlement_runs` in a correlated subquery: an unqualified `id` inside it resolves against the subquery's
+        // own scope, which is a runtime error rather than a compile error (`JooqCycles` records the same trap). The
+        // alias is local to this statement, so the insert below keeps the plain table - jOOQ will not take an
+        // aliased table as an insert target, and a shared constant would have broken one of the two.
+        Table<Record> obligations = DSL.table("obligations").as("obligation");
+        Field<UUID> id = DSL.field(DSL.name("obligation", "id"), UUID.class);
+        Field<OffsetDateTime> voidedAt = DSL.field(DSL.name("obligation", "voided_at"), OffsetDateTime.class);
+
         Optional<Record> row = Optional.ofNullable(dsl.select(ID, GROUP_ID, DEBTOR_ID, CREDITOR_ID,
                         AMOUNT_MINOR, CURRENCY_CODE, CURRENCY_EXPONENT, MEMO, QUOTE_ID, INCURRED_AT,
-                        VOIDED_AT)
-                .from(OBLIGATIONS)
+                        VOIDED_AT, ObligationStatuses.of(id, voidedAt).as("status"))
+                .from(obligations)
                 .where(GROUP_ID.eq(groupId))
                 .and(IDEMPOTENCY_KEY.eq(idempotencyKey))
                 .fetchOne());
@@ -119,7 +128,13 @@ public class JooqObligationStore implements ObligationStore {
                 quote == null ? amount.currency() : quote.convertedAmount().currency(),
                 quote,
                 row.get(MEMO),
-                row.get(VOIDED_AT) == null ? ObligationStatus.OPEN : ObligationStatus.VOIDED,
+                // The status comes from the same derivation the list read serves, so a replay and a page agree about
+                // whether a commitment is still owed (ADR 0036). This used to be a null check on `voided_at` alone,
+                // which answered `open` for an obligation a run had already settled - the answer the enum's own
+                // comment called impossible before the worker existed, and wrong as soon as it did.
+                ObligationStatus.fromWire(row.get("status", String.class)).orElseThrow(() -> new IllegalStateException(
+                        "obligation " + row.get(ID) + " has status '" + row.get("status", String.class)
+                                + "', which is not one of " + ObligationStatus.vocabulary())),
                 row.get(INCURRED_AT).toInstant());
     }
 
