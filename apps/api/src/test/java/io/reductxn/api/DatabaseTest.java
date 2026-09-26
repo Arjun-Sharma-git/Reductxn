@@ -80,6 +80,12 @@ abstract class DatabaseTest {
         jdbc.execute("DELETE FROM postings");
         jdbc.execute("DELETE FROM journal_entries");
         jdbc.execute("DELETE FROM obligations");
+        // The group's membership, which apps/api owns: no foreign key to anything, so its position in this list does
+        // not matter - but its presence does. Forgetting it here is silent: the rows leak into the next test class,
+        // and the failure it produces is that class's fixture assertion ("an empty list" that is not empty) rather
+        // than anything pointing at this method. `group_members` is the first table added since this list was
+        // written, and it is the reason the comment above about "impossible to forget" is wrong (ADR 0035).
+        jdbc.execute("DELETE FROM group_members");
         // No rate is seeded here, deliberately, so that a test which does not mention one is testing the
         // absence of one - which is the pair that must fail closed rather than the pair that works.
         jdbc.execute("DELETE FROM fx_quotes");
