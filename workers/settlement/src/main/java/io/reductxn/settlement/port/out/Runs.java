@@ -3,6 +3,7 @@ package io.reductxn.settlement.port.out;
 import io.reductxn.planning.api.SettlementPlan;
 import io.reductxn.settlement.port.in.ComputedRun;
 import io.reductxn.settlement.port.in.FundingRequest;
+import io.reductxn.settlement.port.in.GateConclusion;
 import io.reductxn.settlement.port.in.RunDecision;
 import io.reductxn.settlement.port.in.SettlementRun;
 import io.reductxn.settlement.port.in.TransferStatus;
@@ -140,6 +141,26 @@ public interface Runs {
      * reads one. That is why the reference is required and unique rather than optional and informational.
      */
     void recordFunding(FundingRequest request, Instant fundedAt);
+
+    /**
+     * Writes what the run's gates concluded, replacing whatever the last look concluded.
+     *
+     * <p><strong>For a reader in another deployable, not for this module.</strong> Everything here is derivable
+     * from the run's rows, and this module does derive it - {@link #findRunById} answers with the gates read from
+     * the rows. What a reader elsewhere cannot do is derive it again without implementing the run's arithmetic a
+     * second time (ADR 0021), so the verdict is written down where it can be projected (ADR 0023).
+     *
+     * <p><strong>One row per run, and the write is the whole conclusion.</strong> The verdict fields are an upsert
+     * on the run and the funding gaps are rows that are replaced rather than merged: a gap that has been covered
+     * must disappear, and an update that only inserted would leave a run reporting a shortfall it no longer has.
+     * All of it belongs in one transaction, which is the caller's - {@code ExecuteRunService} opens it - so a reader
+     * never sees a verdict with the previous verdict's gaps under it.
+     *
+     * <p>Written unconditionally on every look rather than only when it changed, because {@code concludedAt} means
+     * "when the worker last read these gates" and a conditional write would quietly change that to "when they first
+     * said this" - a different, less useful fact.
+     */
+    void recordGates(GateConclusion conclusion);
 
     /**
      * Writes one transfer's state, and what the rail said about it.

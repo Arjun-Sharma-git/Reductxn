@@ -79,6 +79,26 @@ nothing, and a refusal written from outside leaves the run waiting until this wo
 vocabulary is fixed by `V502`'s check constraint, so the other deployable writes words it does not own, and a word
 the run does not know is refused by the row rather than by a list either module keeps.
 
+## What the worker writes down for readers
+
+Everything in this worker is derived from a run's rows, and the worker derives it on every read. A reader in
+`apps/api` cannot: whether a run has quorum needs its participants and who owes what, and the funding requirement is
+the plan's arithmetic - so a reader that answered "why is this waiting?" would be implementing the settlement rules a
+second time (ADR 0021). `settlement_run_gates` is the answer (ADR 0023): `ExecuteRunService` writes the verdict it
+just read - quorum met with the approvals counted and required and how many debtors still have to confirm, the
+funding gaps per currency, the status the verdict was reached for, and when it looked - and `GET /runs/{runId}`
+projects it.
+
+The verdict is `GateConclusion.of(run, instant)`, which *reads* `Quorum` and `Funding` rather than deciding
+anything: one implementation of each rule, and the stored row is a copy of its answer. It is written on every look
+(unconditionally, so `concluded_at` means "when the worker last read these gates"), it is replaced in place rather
+than accumulated - a conclusion is not a history - and its own `CHECK`s refuse a verdict that contradicts itself,
+such as "quorum met" with a debtor still to confirm.
+
+`apps/api` writes these rows in its own test fixture by SQL, the way it writes decisions, because it cannot conclude
+anything; this module's `GateConclusionTest` asserts that its writer produces exactly those columns and that they
+agree with the verdicts it derives. The two tests pin one row from both ends.
+
 ## When a rail does not answer
 
 A refusal is classified by the port itself, and the worker does different things with the two kinds (ADR 0019):
