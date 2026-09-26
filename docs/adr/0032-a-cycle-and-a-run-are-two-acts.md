@@ -7,8 +7,12 @@
   `Runs.describe`'s no-run branch, the trigger rows of `docs/specs/settlement.md`
 - **Closes:** the plan's `Nothing schedules a cycle` and the cycle half of `A scheduler, or any other trigger` - as
   far as it can be closed without inventing a policy
+- **Amended:** 2026-09-26 - its closing note named the shape the API slice should take and named the wrong one; ADR
+  0033 records what the code actually allows (the pair arbitrates the cycle's identity, not the derived id) and
+  makes opening a cycle an API write with no request table at all
 - **Related:** ADR 0018 (the worker drives what it owns), ADR 0020 (the API records, the run judges), ADR 0021 (a
-  read model does not recompute judgements), ADR 0030 (a run has to be findable); RULE B6, B17, S1, S4
+  read model does not recompute judgements), ADR 0030 (a run has to be findable), ADR 0033 (the API opens the
+  cycle); RULE B6, B17, S1, S4
 
 ## Context
 
@@ -142,13 +146,13 @@ request the worker consumes), or an operator can keep opening them by hand.
   cycle's id has nothing left to ask for - and a client cannot learn a cycle's id anyway, because
   `POST /groups/{groupId}/cycles` answers `201` with no body. The API slice has to amend the contract, and this ADR is
   the record that it must rather than a licence to implement the node as written.
-- **The API slice has one decision left to make, and this ADR does not make it.** Either the API records a request in
-  its own table (`(group_id, as_of, requested_at)`, unique on the pair) which the worker's pass consumes by calling
-  `OpenCycle` - no logic of this module is copied, and the request becomes a first-class thing a schedule could also
-  write - or the API writes the cycle row itself, which is ADR 0020's crossing pattern and would duplicate an
-  *identity derivation* rather than a column list. The second is cheaper and touches a key scheme, which is the
-  difference between copying a shape and copying a rule; the first is what `V501`'s comment hinted at and is the shape
-  this ADR would choose.
+- **The API slice has one decision left to make - and this note named the wrong answer.** It suggested a request
+  table in the API's own schema for the worker's pass to consume, on the premise that an API-written cycle would
+  have to copy the id derivation. **ADR 0033 found the premise false**: `JooqRuns.open` inserts a proposed id with
+  `on conflict do nothing` and reads back whichever row the pair already has, so the pair arbitrates the cycle's
+  identity and the derivation is only a proposal. The API writes the cycle row, mints its own id, and no request
+  table exists. The correction is left visible here rather than edited away, because the reasoning that produced it
+  is the kind a reader will reproduce.
 - **Nothing about identity, membership or the settlement policy changed.** Cycles are still opened for whoever the
   caller names, quorum is still over a run's own participants (ADR 0016), and when a cycle comes due is still a group's
   decision that no build here can express.

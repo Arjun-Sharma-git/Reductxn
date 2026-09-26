@@ -198,10 +198,17 @@ class ComputeOpenedCyclesTest extends WorkerDatabaseTest {
      * A cycle written at an instant this test chooses, because what is under test is the order cycles were opened
      * in.
      *
+     * <p><strong>This is the API's statement, written here on purpose.</strong> {@code apps/api} opens cycles with
+     * these four columns - {@code POST /v1/groups/{groupId}/cycles}, through {@code JooqCycles} - because the
+     * member's surface is there and the run is here, with no dependency between the two deployables (ADR 0033, ADR
+     * 0020). A test in this module may not call it, so it writes the same SQL instead, which is what pins the
+     * crossing: {@code OpenCycleApiTest} asserts the row it wrote, this asserts that the cadence computes it, and a
+     * change to the table fails one of them rather than a deployment.
+     *
      * <p>{@code open} uses the worker's clock, and two cycles opened a millisecond apart would make this a coin
-     * toss on the tie-break rather than a test of the ordering. The id is random where a real cycle's is derived,
-     * and that is not a shortcut: nothing identifies a cycle by its id here - the plan that gets computed is keyed
-     * by the cycle's own row, which is why the pass reports the id it read.
+     * toss on the tie-break rather than a test of the ordering. The id is random where {@code ComputeRunService}
+     * proposes a derived one, and that is not a shortcut: the id is a proposal the database may reject in favour of
+     * the row its pair already has, which is why the API can mint its own and why the pass reports the id it read.
      */
     private UUID cycleOpenedAt(UUID groupId, Instant asOf, Instant openedAt) {
         UUID id = UUID.randomUUID();

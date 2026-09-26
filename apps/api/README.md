@@ -104,9 +104,18 @@ one was not compared for a while.
 `POST /v1/runs/{runId}/decisions` records a member's answer, approval or refusal. A refusal ends the run, and the
 end is the worker's to write: this records the row, and `workers/settlement` writes `rejected` on its next look at
 the run (ADR 0022 says why the outcome lands there rather than here or in the driver). A test asserts that no status
-is written here, so the boundary is a failing test rather than a comment. Nothing here computes a run either -
-`POST /cycles/{cycleId}/runs` and `/runs/{runId}/execute` are the operator's triggers, and the worker's driver
-performs both.
+is written here, so the boundary is a failing test rather than a comment. Nothing here computes a run either: a
+cycle is opened (`POST /v1/groups/{groupId}/cycles`), and the plan over it is the worker's cadence, which computes
+every cycle that has no run - in the minute after the cycle is opened (ADR 0032, 0033). The contract used to offer
+`POST /cycles/{cycleId}/runs` for that, and it is gone: a client that had a cycle id would have nothing left to ask
+for, and no client could obtain one, because the operation that opens a cycle answered with no body.
+
+`POST /v1/groups/{groupId}/cycles` is the second write into the worker's rows, and the smaller one. It writes four
+columns of `settlement_cycles` and mints its own id, because the pair `(group_id, as_of)` is what identifies a
+cycle and the database settles which id survives - the worker's `JooqRuns.open` reads back whichever row the pair
+has and writes the run against it. It refuses nothing, and the absence is the decision: a group's commitments are
+this module's rows, so "nothing to settle" is answerable here, and answering it here would refuse a request the
+worker satisfies a minute later, because a commitment recorded tomorrow can carry an instant inside this cycle.
 
 The write path exists: `POST /v1/obligations` records a commitment and books the entry it produces, in one
 transaction - one entry for an ordinary commitment, a linked pair through `fx_clearing` for one whose creditor
