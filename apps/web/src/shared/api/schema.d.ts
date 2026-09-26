@@ -582,17 +582,53 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List obligations, filterable by group, member, status and date */
+        /**
+         * List obligations, filterable by group, member, status and date
+         * @description A group's commitments, newest first unless `sort` says otherwise, narrowed by the parameters below.
+         *
+         *     **This read exists because the client has always called it and the API never answered** (ADR 0035, ADR 0036).
+         *     The obligations screen is the one the whole interface is organised around, it has had its filters in the URL
+         *     since it was built, and until now the only way to see an obligation this API had recorded was to record one
+         *     and read the response.
+         *
+         *     **`status` is derived, and derived once.** An obligation is `voided` when this module's `voided_at` is set,
+         *     `settled` when a settlement run that ended in `done` has taken it, `netted` when a run that has not yet ended
+         *     holds it, and `open` otherwise. The run's states are the settlement worker's own vocabulary, and a run that
+         *     ended without settling (`rejected`, `failed`) *releases* its commitments rather than holding them - which is
+         *     the same reading the netting preview uses, because a group that previews one thing and reads another has been
+         *     told two things. The filter is applied to the same expression the response carries, so a page cannot contain
+         *     a row whose status it would not display.
+         *
+         *     **The dates are UTC days**, and that is a stand-in: a group's settlement timezone is a property of a group
+         *     and no group exists in this build, so `from` is that day's midnight UTC and `to` is inclusive of the whole of
+         *     its day.
+         *
+         *     **`memberId` means either side.** A member reading their own ledger wants what they owe and what they are
+         *     owed, which is why the parameter is not called `debtorId`.
+         *
+         *     **`cursor` is gone and `limit` is here.** The document promised a cursor and no limit, which is a promise to
+         *     answer with every obligation a group has ever recorded; a page is what a screen can render, the clamp is the
+         *     one the runs and cycles reads apply, and a cursor arrives with the pagination this build still owes
+         *     (recorded in the plan).
+         */
         get: {
             parameters: {
                 query: {
                     groupId: string;
+                    /** @description Derived rather than stored: see the description above for where each word comes from. */
                     status?: "open" | "netted" | "settled" | "voided";
+                    /** @description An obligation on either side of this member - what they owe or what they are owed. */
                     memberId?: string;
+                    /** @description Inclusive, as a UTC day. */
                     from?: string;
+                    /** @description Inclusive of the whole day, as a UTC day. */
                     to?: string;
-                    sort?: string;
-                    cursor?: components["parameters"]["Cursor"];
+                    /**
+                     * @description `-occurredAt` for newest first (the default) or `occurredAt` for oldest first. A second field to sort by
+                     *     arrives with the index that makes it cheap; a word neither of these is refused rather than ignored.
+                     */
+                    sort?: "-occurredAt" | "occurredAt";
+                    limit?: number;
                 };
                 header?: never;
                 path?: never;
@@ -609,6 +645,7 @@ export interface paths {
                         "application/json": components["schemas"]["Obligation"][];
                     };
                 };
+                400: components["responses"]["Problem"];
             };
         };
         put?: never;

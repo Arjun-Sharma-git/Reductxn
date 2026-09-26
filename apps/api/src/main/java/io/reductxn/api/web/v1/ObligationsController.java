@@ -1,10 +1,14 @@
 package io.reductxn.api.web.v1;
 
 import io.reductxn.api.port.in.NewObligation;
+import io.reductxn.api.port.in.ObligationFilter;
 import io.reductxn.api.port.in.ObligationRefusals;
+import io.reductxn.api.port.in.ObligationStatus;
+import io.reductxn.api.port.in.ReadObligations;
 import io.reductxn.api.port.in.RecordObligation;
 import io.reductxn.api.port.in.RecordedObligation;
 import io.reductxn.api.web.dto.ObligationMapper;
+import io.reductxn.api.web.dto.ObligationResponse;
 import io.reductxn.api.web.dto.RecordObligationRequest;
 import io.reductxn.api.web.error.ExpectedFailures;
 import io.reductxn.kernel.api.DomainError;
@@ -15,14 +19,20 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Clock;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
+import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * {@code POST /v1/obligations}, per the contract.
@@ -52,15 +62,117 @@ public class ObligationsController {
     private static final int MEMO_MAX_LENGTH = 280;
 
     private final RecordObligation recordObligation;
+    private final ReadObligations readObligations;
     private final Clock clock;
 
-    public ObligationsController(RecordObligation recordObligation, Clock clock) {
+    public ObligationsController(RecordObligation recordObligation, ReadObligations readObligations, Clock clock) {
         this.recordObligation = Objects.requireNonNull(recordObligation, "recordObligation");
+        this.readObligations = Objects.requireNonNull(readObligations, "readObligations");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
+    @GetMapping
+    public ResponseEntity<Object> list(
+            @RequestParam(name = "groupId", required = false) String groupId,
+            @RequestParam(name = "status", required = false) String status,
+            @RequestParam(name = "memberId", required = false) String memberId,
+            @RequestParam(name = "from", required = false) String from,
+            @RequestParam(name = "to", required = false) String to,
+            @RequestParam(name = "sort", required = false) String sort,
+            @RequestParam(name = "limit", required = false) String limit,
+            HttpServletRequest http) {
+
+        DomainError malformed = malformedQuery(groupId, status, memberId, from, to, sort, limit);
+
+        if (malformed != null) {
+            return problem(malformed, http.getRequestURI());
+        }
+
+        List<ObligationResponse> obligations = readObligations.list(new ObligationFilter(
+                        UUID.fromString(groupId),
+                        status == null ? null : ObligationStatus.fromWire(status).orElseThrow(),
+                        memberId == null ? null : UUID.fromString(memberId),
+                        from == null ? null : LocalDate.parse(from),
+                        to == null ? null : LocalDate.parse(to),
+                        sort == null ? ObligationFilter.DEFAULT_SORT : ObligationFilter.Sort.fromWire(sort).orElseThrow(),
+                        limit == null ? ObligationFilter.DEFAULT_LIMIT : Integer.parseInt(limit)))
+                .stream()
+                .map(ObligationMapper::toResponse)
+                .toList();
+
+        return ResponseEntity.ok(obligations);
+    }
+
+    /**
+     * Every query parameter read as a string and checked here, rather than bound to its type.
+     *
+     * <p>A {@code UUID} or {@code LocalDate} parameter makes Spring answer a bad value with its own {@code 400},
+     * whose body carries no code - and a client that cannot branch on a code has to parse prose (RULE B20). It is the
+     * same compromise {@code GroupRunsController} makes for its path variable, and the reason {@code limit} arrives
+     * as a string too: a limit of "many" is a malformed request rather than a server error.
+     */
+    private static DomainError malformedQuery(
+            String groupId, String status, String memberId, String from, String to, String sort, String limit) {
+
+        if (groupId == null || !isUuid(groupId)) {
+            return new ObligationRefusals.RequestIncomplete("groupId, as a uuid");
+        }
+        if (status != null && ObligationStatus.fromWire(status).isEmpty()) {
+            return new ObligationRefusals.RequestIncomplete(
+                    "status, one of " + ObligationStatus.vocabulary());
+        }
+        if (memberId != null && !isUuid(memberId)) {
+            return new ObligationRefusals.RequestIncomplete("memberId, as a uuid");
+        }
+        if (from != null && !isDate(from)) {
+            return new ObligationRefusals.RequestIncomplete("from, a date as yyyy-MM-dd");
+        }
+        if (to != null && !isDate(to)) {
+            return new ObligationRefusals.RequestIncomplete("to, a date as yyyy-MM-dd");
+        }
+        if (sort != null && ObligationFilter.Sort.fromWire(sort).isEmpty()) {
+            return new ObligationRefusals.RequestIncomplete(
+                    "sort, " + ObligationFilter.Sort.vocabulary());
+        }
+        if (limit != null && !isWholeNumber(limit)) {
+            return new ObligationRefusals.RequestIncomplete("limit, a whole number");
+        }
+
+        return null;
+    }
+
+    private static boolean isDate(String candidate) {
+        try {
+            LocalDate.parse(candidate);
+
+            return true;
+        } catch (DateTimeParseException notADate) {
+            return false;
+        }
+    }
+
+    private static boolean isWholeNumber(String candidate) {
+        try {
+            Integer.parseInt(candidate);
+
+            return true;
+        } catch (NumberFormatException notANumber) {
+            return false;
+        }
+    }
+
+    private static boolean isUuid(String candidate) {
+        try {
+            UUID.fromString(candidate);
+
+            return true;
+        } catch (IllegalArgumentException notAUuid) {
+            return false;
+        }
+    }
     @PostMapping
     public ResponseEntity<Object> record(
+
             @RequestHeader(name = IDEMPOTENCY_KEY_HEADER, required = false) String idempotencyKey,
             @RequestBody(required = false) RecordObligationRequest request,
             HttpServletRequest http) {

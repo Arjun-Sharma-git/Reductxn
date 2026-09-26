@@ -99,11 +99,8 @@ public final class ObligationMapper {
      * constant in {@code ObligationStatus} must fail to compile here rather than appear in a response.
      */
     private static String statusName(ObligationStatus status) {
-        return switch (status) {
-            case OPEN -> "open";
-            case NETTED -> "netted";
-            case SETTLED -> "settled";
-            case VOIDED -> "voided";
-        };
+        // The enum owns the vocabulary (ADR 0036), so this is a delegation rather than a second spelling of the four
+        // words. Its exhaustive switch is what makes a new constant fail to compile.
+        return status.wireName();
     }
 }
