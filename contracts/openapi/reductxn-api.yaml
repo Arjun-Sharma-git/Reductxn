@@ -415,14 +415,36 @@ paths:
     post:
       tags: [settlement]
       summary: Approve a computed run (quorum enforced server-side)
+      description: |
+        Records one member's approval of a run. The answer is stored where the run can read it, and the
+        run's own quorum arithmetic over its participants decides what it means - so this operation
+        answers `Approval recorded` rather than `Approved`, and a `200` does not mean the run will execute.
+
+        A member has one answer per run: answering twice is a `409`, and the stored answer is never
+        overwritten. Whether an approval counts is not visible here; `GET /runs/{runId}` is where a
+        member can see who has answered (not implemented yet).
+
+        `memberId` is client-supplied, as an obligation's `debtorId` is: this build has no identity, and
+        the field is `required` so that an approval by nobody is refused rather than attributed to
+        nobody. Requiring it is the honest shape until authentication exists.
       parameters:
-        - name: runId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/RunId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
       responses:
-        '200': { description: Approval recorded }
+        '200':
+          description: Approval recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Approval' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
 
   /runs/{runId}/execute:
     post:
@@ -590,6 +612,12 @@ components:
       in: header
       required: true
       schema: { type: string, maxLength: 128 }
+
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
 
   responses:
     Problem:
@@ -921,6 +949,28 @@ components:
             transfers:
               type: array
               items: { $ref: '#/components/schemas/TransferInstruction' }
+
+    ApprovalRequest:
+      type: object
+      description: |
+        One member's approval. The member is named by the client until this build has identity - the
+        same arrangement an obligation's `debtorId` has - and the server records who the client says
+        answered, while the run decides whether that member's answer counts.
+      required: [memberId]
+      properties:
+        memberId: { type: string, format: uuid }
+
+    Approval:
+      type: object
+      description: |
+        An answer as it now stands on the record. There is no `counted` field, deliberately: whether an
+        answer reaches quorum is the run's arithmetic over its own participants, computed in the module
+        that owns the run, and a boolean here would be this API answering a question it does not compute.
+      required: [runId, memberId, recordedAt]
+      properties:
+        runId: { type: string, format: uuid }
+        memberId: { type: string, format: uuid }
+        recordedAt: { type: string, format: date-time }
 
     SettlementRun:
       type: object

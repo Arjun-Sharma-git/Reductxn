@@ -54,6 +54,24 @@ java -jar workers-settlement.jar --reductxn.command=fund --reductxn.run=<uuid> \
 Exit codes: `0` done, `1` refused by the domain, `2` the invocation was wrong. **No command approves a run** -
 approving is a member's act, and there is no member surface yet (ADR 0018).
 
+## Who writes a run's decisions
+
+Another deployable does. `apps/api` records a member's approval into `settlement_decisions` through
+`POST /v1/runs/{runId}/approve`, because the member's surface is there and the run is here, and the two modules may
+not depend on each other (RULE B6). It is safe for a reason rather than by trust: quorum is a pure function over
+the run's own rows (ADR 0016), so `Quorum.counted()` intersects the answers with the run's participants and an
+answer from somebody the run does not concern counts for nothing, whoever wrote it. The worst a mistaken write can
+do is record one member's approval.
+
+The crossing is pinned from this side by `RecordedApprovalsTest`, which writes the same row with the same SQL as
+`apps/api`'s adapter and asserts that the run's arithmetic judges it - including that two answers recorded from the
+API settle a cycle, and that one is not a quorum. The word `'approve'` is fixed by `V502`'s check constraint, so
+the other deployable writes a vocabulary it does not own.
+
+**Not on this surface: rejections.** A rejection ends the run, and that transition is `DecideOnRun`'s - a rejection
+recorded from outside would leave a run waiting for ever rather than `rejected`, which is why the API's endpoint is
+approve-only and why ADR 0020 names the consumer that would be needed.
+
 ## When a rail does not answer
 
 A refusal is classified by the port itself, and the worker does different things with the two kinds (ADR 0019):
