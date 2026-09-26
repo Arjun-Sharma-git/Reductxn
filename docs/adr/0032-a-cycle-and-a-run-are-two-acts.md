@@ -114,17 +114,18 @@ request the worker consumes), or an operator can keep opening them by hand.
   plan, decided whether the group approves it or funds it first, and put it where a member can find it. The two acts
   being separate is what makes a period closable today and settleable tomorrow, and it is what gives the *next* slice
   something to build on.
-- **What the new tests cost, and what they found.** 17 tests in four new classes plus five cases in
-  `SettlementCommandTest`: opening leaves no run, opening twice is one cycle, a cycle opened now is the cycle computed
-  later - the composition claim, which is the whole design in one assertion - a pass computes what was opened, does not
-  touch what already has a plan, refuses and reports a group with nothing to settle, keeps going after a refusal, keeps
-  going after a fault, serves the oldest request first, and stays inside its batch. `ScheduledRunComputerTest` covers
-  the cadence's seam without a database, as `ScheduledRunDriverTest` does for the driver. **The tests found one real
-  defect and one wrong test.** The defect was `describe`'s throw, which the fixture-dependent tests hit immediately: an
-  invariant that had been true only as long as two acts were one act. The wrong test was mine - I asserted that a batch
-  of one drains the queue to empty, which cannot hold while a refused cycle stays in it; the *code* was right and the
-  assertion came from the design's intent rather than from its behaviour, which is the failure mode the plan already
-  names for assertions about "nothing moved".
+- **What the new tests cost, and what they found.** 16 tests in four new classes plus five cases in
+  `SettlementCommandTest` (21 in all, taking the build from 400 to 421): opening leaves no run, opening twice is one
+  cycle, a cycle opened now is the cycle computed later - the composition claim, which is the whole design in one
+  assertion - a pass computes what was opened, does not touch what already has a plan, refuses and reports a group
+  with nothing to settle, keeps going after a refusal, keeps going after a fault, serves the oldest request first,
+  and stays inside its batch. `ScheduledRunComputerTest` covers the cadence's seam without a database, as
+  `ScheduledRunDriverTest` does for the driver. **The tests found one real defect and one wrong test.** The defect
+  was `describe`'s throw, which the fixture-dependent tests hit immediately: an invariant that had been true only as
+  long as two acts were one act. The wrong test was mine - I asserted that a batch of one drains the queue to empty,
+  which cannot hold while a refused cycle stays in it; the *code* was right and the assertion came from the design's
+  intent rather than from its behaviour, which is the failure mode the plan already names for assertions about
+  "nothing moved".
 - **A cycle with no run is a state the API reads nothing of, which is its own finding.** `apps/api` reads
   `settlement_runs` (the client's runs list, the preview's exclusion of settled commitments) and never
   `settlement_cycles`, so a cycle that exists and has no plan is invisible to every existing reader. That is correct
