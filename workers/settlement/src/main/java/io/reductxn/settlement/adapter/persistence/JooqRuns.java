@@ -18,6 +18,7 @@ import io.reductxn.settlement.port.in.Quorum;
 import io.reductxn.settlement.port.in.RunDecision;
 import io.reductxn.settlement.port.in.RunStatus;
 import io.reductxn.settlement.port.in.SettlementRun;
+import io.reductxn.settlement.port.in.SilentTransfer;
 import io.reductxn.settlement.port.in.TransferStatus;
 import io.reductxn.settlement.port.out.Runs;
 
@@ -135,6 +136,24 @@ public class JooqRuns implements Runs {
     private static final Field<Integer> TRANSFER_UNANSWERED = DSL.field("unanswered_attempts", Integer.class);
     private static final Field<OffsetDateTime> TRANSFER_NEXT_ATTEMPT =
             DSL.field("next_attempt_at", OffsetDateTime.class);
+    private static final Field<OffsetDateTime> TRANSFER_UNANSWERED_SINCE =
+            DSL.field("unanswered_since", OffsetDateTime.class);
+
+    /**
+     * The three transfer columns whose names {@code settlement_runs} also has, written out qualified.
+     *
+     * <p>They are needed only by the escalation report, which joins the two tables; every other read here looks at
+     * one table and can use the unqualified fields above. `id`, `run_id` and `status` each exist in both, and an
+     * unqualified one of those is a query Postgres refuses - or worse, one it accepts against the wrong table.
+     * `JooqChainHeads` sets out the same reasoning for its own join.
+     */
+    private static final Field<UUID> SILENT_TRANSFER_ID =
+            DSL.field(DSL.name("settlement_transfers", "id"), UUID.class);
+    private static final Field<UUID> SILENT_TRANSFER_RUN =
+            DSL.field(DSL.name("settlement_transfers", "run_id"), UUID.class);
+    private static final Field<String> SILENT_TRANSFER_STATUS =
+            DSL.field(DSL.name("settlement_transfers", "status"), String.class);
+    private static final Field<UUID> SILENT_RUN_ID = DSL.field(DSL.name("settlement_runs", "id"), UUID.class);
     private static final Field<OffsetDateTime> TRANSFER_CREATED = DSL.field("created_at", OffsetDateTime.class);
 
     private static final Table<Record> GATES = DSL.table("settlement_run_gates");
@@ -420,12 +439,14 @@ public class JooqRuns implements Runs {
         Objects.requireNonNull(at, "at");
 
         // An answer: the transfer's state, and the retry counter back to zero because the rail is working. The
-        // wait is cleared with it - a transfer that has an answer is not waiting for anything.
+        // wait is cleared with it - a transfer that has an answer is not waiting for anything - and so is the
+        // spell of silence, which is over: a rail that has just spoken is not a rail nobody has heard from.
         dsl.update(TRANSFERS)
                 .set(TRANSFER_STATUS, status.wireName())
                 .set(TRANSFER_DETAIL, railDetail)
                 .set(TRANSFER_UNANSWERED, 0)
                 .set(TRANSFER_NEXT_ATTEMPT, (OffsetDateTime) null)
+                .set(TRANSFER_UNANSWERED_SINCE, (OffsetDateTime) null)
                 .where(TRANSFER_ID.eq(transferId))
                 .execute();
     }
@@ -448,20 +469,75 @@ public class JooqRuns implements Runs {
 
     @Override
     public void markTransferUnanswered(UUID transferId, TransferStatus status, String railDetail, Instant at,
-            int consecutiveUnanswered, Instant nextAttemptAt) {
+            int consecutiveUnanswered, Instant nextAttemptAt, Instant unansweredSince) {
 
         Objects.requireNonNull(transferId, "transferId");
         Objects.requireNonNull(status, "status");
         Objects.requireNonNull(at, "at");
         Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
+        Objects.requireNonNull(unansweredSince, "unansweredSince");
 
+        // The spell's start is written as the caller passes it, which is the start it already had when this call is
+        // not the first of a spell. Attempting a transfer does *not* clear it (see `markTransferAttempted`): a
+        // second offer to a rail that is still silent is part of the same silence, and clearing it here would make
+        // every escalation duration at most one backoff long.
         dsl.update(TRANSFERS)
                 .set(TRANSFER_STATUS, status.wireName())
                 .set(TRANSFER_DETAIL, railDetail)
                 .set(TRANSFER_UNANSWERED, consecutiveUnanswered)
                 .set(TRANSFER_NEXT_ATTEMPT, nextAttemptAt.atOffset(ZoneOffset.UTC))
+                .set(TRANSFER_UNANSWERED_SINCE, unansweredSince.atOffset(ZoneOffset.UTC))
                 .where(TRANSFER_ID.eq(transferId))
                 .execute();
+    }
+
+    @Override
+    public List<SilentTransfer> findSilentTransfers(Instant cutOff, int limit) {
+        Objects.requireNonNull(cutOff, "cutOff");
+
+        // Joined to the run for its group, because the report is about somebody's money, and one query rather than a
+        // lookup per row: a bad month should not make the cost of reporting it a function of how bad it was.
+        //
+        // `id` and `run_id` are the two names this table shares with `settlement_runs`, so those two are written out
+        // qualified (`SILENT_TRANSFER_ID`/`SILENT_TRANSFER_RUN`) and the rest are unambiguous. JooqChainHeads sets
+        // out why a name that resolves against the wrong table is worth the extra characters.
+        return dsl.select(SILENT_TRANSFER_ID, SILENT_TRANSFER_RUN, TRANSFER_RAIL_REF, TRANSFER_CURRENCY,
+                        TRANSFER_EXPONENT, TRANSFER_AMOUNT, SILENT_TRANSFER_STATUS, TRANSFER_DETAIL,
+                        TRANSFER_UNANSWERED, TRANSFER_UNANSWERED_SINCE, RUN_GROUP)
+                .from(TRANSFERS)
+                .join(RUNS).on(SILENT_RUN_ID.eq(SILENT_TRANSFER_RUN))
+                .where(TRANSFER_UNANSWERED_SINCE.isNotNull())
+                .and(TRANSFER_UNANSWERED_SINCE.le(cutOff.atOffset(ZoneOffset.UTC)))
+                .orderBy(TRANSFER_UNANSWERED_SINCE, TRANSFER_RAIL_REF)
+                .limit(limit)
+                .fetch(row -> {
+                    Currency currency = Currency.of(row.get(TRANSFER_CURRENCY), row.get(TRANSFER_EXPONENT));
+
+                    return new SilentTransfer(
+                            row.get(SILENT_TRANSFER_RUN),
+                            row.get(RUN_GROUP),
+                            row.get(SILENT_TRANSFER_ID),
+                            row.get(TRANSFER_RAIL_REF),
+                            currency,
+                            Money.of(row.get(TRANSFER_AMOUNT), currency),
+                            TransferStatus.ofWireName(row.get(SILENT_TRANSFER_STATUS)),
+                            row.get(TRANSFER_DETAIL),
+                            row.get(TRANSFER_UNANSWERED),
+                            row.get(TRANSFER_UNANSWERED_SINCE).toInstant());
+                });
+    }
+
+    @Override
+    public int countSilentTransfers(Instant cutOff) {
+        Objects.requireNonNull(cutOff, "cutOff");
+
+        // No join: the count is a fact about transfers, and pulling the run in would make this query slower for
+        // every row it counted in order to answer a question about none of them.
+        return dsl.selectCount()
+                .from(TRANSFERS)
+                .where(TRANSFER_UNANSWERED_SINCE.isNotNull())
+                .and(TRANSFER_UNANSWERED_SINCE.le(cutOff.atOffset(ZoneOffset.UTC)))
+                .fetchOne(0, Integer.class);
     }
 
     /** The partition's summary, its positions and its transfers. One partition, one currency, no totals. */
@@ -567,7 +643,7 @@ public class JooqRuns implements Runs {
         Map<String, List<PlannedTransfer>> transfersByCurrency = new HashMap<>();
         for (Record row : dsl.select(TRANSFER_ID, TRANSFER_CURRENCY, TRANSFER_EXPONENT, TRANSFER_FROM, TRANSFER_TO,
                         TRANSFER_AMOUNT, TRANSFER_RAIL_REF, TRANSFER_STATUS, TRANSFER_DETAIL, TRANSFER_UNANSWERED,
-                        TRANSFER_NEXT_ATTEMPT)
+                        TRANSFER_NEXT_ATTEMPT, TRANSFER_UNANSWERED_SINCE)
                 .from(TRANSFERS)
                 .where(TRANSFER_RUN.eq(runId))
                 .orderBy(TRANSFER_RAIL_REF.asc())
@@ -575,6 +651,7 @@ public class JooqRuns implements Runs {
 
             Currency currency = Currency.of(row.get(TRANSFER_CURRENCY), row.get(TRANSFER_EXPONENT));
             OffsetDateTime nextAttempt = row.get(TRANSFER_NEXT_ATTEMPT);
+            OffsetDateTime unansweredSince = row.get(TRANSFER_UNANSWERED_SINCE);
             PlannedTransfer transfer = new PlannedTransfer(
                     row.get(TRANSFER_ID),
                     currency,
@@ -585,7 +662,8 @@ public class JooqRuns implements Runs {
                     TransferStatus.ofWireName(row.get(TRANSFER_STATUS)),
                     row.get(TRANSFER_DETAIL),
                     row.get(TRANSFER_UNANSWERED),
-                    nextAttempt == null ? null : nextAttempt.toInstant());
+                    nextAttempt == null ? null : nextAttempt.toInstant(),
+                    unansweredSince == null ? null : unansweredSince.toInstant());
 
             transfers.add(transfer);
             transfersByCurrency.computeIfAbsent(currency.code(), ignored -> new ArrayList<>()).add(transfer);

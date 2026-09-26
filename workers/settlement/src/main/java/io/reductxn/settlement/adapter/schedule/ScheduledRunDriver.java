@@ -1,7 +1,13 @@
 package io.reductxn.settlement.adapter.schedule;
 
+
+
 import io.reductxn.settlement.port.in.DriveRuns;
 import io.reductxn.settlement.port.in.DrivenRuns;
+import io.reductxn.settlement.port.in.Escalation;
+import io.reductxn.settlement.port.in.Escalations;
+import io.reductxn.settlement.port.in.ReadEscalations;
+import io.reductxn.settlement.port.in.SilentTransfer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,18 +54,33 @@ public class ScheduledRunDriver {
 
     private static final Logger log = LoggerFactory.getLogger(ScheduledRunDriver.class);
 
+    /**
+     * How many stuck transfers one pass details in its log.
+     *
+     * <p>A hundred unanswered transfers is a rail outage rather than a report, and the count in the summary line
+     * already says so - listing all of them every minute would be the log nobody reads. The command line shows the
+     * same list on demand, with a limit the operator chooses.
+     */
+    private static final int ESCALATIONS_LOGGED = 20;
+
     private final DriveRuns driveRuns;
+    private final ReadEscalations readEscalations;
+    private final Escalation escalation;
     private final Clock clock;
     private final Duration window;
     private final int batchSize;
 
     public ScheduledRunDriver(
             DriveRuns driveRuns,
+            ReadEscalations readEscalations,
+            Escalation escalation,
             Clock clock,
             @Value("${reductxn.settlement.drive.window:PT2M}") Duration window,
             @Value("${reductxn.settlement.drive.batch-size:50}") int batchSize) {
 
         this.driveRuns = driveRuns;
+        this.readEscalations = readEscalations;
+        this.escalation = escalation;
         this.clock = clock;
         this.window = window;
         this.batchSize = batchSize;
@@ -99,6 +120,53 @@ public class ScheduledRunDriver {
             log.warn("the settlement driver could not complete a pass. Nothing was rolled back - each write it "
                     + "made is committed on its own - and the next pass will look at the same runs (cut-off {})",
                     attemptedBefore, fault);
+        }
+
+        // The escalation half of the same tick, and it is *not* inside the try above: a pass that could not drive
+        // is exactly the pass whose operator most needs to hear what has gone unanswered.
+        escalate();
+    }
+
+    /**
+     * Says which transfers no rail has decided, and how long that has been true.
+     *
+     * <p><strong>This is section 4.4's "or escalate", and it is a log line rather than a state change.</strong> The
+     * worker cannot decide a silent transfer's fate: the absence of an answer is not evidence of anything except
+     * silence, so marking it failed would assert money did not move and marking it confirmed would assert it did.
+     * What the worker can do is stop treating it as business as usual, and a deployment's log is where a human is -
+     * the command line reports the same thing on demand ({@code --reductxn.command=escalations}).
+     *
+     * <p><strong>The line repeats every pass, deliberately.</strong> A silence that has not ended is still
+     * happening: a worker that announced it once would let the second hour, and the twentieth, pass unnoticed. That
+     * is also why nothing is written - an {@code escalated_at} column would be a memory of a log line, and the
+     * evidence is already in the rows the report reads.
+     *
+     * <p>A failure here is logged and swallowed rather than thrown: it is a report about the pass, and an
+     * operational database problem must not be reported as a failed settlement.
+     */
+    private void escalate() {
+        try {
+            Escalations escalations =
+                    readEscalations.silentLongerThan(escalation.cutOff(clock.instant()), ESCALATIONS_LOGGED);
+
+            if (escalations.total() == 0) {
+                return;
+            }
+
+            log.warn("{} transfer(s) have gone unanswered for longer than {} (silent at or before {}{}). The rail "
+                    + "may hold a movement it never confirmed, so these need a person:",
+                    escalations.total(), escalation.after(), escalations.cutOff(),
+                    escalations.truncated() ? ", oldest " + escalations.transfers().size() + " listed" : "");
+
+            for (SilentTransfer silent : escalations.transfers()) {
+                log.warn("  transfer {} of run {}: {} {} {}, {} unanswered call(s) since {} - the rail last said: {}",
+                        silent.railRef(), silent.runId(), silent.status().wireName(),
+                        silent.amount().amountMinor(), silent.currency().code(), silent.unansweredAttempts(),
+                        silent.unansweredSince(), silent.railDetail());
+            }
+        } catch (RuntimeException fault) {
+            log.warn("the settlement driver could not read the escalation report. The rail traffic in this pass "
+                    + "was unaffected", fault);
         }
     }
 }

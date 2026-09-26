@@ -7,10 +7,14 @@ import io.reductxn.settlement.port.in.ComputeRun;
 import io.reductxn.settlement.port.in.ComputedRun;
 import io.reductxn.settlement.port.in.DriveRuns;
 import io.reductxn.settlement.port.in.DrivenRuns;
+import io.reductxn.settlement.port.in.Escalation;
+import io.reductxn.settlement.port.in.Escalations;
 import io.reductxn.settlement.port.in.FundingRequest;
 import io.reductxn.settlement.port.in.PartitionOutcome;
+import io.reductxn.settlement.port.in.ReadEscalations;
 import io.reductxn.settlement.port.in.RecordFxFunding;
 import io.reductxn.settlement.port.in.RunRequest;
+import io.reductxn.settlement.port.in.SilentTransfer;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
@@ -68,9 +72,19 @@ public class SettlementCommand {
     public static final int REFUSED = 1;
     public static final int USAGE = 2;
 
+    /**
+     * How many stuck transfers the listing shows unless the operator asks for another number.
+     *
+     * <p>Fifty is a screenful and a half: enough to see the shape of a problem, few enough to read. The report
+     * always says how many there are in total, so this limit never hides the size of it.
+     */
+    private static final int DEFAULT_ESCALATION_LIMIT = 50;
+
     private final ComputeRun computeRun;
     private final DriveRuns driveRuns;
     private final RecordFxFunding recordFxFunding;
+    private final ReadEscalations readEscalations;
+    private final Escalation escalation;
     private final Clock clock;
     private final Duration window;
     private final int batchSize;
@@ -79,6 +93,8 @@ public class SettlementCommand {
             ComputeRun computeRun,
             DriveRuns driveRuns,
             RecordFxFunding recordFxFunding,
+            ReadEscalations readEscalations,
+            Escalation escalation,
             Clock clock,
             @Value("${reductxn.settlement.drive.window:PT2M}") Duration window,
             @Value("${reductxn.settlement.drive.batch-size:50}") int batchSize) {
@@ -86,6 +102,8 @@ public class SettlementCommand {
         this.computeRun = computeRun;
         this.driveRuns = driveRuns;
         this.recordFxFunding = recordFxFunding;
+        this.readEscalations = readEscalations;
+        this.escalation = escalation;
         this.clock = clock;
         this.window = window;
         this.batchSize = batchSize;
@@ -108,6 +126,7 @@ public class SettlementCommand {
             case "compute" -> compute(args, out);
             case "drive" -> drive(args, out);
             case "fund" -> fund(args, out);
+            case "escalations" -> escalations(args, out);
             default -> usage(out, "unknown command '" + command.get(0)
                     + "'. This worker knows: compute, drive, fund");
         });
@@ -239,6 +258,62 @@ public class SettlementCommand {
                         : "still required: " + run.funding().outstanding().stream()
                                 .map(amount -> amount.amountMinor() + " " + amount.currency().code())
                                 .toList());
+
+        return OK;
+    }
+
+    /**
+     * What no rail will decide: the listing behind section 4's "or escalate".
+     *
+     * <p><strong>A read, and it exits zero even when the answer is bad.</strong> The command did what it was asked -
+     * it looked - and an operator scripting this wants the report rather than an error: "nothing has been silent
+     * long enough" is the good news, and a refusal code would make a monitoring script treat good news as a fault.
+     * The exit codes still mean what they mean elsewhere: {@code 2} for an invocation that cannot be understood.
+     *
+     * <p><strong>Nothing here decides anything, and the output says so.</strong> The worker cannot resolve a silent
+     * transfer: it does not know whether the money moved, and marking one failed or confirmed would be asserting a
+     * fact nobody has. What this prints is what the worker holds - the rail's own last words included - so the
+     * person who can find out (by asking the rail) knows which movement to ask about.
+     */
+    private int escalations(ApplicationArguments args, PrintStream out) {
+        int limit = DEFAULT_ESCALATION_LIMIT;
+
+        if (option(args, "limit").isPresent()) {
+            try {
+                limit = Integer.parseInt(option(args, "limit").orElseThrow());
+            } catch (IllegalArgumentException malformed) {
+                return usage(out, "limit must be a whole number of transfers: " + malformed.getMessage());
+            }
+        }
+
+        Escalations escalations =
+                readEscalations.silentLongerThan(escalation.cutOff(clock.instant()), limit);
+
+        if (escalations.total() == 0) {
+            out.printf("escalations: no transfer has gone unanswered for longer than %s%n", escalation.after());
+            return OK;
+        }
+
+        out.printf("escalations: %d transfer(s) no rail has answered for longer than %s (silent at or before %s)%s%n",
+                escalations.total(), escalation.after(), escalations.cutOff(),
+                escalations.truncated() ? ", oldest " + escalations.transfers().size() + " listed" : "");
+
+        Instant now = clock.instant();
+
+        for (SilentTransfer silent : escalations.transfers()) {
+            out.printf("  %s: %s %s (%s), %s unanswered call(s) for %s%n",
+                    silent.railRef(), silent.amount().amountMinor(), silent.currency().code(),
+                    silent.status().wireName(), silent.unansweredAttempts(), silent.silentFor(now));
+            out.printf("    run %s of group %s, transfer %s%n",
+                    silent.runId(), silent.groupId(), silent.transferId());
+
+            if (silent.railDetail() != null) {
+                out.printf("    the rail last said: %s%n", silent.railDetail());
+            }
+        }
+
+        out.println("The worker cannot resolve these: whether the money moved is the rail's answer to give. A "
+                + "submitted transfer is the one to ask about, because the rail accepted it before it went quiet.");
 
         return OK;
     }

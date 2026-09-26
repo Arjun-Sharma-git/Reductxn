@@ -49,6 +49,9 @@ java -jar workers-settlement.jar --reductxn.command=drive [--reductxn.run=<uuid>
 java -jar workers-settlement.jar --reductxn.command=fund --reductxn.run=<uuid> \
      --reductxn.currency=JPY --reductxn.amount-minor=224 --reductxn.exponent=0 \
      --reductxn.funding-ref=<reference>
+
+# what no rail will decide: the transfers a rail has gone quiet on, oldest silence first
+java -jar workers-settlement.jar --reductxn.command=escalations [--reductxn.limit=50]
 ```
 
 Exit codes: `0` done, `1` refused by the domain, `2` the invocation was wrong. **No command approves or rejects a
@@ -98,6 +101,29 @@ such as "quorum met" with a debtor still to confirm.
 `apps/api` writes these rows in its own test fixture by SQL, the way it writes decisions, because it cannot conclude
 anything; this module's `GateConclusionTest` asserts that its writer produces exactly those columns and that they
 agree with the verdicts it derives. The two tests pin one row from both ends.
+
+## When a rail goes quiet for too long
+
+A transfer the rail never answers is retried with an exponential, capped backoff and then polled for ever, and no
+part of that says when "for ever" has stopped being patience. `reductxn.settlement.escalation.after` (two hours by
+default) is that number, and `Escalation` is the policy that turns it into a cut-off; `V508` stores when the current
+spell of silence began, so the duration is measured from a time rather than from a count of tries - eight tries means
+a different amount of time the moment `retry.base` or `retry.cap` is retuned.
+
+**What the worker does with it is say so, and nothing else (ADR 0024).** Each pass logs a warning naming the
+transfers whose silence has outlasted patience, the state the rail left each one in, how many calls went unanswered
+and the rail's own last words; `--reductxn.command=escalations` prints the same listing on demand. The line repeats
+every pass, because a silence that has not ended is still happening.
+
+**It does not resolve them, and that is the decision rather than an omission.** The absence of an answer is not
+evidence of anything except silence: marking such a transfer `failed` would assert the money did not move, and
+marking it `confirmed` would assert that it did - and for a `submitted` transfer, which the rail accepted before
+going quiet, nobody knows which. So the report is what tells a person *which movement to ask the rail about*; letting
+them record the answer is the next step, and it is a decision about who may assert that money moved.
+
+One thing this slice found and fixed: a run that has `failed` was not covered by the guard that stops a finished run
+being driven again, so a manual `drive --run=<a failed run>` offered that run's remaining `authorized` transfers to
+the rail. A run that is over is answered with itself now, like one that is `done`.
 
 ## When a rail does not answer
 

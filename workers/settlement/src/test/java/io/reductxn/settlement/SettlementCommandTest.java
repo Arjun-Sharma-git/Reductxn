@@ -1,6 +1,8 @@
 package io.reductxn.settlement;
 
 import io.reductxn.settlement.adapter.command.SettlementCommand;
+import io.reductxn.settlement.port.in.ComputedRun;
+import io.reductxn.settlement.port.in.PlannedTransfer;
 import io.reductxn.settlement.port.in.RunDecision;
 import io.reductxn.settlement.port.in.RunRequest;
 
@@ -31,7 +33,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * a shell, and the distinction between "the domain refused" and "you typed it wrong" is the one that matters: a
  * cron job that treats a refusal as a crash, and a crash as a refusal, will do the wrong thing quietly.
  */
-@SpringBootTest(classes = {SettlementWorkerApplication.class, StubRailConfiguration.class})
+@SpringBootTest(
+        classes = {SettlementWorkerApplication.class, StubRailConfiguration.class},
+        // Zero patience, so this class's escalation assertions are about what the command *says* rather than about
+        // waiting two hours for a policy. Zero is a legitimate deployment setting (`Escalation`: "tell me about
+        // every call that goes unanswered"), the worker's own writer is tested with the real policy in
+        // `EscalationTest`, and this class is about the operator's surface over it.
+        properties = "reductxn.settlement.escalation.after=PT0S")
 class SettlementCommandTest extends WorkerDatabaseTest {
 
     @Autowired
@@ -160,6 +168,62 @@ class SettlementCommandTest extends WorkerDatabaseTest {
         assertThat(text()).contains("is done");
         assertThat(storedRunStatus(runId)).isEqualTo("done");
         assertThat(rail.submissions()).as("the money moved, from a shell").hasSize(2);
+    }
+
+    @Test
+    void escalationsIsSilentWhenNothingHasBeenIgnored() {
+        OptionalInt code = command.execute(args("--reductxn.command=escalations"), terminal());
+
+        assertThat(code)
+                .as("a report is not a refusal: 'nothing is stuck' is the good news an operator's cron job must not "
+                        + "read as a fault")
+                .hasValue(SettlementCommand.OK);
+        assertThat(text()).contains("no transfer has gone unanswered for longer than");
+    }
+
+    @Test
+    void escalationsNamesTheTransfersNoRailWillDecide() {
+        crossCurrencyObligation(ALICE, BORIS, 12_500L, 224L);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+        approveEveryone(run);
+        fundEveryRequirement(run);
+
+        for (PlannedTransfer transfer : run.transfers()) {
+            rail.scripting(transfer.railRef(), StubRail.Behaviour.UNREACHABLE);
+        }
+
+        assertThat(command.execute(
+                args("--reductxn.command=drive", "--reductxn.run=" + run.run().id()), terminal()))
+                .hasValue(SettlementCommand.OK);
+
+        OptionalInt code = command.execute(args("--reductxn.command=escalations"), terminal());
+
+        assertThat(code).hasValue(SettlementCommand.OK);
+        assertThat(text())
+                .as("the operator gets what they need to act on: which instruction, which state the rail left it in, "
+                        + "how many calls went unanswered, and the rail's own last words")
+                .contains(run.transfers().get(0).railRef())
+                .contains("authorized")
+                .contains("unanswered call(s) for")
+                .contains("the rail last said")
+                .as("and the boundary, stated rather than implied: this is a report, not a resolution")
+                .contains("The worker cannot resolve these");
+
+        // Two transfers are stuck and the operator asked for one.
+        assertThat(command.execute(args("--reductxn.command=escalations", "--reductxn.limit=1"), terminal()))
+                .hasValue(SettlementCommand.OK);
+        assertThat(text())
+                .as("a truncated listing says so, so the limit never hides the size of the problem")
+                .contains("oldest 1 listed");
+    }
+
+    @Test
+    void aLimitThatIsNotANumberIsAUsageErrorRatherThanAReport() {
+        OptionalInt code = command.execute(
+                args("--reductxn.command=escalations", "--reductxn.limit=all-of-them"), terminal());
+
+        assertThat(code).hasValue(SettlementCommand.USAGE);
+        assertThat(text()).contains("usage error:");
     }
 
     @Test

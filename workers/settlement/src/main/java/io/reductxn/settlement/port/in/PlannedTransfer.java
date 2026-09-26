@@ -32,6 +32,10 @@ import java.util.UUID;
  *                   while a rail is unreachable, which is what makes it the input to the backoff
  * @param nextAttemptAt when this transfer may be offered to the rail again, or null when it may be offered now.
  *                   Only an unanswered call sets it; see {@code V506} for why the wait is stored as an instant
+ * @param unansweredSince when this spell of the rail's silence began: the first unanswered call, kept across the
+ *                   attempts that follow it and cleared by any answer. Null when the rail has answered or has not
+ *                   been asked. This is what an escalation policy measures patience against, because a count of
+ *                   tries means a different duration whenever the backoff is retuned (see {@code V508})
  */
 public record PlannedTransfer(
         UUID id,
@@ -43,7 +47,8 @@ public record PlannedTransfer(
         TransferStatus status,
         String railDetail,
         int unansweredAttempts,
-        Instant nextAttemptAt) {
+        Instant nextAttemptAt,
+        Instant unansweredSince) {
 
     public PlannedTransfer {
         Objects.requireNonNull(id, "id");
@@ -65,6 +70,14 @@ public record PlannedTransfer(
                     "transfer " + id + " is " + status.wireName() + " and waiting until " + nextAttemptAt
                             + ". A resolved transfer is never attempted again, so a wait on one is a claim that "
                             + "something will happen to it");
+        }
+
+        if (status.isResolved() && unansweredSince != null) {
+            throw new IllegalArgumentException(
+                    "transfer " + id + " is " + status.wireName() + " and says a rail has been silent since "
+                            + unansweredSince + ". A resolved transfer has been decided by a rail that answered, "
+                            + "so either the status or the silence is wrong - one of them describes another "
+                            + "transfer");
         }
 
         if (fromUserId.equals(toUserId)) {

@@ -7,8 +7,11 @@ import io.reductxn.rails.api.PaymentRail;
 import io.reductxn.rails.api.Rails;
 import io.reductxn.settlement.application.Backoff;
 import io.reductxn.settlement.application.DriveRunsService;
+import io.reductxn.settlement.application.ReadEscalationsService;
 import io.reductxn.settlement.port.in.DriveRuns;
+import io.reductxn.settlement.port.in.Escalation;
 import io.reductxn.settlement.port.in.ExecuteRun;
+import io.reductxn.settlement.port.in.ReadEscalations;
 import io.reductxn.settlement.port.out.Runs;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -134,5 +137,31 @@ public class UseCaseConfiguration {
             @Value("${reductxn.settlement.retry.cap:PT15M}") Duration cap) {
 
         return new Backoff(base, cap);
+    }
+
+    /**
+     * How long a rail may go unanswered before somebody has to look at it.
+     *
+     * <p><strong>This is the one setting here that is a judgement rather than a rate limit.</strong> The driving
+     * and retrying settings above say how hard this worker tries; this says when trying has stopped being the
+     * answer and a person has to decide something the worker cannot. There is no right number - it depends on what
+     * the rail settles and who is on call - so it is configuration with a stated default (two hours of silence,
+     * which is about eight attempts under the default backoff), and the property file says the same thing.
+     */
+    @Bean
+    Escalation escalation(@Value("${reductxn.settlement.escalation.after:PT2H}") Duration after) {
+        return new Escalation(after);
+    }
+
+    /**
+     * The escalation report: what no rail will decide, for the cadence's log line and the operator's command.
+     *
+     * <p>A read, so it takes no transaction and no clock of its own - the cut-off comes from
+     * {@link Escalation#cutOff(java.time.Instant)} at the call site, which is what keeps the policy in one place
+     * and makes a two-hour rule assertable in a test that never waits.
+     */
+    @Bean
+    ReadEscalations readEscalations(Runs runs) {
+        return new ReadEscalationsService(runs);
     }
 }

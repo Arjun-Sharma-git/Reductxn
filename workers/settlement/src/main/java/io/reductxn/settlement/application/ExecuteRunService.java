@@ -116,9 +116,15 @@ public class ExecuteRunService implements ExecuteRun {
 
         ComputedRun run = found.get();
 
-        // RULE S2's idempotency at the top: executing a run that has finished is a read of it. Not an error - a
-        // caller that retried after a timeout is the ordinary case this is for - and not a second movement.
-        if (run.run().status() == RunStatus.DONE) {
+        // A run that has finished is answered with itself rather than executed again: RULE S2's idempotency, and the
+        // reason is that the caller retried after a timeout. `rejected` is deliberately not in this branch even
+        // though it is just as finished - the gates refuse it below, and their refusal names the member whose
+        // answer ended the run, which is more use to whoever asked than "this run is over" would be.
+        //
+        // `failed` joined `done` here because a manual pass could resume it: a run that failed on one transfer still
+        // has others in `authorized`, and the gates have nothing to say about a run that is over - so an operator
+        // driving a failed run by hand would have moved money for a cycle that had already been declared unfinished.
+        if (run.run().status() == RunStatus.DONE || run.run().status() == RunStatus.FAILED) {
             return Result.ok(run);
         }
 
@@ -318,10 +324,15 @@ public class ExecuteRunService implements ExecuteRun {
         }
 
         int unanswered = transfer.unansweredAttempts() + 1;
+
+        // The spell's start: the one it already had, or this call if there was none. Decided here rather than in
+        // SQL because the count and the start describe one spell of silence, and two places deciding where it began
+        // could disagree about how long a rail has been down - which is the number an escalation is measured from.
+        Instant unansweredSince = transfer.unansweredSince() == null ? now : transfer.unansweredSince();
         Instant nextAttempt = backoff.nextAttempt(unanswered, now);
 
         inTransaction(() -> runs.markTransferUnanswered(
-                transfer.id(), statusToKeep, reason, now, unanswered, nextAttempt));
+                transfer.id(), statusToKeep, reason, now, unanswered, nextAttempt, unansweredSince));
     }
 
     /**
