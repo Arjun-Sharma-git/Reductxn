@@ -42,3 +42,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0034 | A cycle has to be visible before it can be waited on | accepted |
 | 0035 | A promise in a contract is not an implementation | accepted |
 | 0036 | The list the main screen has always asked for | accepted |
+| 0037 | A rate that cannot be locked is not a reference rate | accepted |
