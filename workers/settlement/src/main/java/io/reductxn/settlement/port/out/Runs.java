@@ -8,6 +8,7 @@ import io.reductxn.settlement.port.in.SettlementRun;
 import io.reductxn.settlement.port.in.TransferStatus;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -58,17 +59,25 @@ public interface Runs {
     Optional<ComputedRun> findRunById(UUID runId);
 
     /**
-     * Opens the cycle if it does not exist, records the run, writes the plan, and answers with the plan as
-     * stored.
+     * Opens the cycle if it does not exist, records the run, writes the plan and the commitments it covers, and
+     * answers with the plan as stored.
      *
      * <p>One transaction, because half a plan is worse than none - a run whose transfers were written without
      * its positions could not be checked against the ledger, and a run whose positions were written without its
      * transfers could not be executed.
      *
-     * @param run  the run as the use case decided it, including its status
-     * @param plan the plan to store, unchanged
+     * <p><strong>{@code settledObligationIds} is the same list the plan was computed from.</strong> A run that
+     * recorded its plan but not the commitments it netted could not answer which promises it discharged, and a
+     * later cycle would net them again - the double settlement that is the whole reason this is stored rather
+     * than derived (see {@code V504}). They are written here rather than by a separate call so that a run and
+     * the commitments it covers cannot exist apart.
+     *
+     * @param run                  the run as the use case decided it, including its status
+     * @param plan                 the plan to store, unchanged
+     * @param settledObligationIds the commitments the plan was computed from, which this run settles when its
+     *                             transfers are confirmed
      */
-    ComputedRun open(SettlementRun run, SettlementPlan plan);
+    ComputedRun open(SettlementRun run, SettlementPlan plan, List<UUID> settledObligationIds);
 
     /**
      * Moves a run to another state.

@@ -17,7 +17,7 @@ the module that owns the table (RULE B17):
 | `obligations`, and `groups`/`users`/`kyc_*` when they exist | `apps/api` | `apps/api/src/main/resources/db/migration`, versions `1xx` |
 | `tax_rules`, `tax_assessments` | `libs/netting` | `libs/netting/src/main/resources/db/migration`, versions `2xx` |
 | `ledger_accounts`, `journal_entries`, `postings` | `libs/ledger` | `libs/ledger/src/main/resources/db/migration`, versions `3xx` |
-| `settlement_cycles`, `settlement_runs`, `settlement_partitions`, `net_positions`, `settlement_transfers`, `settlement_decisions`, `settlement_fx_fundings` | `workers/settlement` | `workers/settlement/src/main/resources/db/migration`, versions `5xx` |
+| `settlement_cycles`, `settlement_runs`, `settlement_partitions`, `net_positions`, `settlement_transfers`, `settlement_run_obligations`, `settlement_decisions`, `settlement_fx_fundings` | `workers/settlement` | `workers/settlement/src/main/resources/db/migration`, versions `5xx` |
 | `currencies`, `fx_rates`, `fx_quotes` | `libs/fx` | `libs/fx/src/main/resources/db/migration`, versions `4xx` |
 
 This module only runs them.

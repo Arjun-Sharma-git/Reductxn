@@ -22,3 +22,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0014 | Localization: ICU catalogs, codes not prose, and locale-safe money | accepted |
 | 0015 | `planning` computes the plan, `settlement` executes the run | accepted |
 | 0016 | Quorum is over a run's participants, until membership exists | accepted |
+| 0017 | A settled run books its movements, and settling is terminal | accepted |

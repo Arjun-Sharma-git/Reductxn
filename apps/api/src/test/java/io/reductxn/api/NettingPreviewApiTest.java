@@ -10,6 +10,8 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.hasSize;
@@ -35,6 +37,7 @@ class NettingPreviewApiTest extends DatabaseTest {
     private static final UUID GROUP = new UUID(0L, 1L);
     private static final UUID ALICE = new UUID(0L, 10L);
     private static final UUID BORIS = new UUID(0L, 11L);
+    private static final UUID CAROL = new UUID(0L, 12L);
 
     /** The flat charge per transfer the fixture seeds, in minor units of whichever currency is assessed. */
     private static final long FLAT_TAX_MINOR = 50L;
@@ -55,6 +58,51 @@ class NettingPreviewApiTest extends DatabaseTest {
     @BeforeEach
     void buildMockMvc() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
+    }
+
+    @Test
+    void aCommitmentASettledRunDischargedIsNotPreviewed() throws Exception {
+        obligate(GROUP, ALICE, BORIS, 10_000L, "INR", 2);
+        obligate(GROUP, CAROL, BORIS, 4_000L, "INR", 2);
+
+        UUID settled = jdbc.queryForObject(
+                "SELECT id FROM obligations WHERE debtor_id = ?", UUID.class, ALICE);
+
+        settledByADoneRun(settled);
+
+        preview(GROUP)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bestCase.transfers", hasSize(1)))
+                .andExpect(jsonPath("$.bestCase.transfers[0].fromUserId").value(CAROL.toString()))
+                .andExpect(jsonPath("$.bestCase.transfers[0].amount.amountMinor")
+                        .value(4_000L))
+                .andExpect(jsonPath("$.bestCase.positions", hasSize(2)));
+    }
+
+    /**
+     * A run that reached {@code done} and settled this commitment, as the worker leaves it.
+     *
+     * <p>Written with SQL because the API cannot run a settlement - and may not call the module that does (RULE
+     * B6). This is a fixture standing in for another deployable's writes, exactly as the worker's own tests write
+     * obligation rows: the point is the state, and the state is what a deployment's database holds.
+     */
+    private void settledByADoneRun(UUID obligationId) {
+        UUID runId = UUID.randomUUID();
+        UUID cycleId = UUID.randomUUID();
+        Instant at = Instant.parse("2026-09-20T10:00:00Z");
+
+        jdbc.update("""
+                INSERT INTO settlement_cycles (id, group_id, as_of, created_at)
+                VALUES (?, ?, ?::timestamptz, ?::timestamptz)
+                """, cycleId, GROUP, at.atOffset(ZoneOffset.UTC), at.atOffset(ZoneOffset.UTC));
+
+        jdbc.update("""
+                INSERT INTO settlement_runs (id, group_id, cycle_id, status, computed_at, created_at)
+                VALUES (?, ?, ?, 'done', ?::timestamptz, ?::timestamptz)
+                """, runId, GROUP, cycleId, at.atOffset(ZoneOffset.UTC), at.atOffset(ZoneOffset.UTC));
+
+        jdbc.update("INSERT INTO settlement_run_obligations (run_id, obligation_id) VALUES (?, ?)",
+                runId, obligationId);
     }
 
     @Test

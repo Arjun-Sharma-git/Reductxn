@@ -85,16 +85,13 @@ class PropertyCoverageTest {
             // leaves the booking attached to its quote instead of being rounded into a posting. The half
             // that remains is the cycle sum, which is L8's question rather than a separate one, so it moved
             // there rather than being restated.
-            // L8 left this map when the settlement worker arrived, and the half that remained shrank again when
-            // execution landed. It used to say the gate was missing; the gate is real now (RULE S4 is checked at
-            // execution and refused with the outstanding amount per currency), and `ComputeRunTest` labels the
-            // measurement that a non-zero clearing position flags the run and reports the requirement. What is
-            // still not assertable is the end-of-cycle claim itself - "fx_clearing returns to zero at the end of
-            // every cycle" - and the reason has moved rather than gone: a run now reaches `done` and the rail has
-            // moved the money, but *nothing is posted to the ledger*, so the clearing account has no end-of-cycle
-            // position for a test to read. That is the settlement posting, and it is the next slice. Named here
-            // rather than restated as an entry, because the map's keys are property ids and a property cannot be
-            // half-deferred.
+            // L8 left this map when the settlement worker arrived, and its remaining half - "fx_clearing is
+            // zero, per currency, at the end of every cycle" - was the last thing it deferred. That half is
+            // asserted now: `SettlementBookkeepingTest` books a cross-currency commitment, executes the run,
+            // and reads the clearing account's position back from the stored postings with `Balances`. It could
+            // not be asserted before the settlement posting existed, which is the sequence worth remembering:
+            // a property that waits on a mechanism is deferred for a reason rather than for ever - and this
+            // comment is the record of which reason it was.
             Map.entry("L3", "entries are immutable and corrections are compensating entries. The model "
                     + "half is done - an entry is an immutable record over an unmodifiable posting list, "
                     + "and a compensating entry returns an account to zero - but the spec names the "

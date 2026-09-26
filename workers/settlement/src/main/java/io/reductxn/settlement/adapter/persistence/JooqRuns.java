@@ -101,6 +101,10 @@ public class JooqRuns implements Runs {
     private static final Field<String> TRANSFER_DETAIL = DSL.field("rail_detail", String.class);
     private static final Field<OffsetDateTime> TRANSFER_CREATED = DSL.field("created_at", OffsetDateTime.class);
 
+    private static final Table<Record> RUN_OBLIGATIONS = DSL.table("settlement_run_obligations");
+    private static final Field<UUID> RUN_OBLIGATION_RUN = DSL.field("run_id", UUID.class);
+    private static final Field<UUID> RUN_OBLIGATION_ID = DSL.field("obligation_id", UUID.class);
+
     private static final Table<Record> DECISIONS = DSL.table("settlement_decisions");
     private static final Field<UUID> DECISION_RUN = DSL.field("run_id", UUID.class);
     private static final Field<UUID> DECISION_MEMBER = DSL.field("member_id", UUID.class);
@@ -139,9 +143,10 @@ public class JooqRuns implements Runs {
     }
 
     @Override
-    public ComputedRun open(SettlementRun run, SettlementPlan plan) {
+    public ComputedRun open(SettlementRun run, SettlementPlan plan, List<UUID> settledObligationIds) {
         Objects.requireNonNull(run, "run");
         Objects.requireNonNull(plan, "plan");
+        Objects.requireNonNull(settledObligationIds, "settledObligationIds");
 
         OffsetDateTime asOf = run.asOf().atOffset(ZoneOffset.UTC);
 
@@ -172,6 +177,21 @@ public class JooqRuns implements Runs {
 
         for (CurrencyPlan partition : plan.partitions()) {
             writePartition(run, partition);
+        }
+
+        // Which commitments this run covers, written with the plan it was computed from. A run and the
+        // promises it settles are one fact: a run without them could not answer what it discharged, and a
+        // later cycle would net the same obligations again.
+        for (UUID obligationId : settledObligationIds) {
+            dsl.insertInto(RUN_OBLIGATIONS)
+                    .columns(RUN_OBLIGATION_RUN, RUN_OBLIGATION_ID)
+                    .values(run.id(), obligationId)
+                    // `do nothing` because the run's own insert above conflicts when a second attempt finds a
+                    // run that already exists - in which case its links exist too, and re-inserting them would
+                    // fail on the transaction the retry is supposed to survive.
+                    .onConflict(RUN_OBLIGATION_RUN, RUN_OBLIGATION_ID)
+                    .doNothing()
+                    .execute();
         }
 
         return findRun(run.groupId(), run.asOf())

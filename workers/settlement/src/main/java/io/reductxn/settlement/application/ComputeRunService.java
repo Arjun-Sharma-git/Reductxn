@@ -12,6 +12,7 @@ import io.reductxn.settlement.port.in.RunRequest;
 import io.reductxn.settlement.port.in.RunStatus;
 import io.reductxn.settlement.port.in.SettlementRun;
 import io.reductxn.settlement.port.out.OpenObligations;
+import io.reductxn.settlement.port.out.OpenObligations.OpenCommitment;
 import io.reductxn.settlement.port.out.Runs;
 import io.reductxn.settlement.port.out.TaxRuleCatalog;
 
@@ -83,18 +84,24 @@ public class ComputeRunService implements ComputeRun {
             return Result.ok(alreadyOpen.get());
         }
 
-        List<CycleObligation> cycle = obligations.openFor(request.groupId(), request.asOf());
+        List<OpenCommitment> cycle = obligations.openFor(request.groupId(), request.asOf());
 
         if (cycle.isEmpty()) {
             return Result.fail(new RunRefusals.NothingToSettle(request.groupId(), request.asOf()));
         }
+
+        // The planner consumes the commitments; the run records their identities. Both come from the same
+        // rows, read once: a run has to be able to say which promises it settled, or a later cycle would net
+        // them again and the group would move money twice for one debt.
+        List<CycleObligation> commitments = cycle.stream().map(OpenCommitment::obligation).toList();
+        List<UUID> settledObligationIds = cycle.stream().map(OpenCommitment::obligationId).toList();
 
         // Effective-dated and per currency: the rule is resolved at the cycle's instant rather than at now, so a
         // run over a past cycle is assessed under the law that applied then (ADR 0006). Handed over as a function
         // rather than as a map this layer walks, because which currencies a cycle touches is the planner's answer
         // and not something a use case should have to work out first.
         TaxRuleResolver resolver = currency -> taxRules.activeFor(currency, request.asOf());
-        SettlementPlan plan = planner.plan(cycle, resolver);
+        SettlementPlan plan = planner.plan(commitments, resolver);
 
         Instant now = clock.instant();
 
@@ -107,7 +114,7 @@ public class ComputeRunService implements ComputeRun {
                 now,
                 now);
 
-        return Result.ok(runs.open(run, plan));
+        return Result.ok(runs.open(run, plan, settledObligationIds));
     }
 
     /**

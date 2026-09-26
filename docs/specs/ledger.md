@@ -30,7 +30,7 @@ but included in the group balance report, and it must be zero per currency at th
 | L5 | A balance is a projection over postings, never a stored truth | architecture review |
 | L6 | Currency of all postings in an entry is identical | application + constraint |
 | L7 | Conversion conserves value: the rounding residual is booked to `fx_clearing`, never dropped | jqwik X2 |
-| L8 | `fx_clearing` is zero, per currency, at the end of every cycle - or the run is flagged `externally_funded` | settlement pre-check |
+| L8 | `fx_clearing` is zero, per currency, at the end of every cycle - or the run is flagged `externally_funded` | the settlement posting, read back with `Balances` |
 | L9 | FX linkage: every entry with `fx_role = base` has exactly one partner with the same `fx_link_id`, `fx_role = quote`, in the same group | cross-chain verifier job |
 
 L6 is deliberately **unchanged** by multicurrency. A cross-currency obligation becomes two linked
@@ -58,6 +58,12 @@ stored quote. Both passes are required.
 
 The application's database role is granted `INSERT` and `SELECT` only on `journal_entries` and
 `postings`. No code path can contradict the invariant, because the database refuses.
+
+**Two writers, one shape.** `apps/api` appends an entry when a commitment is recorded, and
+`workers/settlement` appends one when a rail confirms a movement (ADR 0017). They cannot disagree about what an
+entry is: both build it with `libs/booking` (RULE B22), and both append it inside a transaction that holds the
+chain's lock. The rule above is what makes two writers safe in the first place - neither can edit what the other
+wrote - and it is the reason this is the first invariant to enforce below the application rather than in it.
 
 **NOT YET IMPLEMENTED, and the reason is worth recording.** Migrations run as the application's own role, and
 a table's owner can always `UPDATE` and `DELETE` whatever the grants say - so revoking from `reductxn_app`

@@ -17,9 +17,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Primary;
 
 import java.util.List;
 import java.util.UUID;
@@ -40,21 +37,11 @@ import static org.assertj.core.api.Assertions.tuple;
  * part of what the context proves (a deployment gets a working rail by default), and this one takes precedence
  * for the calls these tests make.
  */
-@SpringBootTest(classes = {SettlementWorkerApplication.class, ExecuteRunTest.StubRailConfiguration.class})
+@SpringBootTest(classes = {SettlementWorkerApplication.class, StubRailConfiguration.class})
 class ExecuteRunTest extends WorkerDatabaseTest {
 
     private static final Currency INR = Currency.of("INR", 2);
     private static final Currency JPY = Currency.of("JPY", 0);
-
-    @TestConfiguration
-    static class StubRailConfiguration {
-
-        @Bean
-        @Primary
-        StubRail stubRail() {
-            return new StubRail();
-        }
-    }
 
     @Autowired
     private StubRail rail;
@@ -62,7 +49,7 @@ class ExecuteRunTest extends WorkerDatabaseTest {
     /**
      * A rail that has been told nothing and asked nothing.
      *
-     * <p>It is one bean for the whole class, which is what makes "the rail saw this once" a meaningful
+     * <p>It is one bean for the whole context, which is what makes "the rail saw this once" a meaningful
      * assertion - and it means the test that restricts what the rail settles would otherwise restrict it for
      * every test after it.
      */
@@ -303,20 +290,6 @@ class ExecuteRunTest extends WorkerDatabaseTest {
     @Test
     void executingAnUnknownRunIsRefused() {
         assertThat(refusalCode(executeRun.execute(UUID.randomUUID()))).isEqualTo("settlement.run_not_found");
-    }
-
-    private void approveEveryone(ComputedRun run) {
-        for (UUID member : run.quorum().members()) {
-            decided(run.run().id(), member, RunDecision.Decision.APPROVE);
-        }
-    }
-
-    private void fundEveryRequirement(ComputedRun run) {
-        int index = 0;
-        for (Money requirement : run.funding().required()) {
-            ok(recordFxFunding.fund(new FundingRequest(
-                    run.run().id(), requirement.currency(), requirement, "funding-" + (index++))));
-        }
     }
 
     private String storedRunStatus(UUID runId) {
