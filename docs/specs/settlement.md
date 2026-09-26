@@ -99,8 +99,8 @@ Execution flows through `libs/rails`. Required behaviours of every adapter:
    rejected). Only retryable failures are retried, with exponential backoff and a circuit breaker.
 4. A reconciliation sweep polls for transfers stuck in `submitted` beyond a threshold.
 
-**Status: 1, 2, 3 and 4 are implemented; escalation is implemented as a report (ADR 0024), and a person may now
-resolve what it names (ADR 0025).**
+**Status: 1, 2, 3 and 4 are implemented; escalation is implemented as a report (ADR 0024), a person may resolve what
+it names (ADR 0025), and the report carries both ways a transfer gets stuck (ADR 0026).**
 
 **1 and 2.** The port's contract says submit is idempotent, and `MockRail` implements it as a memory:
 it answers a re-submission with the state it already holds rather than confirming a movement twice. The
@@ -140,12 +140,20 @@ answers `RailUnreachable` with the cooldown in the detail, so a caller needs no 
 memory, because a breaker is a memory of a recent bad spell in this process and a restart is allowed to forget
 it. ADR 0019 records all of this.
 
-**Escalation is implemented, and it is a report rather than a resolution (ADR 0024).** Patience is one number - how
-long a rail may go unanswered before somebody has to look - configured as
+**Escalation is implemented as a report, and it is a report rather than a resolution (ADR 0024).** Patience is one
+number - how long a rail may go unanswered before somebody has to look - configured as
 `reductxn.settlement.escalation.after` and defaulting to two hours. `V508` stores when the current spell of silence
 began, so the duration is measured from a time rather than from a count of tries (eight tries means a different
 amount of time the moment the backoff is retuned). The policy turns itself into a cut-off and a query compares
 silences against it.
+
+**And the fourth requirement is met, with a second reason (ADR 0026).** A silence is not the only way a transfer
+gets stuck: a rail that accepts the instruction and then keeps answering "still pending" is answering, so nothing
+goes unanswered, the retry counter resets on every poll, and the movement can sit at the rail for a week while every
+measure this section had said the transfer was healthy. So `V510` stores `submitted_at` - the first acceptance, kept
+across the polls that follow it - `reductxn.settlement.reconcile.after` (one hour by default) is the second policy,
+and the same report carries both, each line saying which reason it is (`no_answer` or `no_confirmation`) and how long
+it has been true. One listing, because the person on call has one question: *which movements does nobody know about?*
 
 What the worker then does is *say so*: a warning line on each pass, naming the transfers, the rail's last words and
 how long the silence has lasted, and `--reductxn.command=escalations` for the same listing on demand. The line
@@ -195,11 +203,13 @@ raised. That single decision covers both of this section's remaining gaps: **the
 rail accepted and never confirmed is resolved by a later pass, which is what "stuck beyond a threshold" meant),
 and **a run starts as soon as its last fact arrives**, because nothing else would notice.
 
-**What the driver does about a rail that never answers: it escalates (ADR 0024).** A transfer nobody has decided is
-polled for ever, and the pass now also reports the ones whose silence has outlasted patience - a warning line per
-transfer, with the rail's own last words, plus a count in the summary. It does *not* resolve them: silence is not
-evidence, so no status is written on the strength of it, and the report exists so that a person who can find out
-from the rail knows which movement to ask about. `SettlementCommand escalations` prints the same listing on demand.
+**What the driver does about a rail that never answers - or never confirms: it escalates (ADR 0024, 0026).** A
+transfer nobody has decided is polled for ever, and the pass reports the ones past either policy: silent too long,
+or at the rail unconfirmed too long. Each line names the reason, how old the trouble is and the rail's own last
+words, with a count in the summary. It does *not* resolve them: silence is not evidence, so no status is written on
+the strength of it, and an accepted-but-unconfirmed transfer is one the rail is holding - which is worse to guess
+about, not better. The report exists so that a person who can find out from the rail knows which movement to ask
+about, and `SettlementCommand escalations` prints the same listing on demand.
 
 ## 4a. What execution writes to the ledger
 
@@ -321,6 +331,12 @@ On top of that, the run's whole lifecycle:
   `ExecuteRun` used, extracted into one place for this second writer. It calls no rail and touches no other
   transfer, and it refuses an already-answered transfer, a transfer no rail was asked about, and an assertion with
   no name on it.
+- **The other way a transfer gets stuck (ADR 0026)** - a rail that takes the instruction and keeps answering "still
+  pending" leaves no silence, so the report above could not see it. `V510` stores `submitted_at` (the first
+  acceptance, kept across polls by `coalesce`), `Reconciliation` is the threshold it is measured against, and
+  `StuckTransfer` carries both reasons - which is also why `SilentTransfer` was renamed: it was no longer true.
+  `JooqRuns.stuck` is one predicate shared by the listing and the count, so the two numbers an operator decides with
+  cannot disagree.
 
 The tests verify the *stored* plan and stored state rather than the call: per-currency zero-sum read back from
 `net_positions` (N1), every participant zeroed by applying the plan's own transfers (N2), the clearing account's
@@ -339,7 +355,7 @@ funding never reaches it at all.
 | Posting the currency a group brings in from outside | A funding is recorded as a fact about the run and moves no ledger entry, so nothing shows the group's own contribution arriving. The entry needs an account for the group itself, and what kind of account that is (`owner_type = 'group'`, and which of asset/liability/income) is open in `docs/specs/ledger.md` section 6 - guessing it here would have invented typing the ledger has deliberately not chosen |
 | A scheduler, or any other trigger | **Closed for the worker's own work, open for cycles** - nothing computes a run, moves an approved one on, or resolves a transfer left in flight *without a caller* was the honest form of "nothing triggers any of it"; the cadence (`ScheduledRunDriver`) and the operator's command line now cover the first three (ADR 0018, 0019, 0024). What is still open is the trigger for a *cycle*: a run is driven once it exists, and nothing decides that a cycle has come due (see the first row) |
 | Retryable-vs-terminal classification, backoff, circuit breaker (section 4.3) | `PaymentRail.submit` returns a `Result` with nowhere to put the classification the spec requires, so the port needs a change before the behaviour can exist. The worker fails safe meanwhile: an unreachable rail leaves the transfer `authorized` and the run `executing`, and a later pass offers it again |
-| Reconciliation sweep (section 4.4) | Needs a submitted transfer to reconcile against. A later `execute` polls one today, so the logic exists and the job, the threshold and the timer do not |
+| Reconciliation sweep (section 4.4) | **Closed** - the polling always existed (a later `execute` asks the rail about a transfer it accepted), and what was missing was a way to say that a submission had stopped being ordinary traffic and a listing that names it: `V510` stores when the rail accepted the transfer (`coalesce`, so a poll that answers "still pending" does not restart the wait), `reductxn.settlement.reconcile.after` is the threshold, and the same report that escalation uses carries a transfer past it with the reason `no_confirmation` (ADR 0026). What it produces is attention rather than an action, because every action available to the worker - failing the transfer, confirming it, giving up on it - is an assertion about money that only the rail or a person who asked the rail can make |
 | Cycle frequency and closing (section 7) | A cycle is keyed by `(group, as-of)`: an operator or a scheduler chooses the instant. Whether cycles close on a schedule, per group, or manually is open, and the current shape forecloses none of the three |
 | Per-currency execution (section 7) | Would let a funded currency settle while another waits. Tempting for latency and risky for consistency, and the question stays open - `ExecuteRun` refuses the whole run if any currency is unfunded, or if the rail cannot settle it |
 | The "who pays whom" report a group reads | The rows it needs exist: transfers with their states and the requirement per currency. The report is a client-facing surface and the worker has none, so it is `apps/api`'s read model over these tables - RULE S5's remaining half, named as such in `RuleCoverageTest` |

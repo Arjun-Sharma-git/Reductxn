@@ -50,7 +50,7 @@ java -jar workers-settlement.jar --reductxn.command=fund --reductxn.run=<uuid> \
      --reductxn.currency=JPY --reductxn.amount-minor=224 --reductxn.exponent=0 \
      --reductxn.funding-ref=<reference>
 
-# what no rail will decide: the transfers a rail has gone quiet on, oldest silence first
+# what no rail has decided: silent too long, or at the rail unconfirmed too long
 java -jar workers-settlement.jar --reductxn.command=escalations [--reductxn.limit=50]
 
 # what a person found out about one of them (RULE S6): the way back from the report above
@@ -107,23 +107,33 @@ such as "quorum met" with a debtor still to confirm.
 anything; this module's `GateConclusionTest` asserts that its writer produces exactly those columns and that they
 agree with the verdicts it derives. The two tests pin one row from both ends.
 
-## When a rail goes quiet for too long
+## What no rail has decided
 
-A transfer the rail never answers is retried with an exponential, capped backoff and then polled for ever, and no
-part of that says when "for ever" has stopped being patience. `reductxn.settlement.escalation.after` (two hours by
-default) is that number, and `Escalation` is the policy that turns it into a cut-off; `V508` stores when the current
-spell of silence began, so the duration is measured from a time rather than from a count of tries - eight tries means
-a different amount of time the moment `retry.base` or `retry.cap` is retuned.
+Two things stop the worker being able to settle a transfer, and neither of them is a failure it can fix. A rail that
+never answers leaves a *silence*: the transfer is retried with an exponential, capped backoff and then polled for
+ever, and the escalation policy (`reductxn.settlement.escalation.after`, two hours by default) says when "for ever"
+has stopped being patience. `V508` stores when the current spell of silence began, so that duration is measured from
+a time rather than from a count of tries - eight tries means a different amount of time the moment `retry.base` or
+`retry.cap` is retuned.
 
-**What the worker does with it is say so, and nothing else (ADR 0024).** Each pass logs a warning naming the
-transfers whose silence has outlasted patience, the state the rail left each one in, how many calls went unanswered
-and the rail's own last words; `--reductxn.command=escalations` prints the same listing on demand. The line repeats
-every pass, because a silence that has not ended is still happening.
+**A rail that answers and will not confirm is the other one (ADR 0026).** It takes the instruction, so the transfer
+is `submitted`, and then it keeps saying "still pending": nothing goes unanswered, the retry counter resets on every
+poll, and the movement can sit at the rail for a week while every measure the worker had said the transfer was
+healthy. `V510` stores when the rail accepted it - the first acceptance, kept across the polls that follow, so the
+wait cannot restart whenever the rail speaks - and `reductxn.settlement.reconcile.after` (one hour by default) is the
+threshold for that. It is a separate number because it is a separate question: a rail holding the group's money is a
+different thing from a rail that has stopped picking up the phone.
 
-**It does not resolve them, and that is the decision rather than an omission.** The absence of an answer is not
-evidence of anything except silence: marking such a transfer `failed` would assert the money did not move, and
-marking it `confirmed` would assert that it did - and for a `submitted` transfer, which the rail accepted before
-going quiet, nobody knows which. So the report is what tells a person *which movement to ask the rail about*.
+**What the worker does with both is say so, and nothing else (ADR 0024).** Each pass logs a warning naming every
+transfer past either line, the reason (`no_answer` or `no_confirmation`), how long it has been true, the state the
+rail left it in and the rail's own last words; `--reductxn.command=escalations` prints the same listing on demand.
+The line repeats every pass, because trouble that has not ended is still happening, and the listing is one report
+rather than two because the person on call has one question.
+
+**It does not resolve them, and that is the decision rather than an omission.** A silence is not evidence of anything
+except silence, and an acceptance is evidence only that the rail has the instruction: marking such a transfer
+`failed` would assert the money did not move, and marking it `confirmed` would assert that it did. So the report is
+what tells a person *which movement to ask the rail about*, and the resolution below is how they answer it.
 
 ## When a person knows the answer
 
@@ -235,9 +245,9 @@ fails at startup rather than falling back: a worker that moved money through a r
 failure that line exists to prevent.
 
 **Owned-table note:** the fourth and fifth tables arrived with the first run, and two more with quorum and
-funding. `settlement_run_gates` and its shortfall rows arrived with ADR 0023, and `V503`-`V509` have added columns
+funding. `settlement_run_gates` and its shortfall rows arrived with ADR 0023, and `V503`-`V510` have added columns
 rather than tables: what the rail said about a transfer, the retry wait, the spell of silence an escalation policy
-measures, the verdict's fields, and - with ADR 0025 - the three that record who resolved a transfer, on what basis
+measures, the verdict's fields, when a rail accepted a transfer, and - with ADR 0025 - the three that record who resolved one, on what basis
 and when. `settlement_partitions` exists because the plan's per-currency figures - gross, net, tax, tax saved -
 cannot be re-derived from the transfers: they are the netting engine's answers about the partition, and
 re-deriving them would mean running the engine again to read a run. `settlement_decisions` is keyed by
@@ -245,7 +255,7 @@ re-deriving them would mean running the engine again to read a run. `settlement_
 first. `settlement_fx_fundings` is keyed by the caller's `funding_ref`, which is the same idempotency rule (S2)
 applied to the other thing in this module that can half-happen.
 
-**Tests:** `./gradlew :workers:settlement:test` (Testcontainers, real Postgres; 125 tests across seventeen classes).
+**Tests:** `./gradlew :workers:settlement:test` (Testcontainers, real Postgres; 131 tests across seventeen classes).
 The tests drive the inbound ports rather than the service classes, and they verify *stored* state: per-currency
 zero-sum read back from the rows (N1), every participant zeroed by applying the plan's own transfers (N2), the
 clearing account's residual, that the rail was asked exactly once per transfer and not at all when a gate
@@ -257,8 +267,8 @@ driver alone - no test touches `ExecuteRun` - and asserts that a run which canno
 with the gate's reason, that a transfer a rail never confirmed is resolved by a later pass, and that a pass is
 bounded and takes the least recently attempted first. `SettlementCommandTest` walks the operator's command line
 against the real bean and the real database, including an approved, funded run settled to `done` from a shell and a
-resolution recorded from one. `EscalationTest` is about the policy - it moves the clock hours forward to assert what
-patience means - and `ResolveTransferTest` is about what a person's answer may and may not do, including the cases
+resolution recorded from one. `StuckTransfersTest` is about the two policies - it moves the clock hours forward to assert what patience and a
+stale submission mean - and `ResolveTransferTest` is about what a person's answer may and may not do, including the cases
 the worker cannot decide for itself. `RailRetryTest` and `BrokenRailTest` cover a rail that does not answer, and they
 move time rather than sleeping: `MovingClockConfiguration` replaces the clock bean, which is possible because nothing
 below `application` reads a clock of its own.

@@ -8,15 +8,16 @@ import io.reductxn.settlement.port.in.ComputedRun;
 import io.reductxn.settlement.port.in.DriveRuns;
 import io.reductxn.settlement.port.in.DrivenRuns;
 import io.reductxn.settlement.port.in.Escalation;
-import io.reductxn.settlement.port.in.Escalations;
 import io.reductxn.settlement.port.in.FundingRequest;
 import io.reductxn.settlement.port.in.PartitionOutcome;
 import io.reductxn.settlement.port.in.PlannedTransfer;
-import io.reductxn.settlement.port.in.ReadEscalations;
+import io.reductxn.settlement.port.in.ReadStuckTransfers;
+import io.reductxn.settlement.port.in.Reconciliation;
 import io.reductxn.settlement.port.in.RecordFxFunding;
 import io.reductxn.settlement.port.in.ResolveTransfer;
 import io.reductxn.settlement.port.in.RunRequest;
-import io.reductxn.settlement.port.in.SilentTransfer;
+import io.reductxn.settlement.port.in.StuckTransfer;
+import io.reductxn.settlement.port.in.StuckTransfers;
 import io.reductxn.settlement.port.in.TransferResolution;
 import io.reductxn.settlement.port.in.TransferStatus;
 
@@ -99,7 +100,8 @@ public class SettlementCommand {
     private final ComputeRun computeRun;
     private final DriveRuns driveRuns;
     private final RecordFxFunding recordFxFunding;
-    private final ReadEscalations readEscalations;
+    private final ReadStuckTransfers readStuckTransfers;
+    private final Reconciliation reconciliation;
     private final ResolveTransfer resolveTransfer;
     private final Escalation escalation;
     private final Clock clock;
@@ -110,7 +112,8 @@ public class SettlementCommand {
             ComputeRun computeRun,
             DriveRuns driveRuns,
             RecordFxFunding recordFxFunding,
-            ReadEscalations readEscalations,
+            ReadStuckTransfers readStuckTransfers,
+            Reconciliation reconciliation,
             ResolveTransfer resolveTransfer,
             Escalation escalation,
             Clock clock,
@@ -120,7 +123,8 @@ public class SettlementCommand {
         this.computeRun = computeRun;
         this.driveRuns = driveRuns;
         this.recordFxFunding = recordFxFunding;
-        this.readEscalations = readEscalations;
+        this.readStuckTransfers = readStuckTransfers;
+        this.reconciliation = reconciliation;
         this.resolveTransfer = resolveTransfer;
         this.escalation = escalation;
         this.clock = clock;
@@ -283,17 +287,23 @@ public class SettlementCommand {
     }
 
     /**
-     * What no rail will decide: the listing behind section 4's "or escalate".
+     * What no rail has decided: the listing behind section 4's "or escalate".
      *
      * <p><strong>A read, and it exits zero even when the answer is bad.</strong> The command did what it was asked -
-     * it looked - and an operator scripting this wants the report rather than an error: "nothing has been silent
-     * long enough" is the good news, and a refusal code would make a monitoring script treat good news as a fault.
+     * it looked - and an operator scripting this wants the report rather than an error: "nothing has been stuck long
+     * enough" is the good news, and a refusal code would make a monitoring script treat good news as a fault.
      * The exit codes still mean what they mean elsewhere: {@code 2} for an invocation that cannot be understood.
      *
-     * <p><strong>Nothing here decides anything, and the output says so.</strong> The worker cannot resolve a silent
+     * <p><strong>One listing with two reasons, because the operator has one question.</strong> A transfer gets stuck
+     * in two ways - no call is answered ({@code no_answer}) or the rail keeps answering "still pending" and never
+     * confirms ({@code no_confirmation}) - and both mean nobody is waiting for the movement any more. Two commands
+     * would mean remembering to run both; one listing with the reason on each line means the person on call sees the
+     * whole problem, oldest first (ADR 0026).
+     *
+     * <p><strong>Nothing here decides anything, and the output says so.</strong> The worker cannot resolve a stuck
      * transfer: it does not know whether the money moved, and marking one failed or confirmed would be asserting a
-     * fact nobody has. What this prints is what the worker holds - the rail's own last words included - so the
-     * person who can find out (by asking the rail) knows which movement to ask about.
+     * fact nobody has. What this prints is what the worker holds - the rail's own last words included - so the person
+     * who can find out (by asking the rail) knows which movement to ask about.
      */
     private int escalations(ApplicationArguments args, PrintStream out) {
         int limit = DEFAULT_ESCALATION_LIMIT;
@@ -306,35 +316,37 @@ public class SettlementCommand {
             }
         }
 
-        Escalations escalations =
-                readEscalations.silentLongerThan(escalation.cutOff(clock.instant()), limit);
+        Instant now = clock.instant();
+        StuckTransfers stuck = readStuckTransfers.stuckLongerThan(
+                escalation.cutOff(now), reconciliation.cutOff(now), limit);
 
-        if (escalations.total() == 0) {
-            out.printf("escalations: no transfer has gone unanswered for longer than %s%n", escalation.after());
+        if (stuck.total() == 0) {
+            out.printf("escalations: no transfer has gone unanswered for longer than %s, or sat at the rail "
+                    + "unconfirmed for longer than %s%n", escalation.after(), reconciliation.after());
             return OK;
         }
 
-        out.printf("escalations: %d transfer(s) no rail has answered for longer than %s (silent at or before %s)%s%n",
-                escalations.total(), escalation.after(), escalations.cutOff(),
-                escalations.truncated() ? ", oldest " + escalations.transfers().size() + " listed" : "");
+        out.printf("escalations: %d transfer(s) no rail has decided (silent before %s, unconfirmed before %s)%s%n",
+                stuck.total(), stuck.unansweredCutOff(), stuck.unconfirmedCutOff(),
+                stuck.truncated() ? ", oldest " + stuck.transfers().size() + " listed" : "");
 
-        Instant now = clock.instant();
+        for (StuckTransfer transfer : stuck.transfers()) {
+            out.printf("  %s: %s %s, %s for %s, %s%n", transfer.railRef(), transfer.amount().amountMinor(),
+                    transfer.currency().code(), transfer.reason().wireName(), transfer.stuckFor(now),
+                    transfer.unansweredAttempts() == 0
+                            ? "the rail is answering"
+                            : transfer.unansweredAttempts() + " call(s) in a row unanswered");
+            out.printf("    %s, run %s of group %s, transfer %s%n", transfer.status().wireName(),
+                    transfer.runId(), transfer.groupId(), transfer.transferId());
 
-        for (SilentTransfer silent : escalations.transfers()) {
-            out.printf("  %s: %s %s (%s), %s unanswered call(s) for %s%n",
-                    silent.railRef(), silent.amount().amountMinor(), silent.currency().code(),
-                    silent.status().wireName(), silent.unansweredAttempts(), silent.silentFor(now));
-            out.printf("    run %s of group %s, transfer %s%n",
-                    silent.runId(), silent.groupId(), silent.transferId());
-
-            if (silent.railDetail() != null) {
-                out.printf("    the rail last said: %s%n", silent.railDetail());
+            if (transfer.railDetail() != null) {
+                out.printf("    the rail last said: %s%n", transfer.railDetail());
             }
         }
 
-        out.println("Whether the money moved is the rail's answer to give. Ask the rail about a submitted transfer "
-                + "first - it accepted the instruction before it went quiet - and record what you find with "
-                + "--reductxn.command=resolve --reductxn.run=<run> --reductxn.transfer=<transfer> "
+        out.println("Whether the money moved is the rail's answer to give. Ask the rail about a transfer it has "
+                + "(no_confirmation) first: it accepted the instruction, so it can say what became of it. Then record "
+                + "what you find with --reductxn.command=resolve --reductxn.run=<run> --reductxn.transfer=<transfer> "
                 + "--reductxn.outcome=confirmed|failed --reductxn.by=<you> --reductxn.basis=<what you looked at>.");
 
         return OK;

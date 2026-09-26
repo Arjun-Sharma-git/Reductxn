@@ -7,12 +7,13 @@ import io.reductxn.rails.api.PaymentRail;
 import io.reductxn.rails.api.Rails;
 import io.reductxn.settlement.application.Backoff;
 import io.reductxn.settlement.application.DriveRunsService;
-import io.reductxn.settlement.application.ReadEscalationsService;
+import io.reductxn.settlement.application.ReadStuckTransfersService;
 import io.reductxn.settlement.application.ResolveTransferService;
 import io.reductxn.settlement.port.in.DriveRuns;
 import io.reductxn.settlement.port.in.Escalation;
 import io.reductxn.settlement.port.in.ExecuteRun;
-import io.reductxn.settlement.port.in.ReadEscalations;
+import io.reductxn.settlement.port.in.ReadStuckTransfers;
+import io.reductxn.settlement.port.in.Reconciliation;
 import io.reductxn.settlement.port.in.ResolveTransfer;
 import io.reductxn.settlement.port.out.ChainHeads;
 import io.reductxn.settlement.port.out.JournalEntries;
@@ -158,15 +159,29 @@ public class UseCaseConfiguration {
     }
 
     /**
-     * The escalation report: what no rail will decide, for the cadence's log line and the operator's command.
+     * How long a transfer may sit at a rail without being confirmed before somebody has to look at it.
      *
-     * <p>A read, so it takes no transaction and no clock of its own - the cut-off comes from
-     * {@link Escalation#cutOff(java.time.Instant)} at the call site, which is what keeps the policy in one place
-     * and makes a two-hour rule assertable in a test that never waits.
+     * <p>The second of the two judgements that make the stuck-transfer report (ADR 0026), and a separate setting
+     * because it is a separate question: this rail has the instruction and is holding the group's money, which is a
+     * different thing from a rail that has stopped answering. Its default is shorter than the escalation default on
+     * purpose - an hour at the rail is long enough that a confirmation queue is not the explanation, whereas an hour
+     * of silence from a rail that may still be working through a backlog is not yet news.
      */
     @Bean
-    ReadEscalations readEscalations(Runs runs) {
-        return new ReadEscalationsService(runs);
+    Reconciliation reconciliation(@Value("${reductxn.settlement.reconcile.after:PT1H}") Duration after) {
+        return new Reconciliation(after);
+    }
+
+    /**
+     * The stuck-transfer report: what no rail has decided, for the cadence's log line and the operator's command.
+     *
+     * <p>A read, so it takes no transaction and no clock of its own - the cut-offs come from the two policies at the
+     * call site, which is what keeps each judgement in one place and makes a two-hour and a one-hour rule assertable
+     * in a test that never waits.
+     */
+    @Bean
+    ReadStuckTransfers readStuckTransfers(Runs runs) {
+        return new ReadStuckTransfersService(runs);
     }
 
     /**

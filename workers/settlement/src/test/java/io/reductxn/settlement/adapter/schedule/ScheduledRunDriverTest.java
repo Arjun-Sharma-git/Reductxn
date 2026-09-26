@@ -7,9 +7,10 @@ import io.reductxn.kernel.api.Result;
 import io.reductxn.settlement.port.in.DriveRuns;
 import io.reductxn.settlement.port.in.DrivenRuns;
 import io.reductxn.settlement.port.in.Escalation;
-import io.reductxn.settlement.port.in.Escalations;
-import io.reductxn.settlement.port.in.ReadEscalations;
+import io.reductxn.settlement.port.in.ReadStuckTransfers;
+import io.reductxn.settlement.port.in.Reconciliation;
 import io.reductxn.settlement.port.in.RunStatus;
+import io.reductxn.settlement.port.in.StuckTransfers;
 
 import org.junit.jupiter.api.Test;
 
@@ -38,6 +39,7 @@ class ScheduledRunDriverTest {
     private static final Duration WINDOW = Duration.ofMinutes(2);
     private static final int BATCH = 25;
     private static final Escalation ESCALATION = new Escalation(Duration.ofHours(2));
+    private static final Reconciliation RECONCILIATION = new Reconciliation(Duration.ofHours(1));
 
     @Test
     void aTickAsksForTheRunsThatHaveNotBeenAttemptedWithinTheWindow() {
@@ -88,34 +90,38 @@ class ScheduledRunDriverTest {
     }
 
     private ScheduledRunDriver driver(DriveRuns port) {
-        return driver(port, new RecordingEscalations());
+        return driver(port, new RecordingStuckTransfers());
     }
 
-    private ScheduledRunDriver driver(DriveRuns port, ReadEscalations escalations) {
-        return new ScheduledRunDriver(
-                port, escalations, ESCALATION, Clock.fixed(NOW, ZoneOffset.UTC), WINDOW, BATCH);
+    private ScheduledRunDriver driver(DriveRuns port, ReadStuckTransfers stuckTransfers) {
+        return new ScheduledRunDriver(port, stuckTransfers, ESCALATION, RECONCILIATION,
+                Clock.fixed(NOW, ZoneOffset.UTC), WINDOW, BATCH);
     }
 
     @Test
-    void aTickAsksForWhateverTheRailHasBeenSilentOnLongerThanThePolicy() {
+    void aTickAsksForWhateverIsStuckPastEitherPolicy() {
         RecordingDriver port = new RecordingDriver();
-        RecordingEscalations escalations = new RecordingEscalations();
+        RecordingStuckTransfers stuckTransfers = new RecordingStuckTransfers();
 
-        driver(port, escalations).drive();
+        driver(port, stuckTransfers).drive();
 
-        assertThat(escalations.cutOffs)
-                .as("the cadence turns patience into the instant a query compares against, which is what keeps the "
-                        + "policy in one place and out of the SQL")
+        assertThat(stuckTransfers.unansweredCutOffs)
+                .as("the cadence turns each policy into the instant a query compares against, which is what keeps "
+                        + "the judgements in one place and out of the SQL")
                 .containsExactly(ESCALATION.cutOff(NOW));
+        assertThat(stuckTransfers.unconfirmedCutOffs)
+                .as("both lines are drawn in one report, because the person who reads it has one question: what has "
+                        + "no rail decided (ADR 0026)")
+                .containsExactly(RECONCILIATION.cutOff(NOW));
     }
 
     @Test
-    void aTickThatCannotReadTheEscalationReportStillSurvives() {
+    void aTickThatCannotReadTheStuckTransferReportStillSurvives() {
         RecordingDriver port = new RecordingDriver();
-        RecordingEscalations escalations = new RecordingEscalations();
-        escalations.fault = new IllegalStateException("the report query went away");
+        RecordingStuckTransfers stuckTransfers = new RecordingStuckTransfers();
+        stuckTransfers.fault = new IllegalStateException("the report query went away");
 
-        assertThatCode(() -> driver(port, escalations).drive())
+        assertThatCode(() -> driver(port, stuckTransfers).drive())
                 .as("the report is a report: a database problem while reading it must not be reported as a failed "
                         + "settlement pass, and the runs that were driven stay driven")
                 .doesNotThrowAnyException();
@@ -125,21 +131,23 @@ class ScheduledRunDriverTest {
                 .hasSize(1);
     }
 
-    /** A port that records the cut-off it was asked about, and can be told to fail. */
-    private static final class RecordingEscalations implements ReadEscalations {
+    /** A port that records the cut-offs it was asked about, and can be told to fail. */
+    private static final class RecordingStuckTransfers implements ReadStuckTransfers {
 
-        private final List<Instant> cutOffs = new ArrayList<>();
+        private final List<Instant> unansweredCutOffs = new ArrayList<>();
+        private final List<Instant> unconfirmedCutOffs = new ArrayList<>();
         private RuntimeException fault;
 
         @Override
-        public Escalations silentLongerThan(Instant cutOff, int limit) {
-            cutOffs.add(cutOff);
+        public StuckTransfers stuckLongerThan(Instant unansweredCutOff, Instant unconfirmedCutOff, int limit) {
+            unansweredCutOffs.add(unansweredCutOff);
+            unconfirmedCutOffs.add(unconfirmedCutOff);
 
             if (fault != null) {
                 throw fault;
             }
 
-            return Escalations.none(cutOff);
+            return StuckTransfers.none(unansweredCutOff, unconfirmedCutOff);
         }
     }
 

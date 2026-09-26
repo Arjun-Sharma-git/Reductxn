@@ -31,3 +31,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0023 | The worker writes its verdicts down for readers that cannot compute them | accepted |
 | 0024 | A silence is not evidence, so escalation is a report | accepted |
 | 0025 | A person's word is evidence, so a resolution is attributed | accepted |
+| 0026 | An answer of "still pending" is not progress, so a stale submission is reported too | accepted |
