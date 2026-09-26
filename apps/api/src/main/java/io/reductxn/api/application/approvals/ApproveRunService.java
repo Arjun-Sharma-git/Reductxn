@@ -1,6 +1,7 @@
 package io.reductxn.api.application.approvals;
 
 import io.reductxn.api.port.in.ApprovalRefusals;
+import io.reductxn.api.port.in.RunRefusals;
 import io.reductxn.api.port.in.ApproveRun;
 import io.reductxn.api.port.in.NewApproval;
 import io.reductxn.api.port.in.RecordedApproval;
@@ -52,7 +53,7 @@ public class ApproveRunService implements ApproveRun {
         UUID memberId = request.memberId();
 
         if (!approvals.hasRun(runId)) {
-            return Result.fail(new ApprovalRefusals.NoSuchRun(runId));
+            return Result.fail(new RunRefusals.NoSuchRun(runId));
         }
 
         Approvals.Written written = approvals.record(request);
