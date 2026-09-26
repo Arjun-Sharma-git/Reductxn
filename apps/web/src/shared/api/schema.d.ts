@@ -305,7 +305,29 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** List members with their roles and credit limits */
+        /**
+         * The group's members, in the order they joined
+         * @description Who can be named - a debtor, a creditor, a filter, a participant in a preview - and the name to show them
+         *     by. **This read exists because three screens have been asking for it and the API never answered.** The
+         *     client's member catalogue has called this path since obligations were built, so in development every
+         *     screen that names a person fell back to showing a uuid, and no test could see it: the client's tests stub
+         *     the API, and this module had never asked for members - the endpoint was a promise in the contract with
+         *     nothing behind it (ADR 0035).
+         *
+         *     Membership is data rather than a consequence of a group's activity: a member who has promised nothing yet
+         *     is still a member, and an obligation naming somebody outside the group is refused by the write that
+         *     records the obligation rather than by this read.
+         *
+         *     The order is the index's - `group_members_by_group (group_id, joined_at, user_id)` - so a page is the group
+         *     in the order people joined, and the tie-break on the id makes that total rather than arbitrary.
+         *
+         *     `displayName` is what the group recorded, not a directory lookup: there is no `users` table in this build,
+         *     so a name is a fact the group agreed on. `role` is recorded and nothing consults it yet, which the schema
+         *     says rather than hides.
+         *
+         *     There is no `404` for a group nobody has heard of, for the reason the runs and cycles lists give: groups
+         *     are not tables, so the empty array is true of a group with no members and of a group that does not exist.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -317,7 +339,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Members */
+                /** @description Members, in the order they joined */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -326,10 +348,27 @@ export interface paths {
                         "application/json": components["schemas"]["Member"][];
                     };
                 };
+                400: components["responses"]["Problem"];
             };
         };
         put?: never;
-        /** Add a member directly (admin only) */
+        /**
+         * Record a member of the group
+         * @description Writes one row of `group_members`: who the member is, what the group calls them, and whether the group
+         *     calls them an admin.
+         *
+         *     **No `admin only`, because there is no admin.** This summary used to claim "Add a member directly (admin
+         *     only)", which is a check this build cannot make: there is no identity, so there is nobody whose `admin`
+         *     row would authorise anything. The endpoint is unauthorised and says so - the stance the decision endpoint
+         *     already takes, where the member is whoever the body says (ADR 0020) - because identity is the recorded
+         *     gap, and a summary promising a check that does not exist is worse than one admitting there is none.
+         *
+         *     **Idempotent by rule rather than by a key.** `(groupId, userId)` is unique, so a second request for the
+         *     same member answers `200` with the member that exists instead of recording a second one, and a retry whose
+         *     response was lost collides with the first attempt's row (P8). Nothing is overwritten either: a name the
+         *     group has recorded is not changed by a later request, which is why this is an add rather than an upsert -
+         *     and why renaming belongs to the admin operation this build does not have.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -339,15 +378,31 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemberRequest"];
+                };
+            };
             responses: {
-                /** @description Member added */
+                /** @description The member was already recorded, and is returned as it stands */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Member"];
+                    };
+                };
+                /** @description Member recorded */
                 201: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Member"];
+                    };
                 };
+                400: components["responses"]["Problem"];
             };
         };
         delete?: never;
@@ -1576,13 +1631,43 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        /**
+         * @description A person the group has recorded as a member: what to call them, and the role the group gave them.
+         *
+         *     No credit limit, which this schema used to promise as a `Money`. Nothing in this build sets one, nothing
+         *     consults one, and a field that is always absent is a promise a client would wait for - so it comes back
+         *     with the policy that enforces it rather than sitting here being null (ADR 0035, the same habit ADR 0033
+         *     applied to `close`).
+         */
         Member: {
             /** Format: uuid */
             userId: string;
             displayName: string;
-            /** @enum {string} */
+            /**
+             * @description Recorded, not enforced. A build without identity has no admin whose word an `admin` row would weigh
+             *     more than a member's, so the role is a fact the group agreed on and nothing consults it.
+             * @enum {string}
+             */
             role: "admin" | "member";
-            creditLimit?: components["schemas"]["Money"];
+        };
+        /**
+         * @description A membership to record. `role` defaults to `member`, because that is the ordinary case and asking every
+         *     caller to say so would make the request longer without making it clearer - and because a build without
+         *     identity has no use for an admin.
+         */
+        MemberRequest: {
+            /**
+             * Format: uuid
+             * @description The person, as the group's own record identifies them.
+             */
+            userId: string;
+            /** @description What the group calls them. There is no users table to look a name up in, so this is the name. */
+            displayName: string;
+            /**
+             * @default member
+             * @enum {string}
+             */
+            role: "admin" | "member";
         };
         Invite: {
             code: string;

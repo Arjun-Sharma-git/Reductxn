@@ -42,5 +42,6 @@
   "amount.unsafe_integer": "That amount cannot be read exactly and has been refused rather than rounded.",
   "amount.negative": "An amount is a magnitude; who pays whom carries the direction.",
   "amount.not_a_currency_code": "That is not a currency code.",
-  "form.occurred_at_invalid": "Enter when this happened as a date and a time."
+  "form.occurred_at_invalid": "Enter when this happened as a date and a time.",
+  "api.member_name_too_long": "That name is longer than this API stores. Shorten it and try again."
 }

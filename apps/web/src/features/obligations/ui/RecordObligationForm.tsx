@@ -20,7 +20,7 @@ import {
   type Refusal,
 } from '../model/input';
 import { nextAttemptKey, useRecordObligation } from '../mutations';
-import { Field } from './Field';
+import { Field } from '@/shared/ui';
 import { fromLocalInput, toLocalInput } from '@/shared/lib/localTime';
 import styles from './RecordObligationForm.module.css';
 

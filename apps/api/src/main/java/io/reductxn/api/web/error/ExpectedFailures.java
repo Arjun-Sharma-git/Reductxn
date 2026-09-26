@@ -1,6 +1,7 @@
 package io.reductxn.api.web.error;
 
 import io.reductxn.api.port.in.DecisionRefusals;
+import io.reductxn.api.port.in.MemberRefusals;
 import io.reductxn.api.port.in.RunRefusals;
 import io.reductxn.api.port.in.ObligationRefusals;
 import io.reductxn.fx.api.AmountTooSmallToConvertException;
@@ -44,6 +45,7 @@ public final class ExpectedFailures {
             // The request itself is malformed, so the server has not begun to answer it.
             Map.entry(ObligationRefusals.RequestIncomplete.CODE, HttpStatus.BAD_REQUEST),
             Map.entry(ObligationRefusals.MemoTooLong.CODE, HttpStatus.BAD_REQUEST),
+            Map.entry(MemberRefusals.NameTooLong.CODE, HttpStatus.BAD_REQUEST),
             Map.entry(RunRefusals.RequestIncomplete.CODE, HttpStatus.BAD_REQUEST),
 
             // The request is understood and the answer is no: an obligation that cannot exist, or a

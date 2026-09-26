@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as GroupsGroupIdRouteRouteImport } from './routes/groups/$groupId/route'
+import { Route as GroupsGroupIdMembersRouteImport } from './routes/groups/$groupId/members'
 import { Route as GroupsGroupIdNettingRouteImport } from './routes/groups/$groupId/netting'
 import { Route as GroupsGroupIdObligationsRouteImport } from './routes/groups/$groupId/obligations'
 import { Route as GroupsGroupIdSettlementIndexRouteImport } from './routes/groups/$groupId/settlement/index'
@@ -25,6 +26,11 @@ const GroupsGroupIdRouteRoute = GroupsGroupIdRouteRouteImport.update({
   id: '/groups/$groupId',
   path: '/groups/$groupId',
   getParentRoute: () => rootRouteImport,
+} as any)
+const GroupsGroupIdMembersRoute = GroupsGroupIdMembersRouteImport.update({
+  id: '/members',
+  path: '/members',
+  getParentRoute: () => GroupsGroupIdRouteRoute,
 } as any)
 const GroupsGroupIdNettingRoute = GroupsGroupIdNettingRouteImport.update({
   id: '/netting',
@@ -53,6 +59,7 @@ const GroupsGroupIdSettlementRunIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
+  '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
   '/groups/$groupId/obligations': typeof GroupsGroupIdObligationsRoute
   '/groups/$groupId/settlement/$runId': typeof GroupsGroupIdSettlementRunIdRoute
@@ -61,6 +68,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
+  '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
   '/groups/$groupId/obligations': typeof GroupsGroupIdObligationsRoute
   '/groups/$groupId/settlement/$runId': typeof GroupsGroupIdSettlementRunIdRoute
@@ -70,6 +78,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
+  '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
   '/groups/$groupId/obligations': typeof GroupsGroupIdObligationsRoute
   '/groups/$groupId/settlement/$runId': typeof GroupsGroupIdSettlementRunIdRoute
@@ -80,6 +89,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/groups/$groupId'
+    | '/groups/$groupId/members'
     | '/groups/$groupId/netting'
     | '/groups/$groupId/obligations'
     | '/groups/$groupId/settlement/$runId'
@@ -88,6 +98,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/groups/$groupId'
+    | '/groups/$groupId/members'
     | '/groups/$groupId/netting'
     | '/groups/$groupId/obligations'
     | '/groups/$groupId/settlement/$runId'
@@ -96,6 +107,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/groups/$groupId'
+    | '/groups/$groupId/members'
     | '/groups/$groupId/netting'
     | '/groups/$groupId/obligations'
     | '/groups/$groupId/settlement/$runId'
@@ -122,6 +134,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/groups/$groupId'
       preLoaderRoute: typeof GroupsGroupIdRouteRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/groups/$groupId/members': {
+      id: '/groups/$groupId/members'
+      path: '/members'
+      fullPath: '/groups/$groupId/members'
+      preLoaderRoute: typeof GroupsGroupIdMembersRouteImport
+      parentRoute: typeof GroupsGroupIdRouteRoute
     }
     '/groups/$groupId/netting': {
       id: '/groups/$groupId/netting'
@@ -155,6 +174,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface GroupsGroupIdRouteRouteChildren {
+  GroupsGroupIdMembersRoute: typeof GroupsGroupIdMembersRoute
   GroupsGroupIdNettingRoute: typeof GroupsGroupIdNettingRoute
   GroupsGroupIdObligationsRoute: typeof GroupsGroupIdObligationsRoute
   GroupsGroupIdSettlementRunIdRoute: typeof GroupsGroupIdSettlementRunIdRoute
@@ -162,6 +182,7 @@ interface GroupsGroupIdRouteRouteChildren {
 }
 
 const GroupsGroupIdRouteRouteChildren: GroupsGroupIdRouteRouteChildren = {
+  GroupsGroupIdMembersRoute: GroupsGroupIdMembersRoute,
   GroupsGroupIdNettingRoute: GroupsGroupIdNettingRoute,
   GroupsGroupIdObligationsRoute: GroupsGroupIdObligationsRoute,
   GroupsGroupIdSettlementRunIdRoute: GroupsGroupIdSettlementRunIdRoute,

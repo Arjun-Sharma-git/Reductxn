@@ -117,6 +117,15 @@ has and writes the run against it. It refuses nothing, and the absence is the de
 this module's rows, so "nothing to settle" is answerable here, and answering it here would refuse a request the
 worker satisfies a minute later, because a commitment recorded tomorrow can carry an instant inside this cycle.
 
+`GET /groups/{groupId}/members` and `POST /groups/{groupId}/members` are this module's own data rather than a
+crossing (ADR 0035): `V104` creates `group_members`, the read serves the group in the order people joined, and the
+write records one - idempotent on the pair `(group_id, user_id)`, so a second request answers `200` with the row that
+exists. **The read had been promised by the contract for several slices with nothing behind it**, and the client
+called it from three screens all along; the stub-generated browser tests could not see it and this module had never
+asked for members, which is what made it a gap worth an ADR rather than a missing file. `Member.creditLimit` and the
+`admin only` claim on the write were removed rather than left unimplemented: nothing sets or consults a limit, and a
+build without identity has no admin whose word would authorise anything.
+
 `GET /v1/groups/{groupId}/cycles` is the read that makes it visible (ADR 0034). It exists for the reason
 `GET /v1/groups/{groupId}/runs` does, one act earlier: opening a cycle writes a claim about an instant, the plan over
 it is the worker's business a minute later, and without the list a member who asked and a member whose cycle the

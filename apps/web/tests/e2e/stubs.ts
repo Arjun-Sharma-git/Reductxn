@@ -513,6 +513,51 @@ export async function stubSettlementApi(
   return { posted, answers, opened };
 }
 
+export type MembersRecorder = {
+  /** The memberships the endpoint recorded, so a test can see what was sent rather than what the screen shows. */
+  readonly recorded: readonly Record<string, unknown>[];
+};
+
+/**
+ * The members API: the group's members, and recording one.
+ *
+ * A POST answers with the row it wrote and appends it to what the list serves, so a test watches the member's own
+ * request come back as a row - the read and the write are one flow rather than two endpoints, which is the whole
+ * reason the write exists (ADR 0035). The existing `MEMBERS` fixture is reused rather than copied, so the names the
+ * obligations and settlement screens fall back on are the same names this screen shows.
+ */
+export async function stubMembersApi(
+  page: Page,
+  members: readonly Member[] = MEMBERS,
+): Promise<MembersRecorder> {
+  const recorded: Record<string, unknown>[] = [];
+  const current: Member[] = [...members];
+
+  await page.route('**/v1/groups/*/members', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(current) });
+
+      return;
+    }
+
+    const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+
+    recorded.push(body);
+
+    const written = {
+      userId: String(body['userId']),
+      displayName: String(body['displayName']),
+      role: body['role'] === 'admin' ? ('admin' as const) : ('member' as const),
+    };
+
+    current.push(written);
+
+    await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(written) });
+  });
+
+  return { recorded };
+}
+
 /** Answers as the read model serves them, so the screen's answer table has a row per answer. */
 function withDates(
   answers: readonly { readonly memberId: string; readonly decision: string }[],

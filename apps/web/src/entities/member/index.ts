@@ -1,1 +1,1 @@
-export { membersQuery, nameOf, type Member } from './queries';
+export { membersQuery, nameOf, type Member, type NewMember } from './queries';

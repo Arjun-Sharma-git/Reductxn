@@ -1,0 +1,58 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-5);
+}
+
+.lede {
+  color: var(--rn-text-muted);
+  max-inline-size: 60ch;
+}
+
+.status {
+  color: var(--rn-text-muted);
+}
+
+.table {
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+
+.caption {
+  text-align: start;
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-xs);
+  padding-block-end: var(--rn-space-2);
+}
+
+.table th,
+.table td {
+  text-align: start;
+  padding: var(--rn-space-2) var(--rn-space-3);
+  border-block-end: 1px solid var(--rn-border);
+}
+
+/* The identifier is shown, not emphasised: it is a handle rather than a name, and it should read as one. */
+.identifier {
+  font-family: var(--rn-font-amount);
+  font-size: var(--rn-text-xs);
+  color: var(--rn-text-muted);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+}
+
+.refusal {
+  margin: 0;
+  color: var(--rn-danger-text);
+  font-size: var(--rn-text-sm);
+  font-weight: var(--rn-weight-medium);
+}
+
+.actions {
+  display: flex;
+  gap: var(--rn-space-3);
+  flex-wrap: wrap;
+}
