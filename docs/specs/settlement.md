@@ -109,20 +109,35 @@ write is its own committed transaction in `ExecuteRunService` (`TransactionTempl
 and it happens before the call it describes: a transfer is written `authorized` before the rail is asked and
 its answer is written after. A `@Transactional` method would have been the shorter code and the wrong one -
 it would hold a database transaction open across every network call, and a rollback after a confirmation
-would erase the only record that money moved.
+would erase the only record that money moved. The driver that calls this pass is not `@Transactional` for the
+same reason, one level up: a transaction spanning a whole batch would span every rail call in it.
 
 **3 is not implemented, and the port cannot express it yet.** `PaymentRail.submit` returns
 `Result<RailReference>`, which says *that* the rail refused and not whether the refusal was retryable -
 there is nowhere in the contract to put that classification, and the spec asks for it. What the worker does
 in the meantime is fail in the safe direction rather than the clever one: a call that did not complete
 leaves the transfer `authorized` and the run `executing` (nothing was refused and nothing moved), a
-transfer refused at the domain level is terminal (the run is `failed`), and re-running the pass retries the
-former. Backoff, a circuit breaker and a classification on the port are the next rail slice.
+transfer refused at the domain level is terminal (the run is `failed`), and the driver retries the former.
+Backoff, a circuit breaker and a classification on the port are the next rail slice.
 
-**4 is not implemented.** A `submitted` transfer is resolved by a later pass polling it, which is the same
-logic a sweep would run on a timer; what is missing is the timer, the threshold and the job. `V503`
-deliberately does not add a `submitted_at` column for it yet - a column nothing reads is a claim rather than
-a fact.
+**4 is implemented as a driver, with one difference from the letter of this section and a reason.** The sweep
+was specified as a threshold on a `submitted` transfer; what was built is a driver whose threshold is on the
+*run* (`settlement_runs.driven_at`, `V505`). A run is the unit of work - `ExecuteRun` already walks its
+transfers and decides for each whether to submit or poll - so a per-transfer timestamp would have been a second
+mechanism for what the pass already does, and the guard that was actually needed is against running the same run
+twice, which is a fact about the run. `V503` promised the column for the sweep; `V505` records why it moved up a
+level, because a column nothing reads is a claim rather than a fact.
+
+The driver is a cadence in this deployable (ADR 0018). It asks for runs in the three states where progress is
+possible - `awaiting_approval`, `awaiting_fx_funding`, `executing` - least recently attempted first, bounded by a
+batch size and a window, and offers each to `ExecuteRun`. The gates decide; a refusal is reported rather than
+raised. That single decision covers both of this section's remaining gaps: **the poll happens** (a transfer the
+rail accepted and never confirmed is resolved by a later pass, which is what "stuck beyond a threshold" meant),
+and **a run starts as soon as its last fact arrives**, because nothing else would notice.
+
+**What the driver does not do: escalate.** A rail that never answers is polled for ever - the report counts the
+transfers still in flight and nothing turns that count into a human's problem. That half of this section is still
+open, and it is the half that needs a policy (how long is too long) rather than a mechanism.
 
 ## 4a. What execution writes to the ledger
 
@@ -204,12 +219,12 @@ leave the group short. Mitigations, in order of preference:
 - Whether per-currency partitions may be executed independently once approved, which would let a
 ## 8. Implementation status
 
-**Implemented in `workers/settlement`, tested against a container (53 tests across seven classes):** opening a
+**Implemented in `workers/settlement`, tested against a container (74 tests across ten classes):** opening a
 run for a `(group, as-of)` pair, computing the plan through `libs/planning`, and recording it as rows - one
 partition per currency, one net position per participant per currency, one transfer per movement with its RULE
 S2 rail reference, and the identities of the commitments it nets. The run's status is decided in the use case,
-not the adapter: `awaiting_approval`, or
-`awaiting_fx_funding` when any currency's `fx_clearing` position is non-zero (RULE S4).
+not the adapter: `awaiting_fx_funding` when any currency's `fx_clearing` position is non-zero (RULE S4), else
+`awaiting_approval`.
 
 On top of that, the run's whole lifecycle:
 
@@ -230,6 +245,13 @@ On top of that, the run's whole lifecycle:
   leaves every member flat and `fx_clearing` at zero per currency. The commitment an obligation recorded and the
   entry a run writes are the two halves of one verifiable chain, and the tests hand the rebuilt entries to
   `EntryChain` rather than comparing fields. Section 4a has what this does and does not cover.
+- **Driving (section 4.4)** - `DriveRuns` offers every run whose progress is possible to `ExecuteRun`, and two
+  adapters trigger it: a cadence (`ScheduledRunDriver`, `@Scheduled`, rate-limited by a window and a batch size)
+  and an operator's command line (`SettlementCommand`: `compute`, `drive`, `fund`). Until this existed, the only
+  caller of `ExecuteRun` in the repository was a test - and the worker, being a non-web application with no
+  non-daemon thread, exited at startup rather than running as a service at all. ADR 0018 records the boundary it
+  draws: the worker drives what it owns, an operator triggers what only a person can decide, and a member's
+  approval is neither - which is the next decision.
 
 The tests verify the *stored* plan and stored state rather than the call: per-currency zero-sum read back from
 `net_positions` (N1), every participant zeroed by applying the plan's own transfers (N2), the clearing account's
@@ -241,6 +263,9 @@ funding never reaches it at all.
 
 | Missing | Why it is not here |
 |---|---|
+| Nothing schedules a *cycle* | A run is driven once it exists, but nothing decides that a cycle has come due: a group's settlement schedule is a group's property and `groups` does not exist. Cycles are opened by an operator's command in the meantime, and the policy that replaces it ("every month, at the group's cut-off") is a decision about a group's money that belongs with the group. ADR 0018 records the two questions that stay separate: what moves a run, and what a person has to decide |
+| A member's approval reaching this worker | The largest gap in the product: a run reaches `executing` only when `DecideOnRun` is called, and no surface calls it. It needs identity (who is a member), a member-facing endpoint (the API), and a channel from there to this module - a network path or a shared table, either of which is an ADR rather than an improvisation. The operator's command deliberately does *not* approve on a member's behalf, and `SettlementCommandTest` shows what that costs: its end-to-end test records approvals through the port |
+| Escalating a transfer no rail will ever decide | Section 4's sweep resolves what a rail has decided and polls what it has not; nothing says when "for ever" has arrived. It needs a policy (how long is too long, and who is told) and the driver's report is what would feed it |
 | Posting the currency a group brings in from outside | A funding is recorded as a fact about the run and moves no ledger entry, so nothing shows the group's own contribution arriving. The entry needs an account for the group itself, and what kind of account that is (`owner_type = 'group'`, and which of asset/liability/income) is open in `docs/specs/ledger.md` section 6 - guessing it here would have invented typing the ledger has deliberately not chosen |
 | A scheduler, or any other trigger | The tests call the use cases. Nothing computes a run, moves an approved one on, or resolves a transfer left in flight without a caller - which is the honest form of "nothing schedules anything" |
 | Retryable-vs-terminal classification, backoff, circuit breaker (section 4.3) | `PaymentRail.submit` returns a `Result` with nowhere to put the classification the spec requires, so the port needs a change before the behaviour can exist. The worker fails safe meanwhile: an unreachable rail leaves the transfer `authorized` and the run `executing`, and a later pass offers it again |

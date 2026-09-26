@@ -23,3 +23,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0015 | `planning` computes the plan, `settlement` executes the run | accepted |
 | 0016 | Quorum is over a run's participants, until membership exists | accepted |
 | 0017 | A settled run books its movements, and settling is terminal | accepted |
+| 0018 | The worker drives what it owns, and an operator triggers the rest | accepted |
