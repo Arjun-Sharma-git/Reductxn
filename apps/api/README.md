@@ -117,6 +117,15 @@ has and writes the run against it. It refuses nothing, and the absence is the de
 this module's rows, so "nothing to settle" is answerable here, and answering it here would refuse a request the
 worker satisfies a minute later, because a commitment recorded tomorrow can carry an instant inside this cycle.
 
+`GET /v1/groups/{groupId}/cycles` is the read that makes it visible (ADR 0034). It exists for the reason
+`GET /v1/groups/{groupId}/runs` does, one act earlier: opening a cycle writes a claim about an instant, the plan over
+it is the worker's business a minute later, and without the list a member who asked and a member whose cycle the
+worker refused to plan would see the same thing - nothing. Each row carries `runId`, a fact rather than a status:
+present means the plan is readable at `/runs/{runId}`, absent means there is none, and the two situations behind
+"none" are deliberately not told apart, because telling them apart would mean recording a refusal this module does
+not judge. The read is one query - a left join to the worker's `settlement_runs`, which `one_run_per_cycle` keeps
+row-preserving - ordered by `created_at` through the index `V511` creates for it.
+
 The write path exists: `POST /v1/obligations` records a commitment and books the entry it produces, in one
 transaction - one entry for an ordinary commitment, a linked pair through `fx_clearing` for one whose creditor
 is paid in another currency. It has no route for anything else: no void, no list, no settlement.

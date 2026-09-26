@@ -726,7 +726,62 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /**
+         * The group's settlement cycles, newest first
+         * @description What a group has closed its books at, and what became of each one. **This is the read that makes an
+         *     opened cycle visible.** Opening one writes a claim about an instant; whether a plan exists for it is a
+         *     question about a *run*, and the worker answers it a minute later on its cadence. Without this read, a
+         *     member who asked for a settlement and a member whose cycle the worker refused to plan (because the group
+         *     has nothing recorded at or before the instant, `settlement.nothing_to_settle`) see exactly the same thing:
+         *     nothing at all.
+         *
+         *     The order is the schema's own - `settlement_cycles_by_group (group_id, created_at DESC)`, the index the
+         *     migration created for this read - so a page is the group's most recently *asked for* cycles, which is what
+         *     a member wants at the top after asking. Note that this is not `asOf` order: a cycle opened today for last
+         *     quarter would otherwise appear halfway down a page of history, and the pair `(groupId, asOf)` is unique, so
+         *     the tie-break by id is a formality rather than a reordering.
+         *
+         *     `runId` is the plan over the cycle, or absent when none exists yet. It is a *fact* rather than a status -
+         *     the run's own status lives on the run, where `GET /runs/{runId}` and the group's runs already serve it -
+         *     and it is what lets a client say "asked, waiting since <createdAt>" instead of guessing. A cycle whose
+         *     instant has passed and whose plan never appears is a visible anomaly in a list ordered by when it was
+         *     asked, which is the honest way to report a situation this API cannot decide.
+         *
+         *     There is no `404` for a group nobody has heard of, for the reason the runs list gives: groups are not
+         *     tables in this build, so the empty array is true of both. Nor is there a filter by "waiting" - it would be
+         *     a second ordering guarantee for a query whose only interesting question is "did my request become a plan",
+         *     which the first page answers.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /**
+                     * @description How many cycles one page may hold. The default is this contract's own for list endpoints and the
+                     *     maximum is the API's, for the reason the runs list states: an unbounded read is a read whose cost
+                     *     grows with a group's history, and a limit pretending to be paging is worse than a limit.
+                     */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    groupId: components["parameters"]["GroupId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Cycles, most recently opened first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SettlementCycle"][];
+                    };
+                };
+                400: components["responses"]["Problem"];
+            };
+        };
         put?: never;
         /**
          * Open a settlement cycle as of an instant
@@ -1701,15 +1756,14 @@ export interface components {
             recordedAt: string;
         };
         /**
-         * @description A closed period of a group's books, as `settlement_cycles` stores it (ADR 0032). It is four
-         *     facts and no status: a cycle is a claim about an instant rather than a state machine, and
-         *     whether it has been computed is a question about a *run*, which is
-         *     `GET /groups/{groupId}/runs`' to answer.
+         * @description A closed period of a group's books, as `settlement_cycles` stores it (ADR 0032). It is four facts and
+         *     no status of its own: a cycle is a claim about an instant rather than a state machine, and whether it
+         *     has been computed is a question about a *run* - which this schema answers with `runId` and which the
+         *     runs endpoints answer with the plan's status and figures.
          *
-         *     `asOf` is the cycle's identity along with the group - one cycle per group per instant - and it
-         *     is the instant every rate, tax rule and commitment in it is resolved at. `createdAt` is when
-         *     somebody asked for it, which is what a client shows as "waiting since" when the plan has not
-         *     been computed yet.
+         *     `asOf` is the cycle's identity along with the group - one cycle per group per instant - and it is the
+         *     instant every rate, tax rule and commitment in it is resolved at. `createdAt` is when somebody asked
+         *     for it, which is what a client shows as "waiting since" when the plan has not been computed yet.
          */
         SettlementCycle: {
             /** Format: uuid */
@@ -1723,6 +1777,15 @@ export interface components {
             asOf: string;
             /** Format: date-time */
             createdAt: string;
+            /**
+             * Format: uuid
+             * @description The plan computed over this cycle, or absent when none exists yet. A cycle the worker has not
+             *     computed (`workers/settlement`'s cadence, within a minute) and a cycle it refused
+             *     (`settlement.nothing_to_settle`, because the group has nothing recorded at or before `asOf`)
+             *     are both absent here, and that is deliberate: telling them apart would mean recording a
+             *     refusal, which is a decision this schema does not have the facts to make.
+             */
+            runId?: string | null;
         };
         /**
          * @description One run per (group, cycle), containing one partition per currency present. Per-currency

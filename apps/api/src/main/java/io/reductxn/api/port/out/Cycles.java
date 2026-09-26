@@ -1,6 +1,10 @@
 package io.reductxn.api.port.out;
 
+import io.reductxn.api.port.in.CycleReport;
 import io.reductxn.api.port.in.OpenedCycle;
+
+import java.util.List;
+import java.util.UUID;
 
 /**
  * The cycle rows, written from {@code apps/api}.
@@ -31,4 +35,16 @@ public interface Cycles {
      * @return the cycle as stored, with {@link OpenedCycle#created()} saying whether this call inserted it
      */
     OpenedCycle open(CycleToOpen cycle);
+
+    /**
+     * At most {@code limit} cycles of this group, most recently opened first.
+     *
+     * <p>Each one carries its plan's id when a plan exists, which is a read of {@code workers/settlement}'s run rows
+     * and therefore the same crossing every other read model here makes. It is one query rather than one per row -
+     * {@code settlement_runs} is unique per cycle, so a left join cannot multiply a cycle into two - and the order
+     * is the one {@code settlement_cycles_by_group} was created for.
+     *
+     * @param limit clamped by the caller: a limit is a boundary concern rather than a rule
+     */
+    List<CycleReport> listByGroup(UUID groupId, int limit);
 }

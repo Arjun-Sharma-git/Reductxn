@@ -3,6 +3,7 @@ package io.reductxn.api.web.v1;
 import io.reductxn.api.port.in.NewCycle;
 import io.reductxn.api.port.in.OpenCycle;
 import io.reductxn.api.port.in.OpenedCycle;
+import io.reductxn.api.port.in.ReadGroupCycles;
 import io.reductxn.api.port.in.RunRefusals;
 import io.reductxn.api.web.dto.CycleRequest;
 import io.reductxn.api.web.dto.SettlementCycleResponse;
@@ -13,13 +14,16 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Clock;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -55,11 +59,16 @@ import java.util.UUID;
 @RequestMapping("/v1/groups/{groupId}/cycles")
 public class GroupCyclesController {
 
+    /** The contract's default for a list endpoint, and the same one the runs and cycles pages use. */
+    private static final int DEFAULT_LIMIT = 20;
+
     private final OpenCycle openCycle;
+    private final ReadGroupCycles readGroupCycles;
     private final Clock clock;
 
-    public GroupCyclesController(OpenCycle openCycle, Clock clock) {
+    public GroupCyclesController(OpenCycle openCycle, ReadGroupCycles readGroupCycles, Clock clock) {
         this.openCycle = Objects.requireNonNull(openCycle, "openCycle");
+        this.readGroupCycles = Objects.requireNonNull(readGroupCycles, "readGroupCycles");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -82,7 +91,36 @@ public class GroupCyclesController {
                 ? ResponseEntity.status(HttpStatus.CREATED)
                 : ResponseEntity.ok();
 
-        return response.body(SettlementCycleResponse.of(opened));
+        return response.body(SettlementCycleResponse.of(opened.cycle()));
+    }
+
+    /**
+     * {@code GET /v1/groups/{groupId}/cycles}: the cycles this group has closed, and the plan over each one.
+     *
+     * <p>The read that makes the write above observable. A member who asked for a settlement and a member whose cycle
+     * the worker refused to plan both see nothing at all without it - the first has a row nobody reads, the second
+     * has a cycle whose instant passes with no plan - and the {@code runId} on each row is what tells them apart from
+     * a cycle that was merely asked for a moment ago.
+     */
+    @GetMapping
+    public ResponseEntity<Object> list(
+            @PathVariable String groupId,
+            @RequestParam(name = "limit", required = false) Integer limit,
+            HttpServletRequest http) {
+
+        DomainError malformed = malformedGroupId(groupId);
+
+        if (malformed != null) {
+            return problem(malformed, http.getRequestURI());
+        }
+
+        List<SettlementCycleResponse> cycles = readGroupCycles
+                .list(UUID.fromString(groupId), limit == null ? DEFAULT_LIMIT : limit)
+                .stream()
+                .map(SettlementCycleResponse::of)
+                .toList();
+
+        return ResponseEntity.ok(cycles);
     }
 
     /**
@@ -93,14 +131,31 @@ public class GroupCyclesController {
      * request cannot be handed to the use case" is one condition however many endpoints meet it.
      */
     private static DomainError malformed(String groupId, CycleRequest request) {
-        if (groupId == null || groupId.isBlank() || !isUuid(groupId)) {
-            return new RunRefusals.RequestIncomplete("groupId in the path, as a uuid");
+        DomainError path = malformedGroupId(groupId);
+
+        if (path != null) {
+            return path;
         }
         if (request == null) {
             return new RunRefusals.RequestIncomplete("body");
         }
         if (request.asOf() == null) {
             return new RunRefusals.RequestIncomplete("asOf, the instant the books are closed at");
+        }
+
+        return null;
+    }
+
+    /**
+     * The path parameter, which the contract declares as a uuid.
+     *
+     * <p>Taken as a {@code String} and checked here rather than bound as a {@code UUID}, so that a malformed id gets
+     * the same coded problem body every other refusal gets - the reason {@code GroupRunsController} gives, and the
+     * reason this class shares one code with it: a code identifies a condition rather than an endpoint (RULE B20).
+     */
+    private static DomainError malformedGroupId(String groupId) {
+        if (groupId == null || groupId.isBlank() || !isUuid(groupId)) {
+            return new RunRefusals.RequestIncomplete("groupId in the path, as a uuid");
         }
 
         return null;
