@@ -1,5 +1,6 @@
 package io.reductxn.api.port.in;
 
+import io.reductxn.fx.api.FxQuote;
 import io.reductxn.ledger.api.Currency;
 import io.reductxn.ledger.api.Money;
 
@@ -25,6 +26,10 @@ import java.util.UUID;
  * @param settleInCurrency what the creditor is to receive. Never null: it equals {@code amount}'s currency
  *                         for an ordinary obligation, and stating it is a claim about the commitment
  *                         rather than an echo of the request
+ * @param fxQuote          the locked conversion, for a commitment paid in another currency; null when the
+ *                         creditor is paid in the debt currency. Present, it is what makes the obligation
+ *                         cross-currency to every reader - the answer to "which rate was this promised at" is
+ *                         the quote, not a rate looked up later
  */
 public record RecordedObligation(
         UUID id,
@@ -33,6 +38,7 @@ public record RecordedObligation(
         UUID creditorId,
         Money amount,
         Currency settleInCurrency,
+        FxQuote fxQuote,
         String memo,
         ObligationStatus status,
         Instant occurredAt) {

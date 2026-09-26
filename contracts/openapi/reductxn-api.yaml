@@ -304,9 +304,9 @@ paths:
                     Two failures are possible and they are not the same failure. `fx.rate_stale` (422)
                     means a rate was found and was not usable at the moment of locking, so this request
                     cannot be honoured. `fx.rate_unavailable` (503) means no rate could be obtained at
-                    all, so the server cannot answer yet and the client should retry later. A server
-                    with no rate provider configured answers the second for every cross-currency
-                    request, which is what "no rate means no cross-currency" means in practice.
+                    all, so the server cannot answer yet and the client should retry later. A pair with
+                    nothing quoted at or before the obligation's instant is answered the second, which is
+                    what "no rate means no cross-currency" means in practice.
                 memo: { type: string, maxLength: 280 }
                 occurredAt: { type: string, format: date-time }
       responses:
@@ -320,10 +320,10 @@ paths:
         '503':
           description: |
             The server cannot answer yet, and the request should be retried. Today this is
-            `fx.rate_unavailable` for a cross-currency obligation, because no rate provider is
-            configured. Distinct from a 422 on purpose: a 422 means the request is answerable and the
-            answer is no, and a client that treated the two alike would either give up on a request
-            that would succeed later or retry one that never will.
+            `fx.rate_unavailable` for a cross-currency obligation whose pair has no rate quoted at or
+            before the obligation's instant. Distinct from a 422 on purpose: a 422 means the request is
+            answerable and the answer is no, and a client that treated the two alike would either give
+            up on a request that would succeed later or retry one that never will.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

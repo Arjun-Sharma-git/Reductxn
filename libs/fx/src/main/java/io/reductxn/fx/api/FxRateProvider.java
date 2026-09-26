@@ -7,9 +7,16 @@ import java.time.Instant;
 /**
  * A source of exchange rates.
  *
- * <p>The port is owned here, in the pure core; adapters live in {@code apps/api/adapter/rate}
- * (RULE B19, recipe 10.8). Owning it here means {@code libs/fx} can be tested against a fixed rate
- * with no provider, no network and no container (P4).
+ * <p>The port is owned here, in the pure core; an adapter lives in {@code apps/api}, in its
+ * {@code adapter/persistence} package. Owning it here means {@code libs/fx} can be tested against a fixed
+ * rate with no provider, no network and no container (P4).
+ *
+ * <p><strong>Why the adapter's package is named rather than left open.</strong> This comment used to say
+ * {@code apps/api/adapter/rate}, and RULE B16 - which keeps every jOOQ type inside one package so no row type
+ * escapes - makes that impossible for an adapter that reads a table. The rule is mechanical and enforced; the
+ * sentence was prose written before the rule's scope was known, so the sentence was corrected. A provider that
+ * fetched rates over the network instead of from the database could live anywhere in the module, and the day
+ * one exists this sentence should say so.
  *
  * <p>Keep this deliberate and small. An adapter for a market data provider does not belong in the
  * module that also decides how many minor units a creditor is owed.

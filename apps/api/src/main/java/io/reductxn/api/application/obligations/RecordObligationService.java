@@ -7,22 +7,29 @@ import io.reductxn.api.port.in.RecordObligation;
 import io.reductxn.api.port.in.RecordedObligation;
 import io.reductxn.api.port.out.ChainHeads;
 import io.reductxn.api.port.out.CurrencyCatalog;
+import io.reductxn.api.port.out.FxQuotes;
 import io.reductxn.api.port.out.JournalEntries;
 import io.reductxn.api.port.out.ObligationStore;
 import io.reductxn.api.port.out.ObligationToRecord;
+import io.reductxn.booking.api.Booking;
 import io.reductxn.booking.api.Bookings;
 import io.reductxn.booking.api.Commitment;
 import io.reductxn.fx.api.FxException;
+import io.reductxn.fx.api.FxQuote;
+import io.reductxn.fx.api.FxRate;
 import io.reductxn.fx.api.FxRateProvider;
 import io.reductxn.kernel.api.Result;
 import io.reductxn.ledger.api.Currency;
 import io.reductxn.ledger.api.JournalEntry;
 import io.reductxn.ledger.api.Money;
+import io.reductxn.planning.api.CrossCurrencyObligation;
+import io.reductxn.planning.api.FxClearing;
 import io.reductxn.planning.api.SingleCurrencyObligation;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -62,19 +69,22 @@ public class RecordObligationService implements RecordObligation {
     private final ChainHeads chainHeads;
     private final CurrencyCatalog currencies;
     private final FxRateProvider rates;
+    private final FxQuotes quotes;
 
     public RecordObligationService(
             ObligationStore obligations,
             JournalEntries entries,
             ChainHeads chainHeads,
             CurrencyCatalog currencies,
-            FxRateProvider rates) {
+            FxRateProvider rates,
+            FxQuotes quotes) {
 
         this.obligations = Objects.requireNonNull(obligations, "obligations");
         this.entries = Objects.requireNonNull(entries, "entries");
         this.chainHeads = Objects.requireNonNull(chainHeads, "chainHeads");
         this.currencies = Objects.requireNonNull(currencies, "currencies");
         this.rates = Objects.requireNonNull(rates, "rates");
+        this.quotes = Objects.requireNonNull(quotes, "quotes");
     }
 
     @Override
@@ -138,7 +148,7 @@ public class RecordObligationService implements RecordObligation {
 
         obligations.record(new ObligationToRecord(
                 commitment.obligationId(), request.groupId(), request.debtorId(), request.creditorId(),
-                amount, request.memo(), request.idempotencyKey(), commitment.occurredAt()));
+                amount, null, request.memo(), request.idempotencyKey(), commitment.occurredAt()));
 
         JournalEntry entry = Bookings.singleCurrency(
                 chainHeads.forGroup(request.groupId()),
@@ -149,21 +159,27 @@ public class RecordObligationService implements RecordObligation {
 
         return Result.ok(new RecordedObligation(
                 commitment.obligationId(), request.groupId(), request.debtorId(), request.creditorId(),
-                amount, currency, request.memo(), ObligationStatus.OPEN, commitment.occurredAt()));
+                amount, currency, null, request.memo(), ObligationStatus.OPEN, commitment.occurredAt()));
     }
 
     /**
-     * The cross-currency case, which asks for a rate and cannot yet store what the rate produced.
+     * The cross-currency case: lock a rate to the amount, store what was locked, and book the linked pair.
      *
      * <p>The port's failures are exceptions that implement {@code DomainError}, and they are caught and
      * returned as a value. That is not defensive coding: this module's {@code DomainErrorResolver} reads a
      * {@code DomainError} that escapes to the boundary as a programming fault and answers {@code 500} - right
-     * for an invariant that was broken, wrong for a provider that could not be reached. Catching here is
-     * where those two readings are separated, and it is why the resolver did not have to be loosened.
+     * for an invariant that was broken, wrong for a provider that could not be reached. Catching here is where
+     * those two readings are separated, and it is why the resolver did not have to be loosened.
      *
-     * <p>When a rate <em>is</em> available this still refuses, for the reason in the class comment: the quote
-     * has nowhere to live. The code below makes booking the debt side alone impossible rather than merely
-     * waiting for the storage.
+     * <p><strong>The order of the three writes is the point.</strong> The quote, then the obligation that
+     * points at it, then the entries: each step depends on the one before it, so a failure leaves no
+     * half-recorded conversion rather than a debt with no promise attached. The caller's transaction is what
+     * makes that true rather than merely likely - and it is the same transaction the chain locks were taken
+     * in, which matters twice here because a cross-currency commitment appends to two chains.
+     *
+     * <p>{@code railPerformedFx} is false and will stay false until the run. At recording time no rail has
+     * done anything; the flag becomes meaningful when value actually moves, and setting it here would claim a
+     * conversion nobody has performed yet.
      */
     private Result<RecordedObligation> crossCurrency(
             NewObligation request, Commitment commitment, Currency debtCurrency) {
@@ -174,28 +190,52 @@ public class RecordObligationService implements RecordObligation {
             return Result.fail(new ObligationRefusals.UnknownCurrency(request.settleInCurrency()));
         }
 
+        Money owed = Money.of(request.amountMinor(), debtCurrency);
+
+        FxQuote quote;
         try {
-            rates.rateFor(debtCurrency, settlementCurrency, request.occurredAt());
+            FxRate rate = rates.rateFor(debtCurrency, settlementCurrency, commitment.occurredAt());
+            quote = FxQuote.lock(
+                    quoteIdOf(commitment.obligationId()), owed, rate, commitment.occurredAt(), false);
         } catch (FxException expected) {
-            // The provider's own code and message, not a rewording: the client branches on the code, and the
-            // adapter is the only place that knows whether the rate was stale, absent or unreachable.
+            // The provider's or the lock's own code and message, not a rewording: the client branches on the
+            // code, and those two are the only places that know whether the rate was stale or absent.
             return Result.fail(expected);
         }
 
-        // Unreachable today - no provider is configured, so the call above always fails - and deliberately
-        // impossible to reach by accident. A cross-currency obligation needs its quote stored before it can
-        // be recorded, and there is no `fx_quotes` table and no quote column on `obligations`.
-        throw new IllegalStateException(
-                "a rate for " + debtCurrency.code() + "/" + settlementCurrency.code() + " was available, so "
-                        + "cross-currency recording is now reachable - and it must not be, because the locked "
-                        + "quote has nowhere to live. `obligations` has no quote columns and there is no "
-                        + "fx_quotes table, so this obligation would be stored with its debt side only, and "
-                        + "the netting preview would read it back as a single-currency obligation in "
-                        + debtCurrency.code() + " - the currency the creditor is not being paid in. Add the "
-                        + "storage (fx_rates and fx_quotes in libs/fx, the quote columns and the read path in "
-                        + "apps/api) in the same slice as the rate source. CrossCurrencyObligation and "
-                        + "Bookings.crossCurrency are written and tested; what is missing is where the quote "
-                        + "is kept.");
+        CrossCurrencyObligation obligation = new CrossCurrencyObligation(
+                request.debtorId(), request.creditorId(), quote);
+
+        quotes.record(quote);
+
+        obligations.record(new ObligationToRecord(
+                commitment.obligationId(), request.groupId(), request.debtorId(), request.creditorId(),
+                owed, quote.id(), request.memo(), request.idempotencyKey(), commitment.occurredAt()));
+
+        Booking booking = Bookings.crossCurrency(
+                chainHeads.forGroup(request.groupId()), commitment, obligation, FxClearing.ACCOUNT_ID);
+
+        for (JournalEntry entry : booking.entries()) {
+            entries.append(entry);
+        }
+
+        return Result.ok(new RecordedObligation(
+                commitment.obligationId(), request.groupId(), request.debtorId(), request.creditorId(),
+                owed, obligation.settlementCurrency(), quote, request.memo(), ObligationStatus.OPEN,
+                commitment.occurredAt()));
+    }
+
+    /**
+     * The quote's identity, derived from the commitment it belongs to.
+     *
+     * <p>{@code FxQuote} takes its id from the caller "so this module stays deterministic", and the commitment
+     * is what the id has to be derived from: a quote is part of one commitment's history, not an independently
+     * addressable conversion. The scheme mirrors {@code libs/booking}'s entry ids deliberately - same
+     * technique, same reason - so that a re-run of the same commitment produces the same quote id and collides
+     * rather than locking a second rate for a commitment nobody made twice.
+     */
+    private static UUID quoteIdOf(UUID obligationId) {
+        return UUID.nameUUIDFromBytes((obligationId + ":fx-quote").getBytes(StandardCharsets.UTF_8));
     }
 
 }

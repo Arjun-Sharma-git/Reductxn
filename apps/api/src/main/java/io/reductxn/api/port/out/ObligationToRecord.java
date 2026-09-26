@@ -17,6 +17,9 @@ import java.util.UUID;
  * @param id             the commitment's identity, chosen by the use case so the entries derive from it
  * @param amount         already resolved to a {@code Currency}, which means the exponent came from the
  *                       catalogue rather than from the request
+ * @param quoteId        the locked conversion, for a commitment paid in another currency; null when the
+ *                       creditor is paid in the debt currency. The settlement currency is deliberately not a
+ *                       field: it is the quote's quote currency, and a second copy could disagree with it
  * @param idempotencyKey the key the header carried; the unique index is on (group, key)
  */
 public record ObligationToRecord(
@@ -25,6 +28,7 @@ public record ObligationToRecord(
         UUID debtorId,
         UUID creditorId,
         Money amount,
+        UUID quoteId,
         String memo,
         String idempotencyKey,
         Instant incurredAt) {
