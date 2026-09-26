@@ -690,3 +690,65 @@ function withDates(
 ): { memberId: string; decision: string; decidedAt: string }[] {
   return answers.map((answer) => ({ ...answer, decidedAt: '2026-09-26T10:00:00Z' }));
 }
+
+// --- Invites -------------------------------------------------------------------------------------------
+
+export type Invite = paths['/groups/{groupId}/invites']['post']['responses']['201']['content']['application/json'];
+
+/** A code with a week to live and no limit, which is what this deployment's creation operation produces. */
+export const INVITE: Invite = {
+  code: 'JKM2345P',
+  expiresAt: '2026-10-03T09:00:00Z',
+};
+
+export type InviteRecorder = {
+  /** Every acceptance the screen sent, as the body the server would have read. */
+  readonly acceptances: readonly string[];
+};
+
+/**
+ * The invite API: making a code, and spending one.
+ *
+ * The acceptance handler records the body it was asked, because the body *is* the recorded identity gap in action - the
+ * page mints the id and sends the name - and a test that only saw "You are in" would not know what the server was told
+ * about who joined. A refusal is a parameter rather than a route of its own, so a test can ask for the same request and
+ * get the answer it is about.
+ */
+export async function stubInvitesApi(
+  page: Page,
+  options: { readonly refusal?: { readonly status: number; readonly code: string } } = {},
+): Promise<InviteRecorder> {
+  const acceptances: string[] = [];
+
+  await page.route('**/v1/groups/*/invites', (route) =>
+    route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(INVITE) }),
+  );
+
+  await page.route('**/v1/invites/*/accept', (route) => {
+    acceptances.push(route.request().postData() ?? '');
+
+    if (options.refusal !== undefined) {
+      return route.fulfill({
+        status: options.refusal.status,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'about:blank',
+          title: options.refusal.status === 410 ? 'Gone' : 'Not Found',
+          status: options.refusal.status,
+          detail: 'stubbed refusal',
+          code: options.refusal.code,
+        }),
+      });
+    }
+
+    const body = JSON.parse(route.request().postData() ?? '{}') as { userId: string; displayName: string };
+
+    return route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ userId: body.userId, displayName: body.displayName, role: 'member' }),
+    });
+  });
+
+  return { acceptances };
+}

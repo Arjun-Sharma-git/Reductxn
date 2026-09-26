@@ -26,5 +26,13 @@
     "roleHint": "Recorded, not enforced: a build without identity has no admin whose word the role would weigh more than a member's.",
     "submit": "Record the member",
     "recorded": "{name} is a member of this group now."
+  },
+  "invite": {
+    "cardTitle": "Invite somebody",
+    "cardDescription": "Make a code the next member can use to join. The code lasts seven days and can be used by anyone who has it, as often as they like - so send it to the people you mean to, and let it expire rather than passing it around.",
+    "make": "Make a code",
+    "making": "Making a code…",
+    "expires": "Usable until {when}, then it stops working.",
+    "noLimit": "This code has no limit on how many times it can be used. It stops when it expires, and not before."
   }
 }

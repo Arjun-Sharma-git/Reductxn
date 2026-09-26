@@ -3,8 +3,10 @@
 React SPA - recording obligations, reading balances, the netting preview, settlement reports, tax. Six group screens
 exist today and each arrived with the slice that served it: the netting preview (ADR 0028), the members list (ADR 0035),
 the obligations list and its recording form (ADR 0029, 0036), the settlement reports and the open-a-cycle form (ADR
-0033, 0034), the balances screen (ADR 0039) and the tax screen (ADR 0040). The rest of the plan's route tree arrives the
-same way - screen by screen, feeding on a read that the server had to be made to answer.
+0033, 0034), the balances screen (ADR 0039) and the tax screen (ADR 0040). One more screen sits outside the group's tree
+entirely: `/invites/$code`, where somebody with a code joins (ADR 0041) - it cannot be under a group, because the person
+arriving is usually not a member yet and the code is what says which group it is for. The rest of the plan's route tree
+arrives the same way - screen by screen, feeding on a read that the server had to be made to answer.
 
 **Public surface:** the app itself; consumed by browsers only.
 
@@ -24,7 +26,7 @@ same way - screen by screen, feeding on a read that the server had to be made to
 |---|---|
 | `src/app` | The composition root: the router, the query client, the providers. No business logic and no screens |
 | `src/routes` | TanStack Router file-based routes, and **thin** (RULE F4): validate search parameters, wrap the screen in its locale, render one feature |
-| `src/features/<name>` | One vertical capability. Public surface is `index.ts`; everything else is private (RULE F8). `obligations` owns the list, the filters' UI and the recording form; `netting` owns the preview; `settlement` owns the group's runs, one run, the answer form, and closing the books at an instant; `members` owns the list of who is in the group and recording somebody; `balances` owns what each member owes right now, which is the plan's positions joined to the group's names (ADR 0039); `tax` owns the rules in force and the report over the group's plans (ADR 0040) |
+| `src/features/<name>` | One vertical capability. Public surface is `index.ts`; everything else is private (RULE F8). `obligations` owns the list, the filters' UI and the recording form; `netting` owns the preview; `settlement` owns the group's runs, one run, the answer form, and closing the books at an instant; `members` owns the list of who is in the group and recording somebody; `balances` owns what each member owes right now, which is the plan's positions joined to the group's names (ADR 0039); `tax` owns the rules in force and the report over the group's plans (ADR 0040); `invites` owns arriving from a code - the joining half of a flow whose other half sits on the members screen, where inviting somebody is how the next member arrives (ADR 0041) |
 | `src/entities/<name>` | Domain-shaped client models and their `queryOptions` factories: `currency`, `member`, `obligation`, `netting`, `fx`, `run`, `cycle` |
 | `src/shared/api` | The generated contract (`schema.d.ts`) and the only `fetch` in the app (RULE F5) |
 | `src/shared/money` | Integer minor units, formatted and parsed for a locale. The P1 boundary in the client |

@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as GroupsGroupIdRouteRouteImport } from './routes/groups/$groupId/route'
+import { Route as InvitesCodeRouteImport } from './routes/invites/$code'
 import { Route as GroupsGroupIdBalancesRouteImport } from './routes/groups/$groupId/balances'
 import { Route as GroupsGroupIdMembersRouteImport } from './routes/groups/$groupId/members'
 import { Route as GroupsGroupIdNettingRouteImport } from './routes/groups/$groupId/netting'
@@ -27,6 +28,11 @@ const IndexRoute = IndexRouteImport.update({
 const GroupsGroupIdRouteRoute = GroupsGroupIdRouteRouteImport.update({
   id: '/groups/$groupId',
   path: '/groups/$groupId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvitesCodeRoute = InvitesCodeRouteImport.update({
+  id: '/invites/$code',
+  path: '/invites/$code',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GroupsGroupIdBalancesRoute = GroupsGroupIdBalancesRouteImport.update({
@@ -71,6 +77,7 @@ const GroupsGroupIdSettlementRunIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
+  '/invites/$code': typeof InvitesCodeRoute
   '/groups/$groupId/balances': typeof GroupsGroupIdBalancesRoute
   '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
@@ -82,6 +89,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
+  '/invites/$code': typeof InvitesCodeRoute
   '/groups/$groupId/balances': typeof GroupsGroupIdBalancesRoute
   '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
@@ -94,6 +102,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
+  '/invites/$code': typeof InvitesCodeRoute
   '/groups/$groupId/balances': typeof GroupsGroupIdBalancesRoute
   '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
@@ -107,6 +116,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/groups/$groupId'
+    | '/invites/$code'
     | '/groups/$groupId/balances'
     | '/groups/$groupId/members'
     | '/groups/$groupId/netting'
@@ -118,6 +128,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/groups/$groupId'
+    | '/invites/$code'
     | '/groups/$groupId/balances'
     | '/groups/$groupId/members'
     | '/groups/$groupId/netting'
@@ -129,6 +140,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/groups/$groupId'
+    | '/invites/$code'
     | '/groups/$groupId/balances'
     | '/groups/$groupId/members'
     | '/groups/$groupId/netting'
@@ -141,6 +153,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   GroupsGroupIdRouteRoute: typeof GroupsGroupIdRouteRouteWithChildren
+  InvitesCodeRoute: typeof InvitesCodeRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -157,6 +170,13 @@ declare module '@tanstack/react-router' {
       path: '/groups/$groupId'
       fullPath: '/groups/$groupId'
       preLoaderRoute: typeof GroupsGroupIdRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/invites/$code': {
+      id: '/invites/$code'
+      path: '/invites/$code'
+      fullPath: '/invites/$code'
+      preLoaderRoute: typeof InvitesCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/groups/$groupId/balances': {
@@ -237,6 +257,7 @@ const GroupsGroupIdRouteRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   GroupsGroupIdRouteRoute: GroupsGroupIdRouteRouteWithChildren,
+  InvitesCodeRoute: InvitesCodeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
