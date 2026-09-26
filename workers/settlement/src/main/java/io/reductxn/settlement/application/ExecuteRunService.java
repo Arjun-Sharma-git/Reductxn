@@ -9,6 +9,7 @@ import io.reductxn.rails.api.PaymentRail;
 import io.reductxn.settlement.port.in.ComputedRun;
 import io.reductxn.settlement.port.in.ExecuteRun;
 import io.reductxn.settlement.port.in.PlannedTransfer;
+import io.reductxn.settlement.port.in.Quorum;
 import io.reductxn.settlement.port.in.RunRefusals;
 import io.reductxn.settlement.port.in.RunStatus;
 import io.reductxn.settlement.port.in.SettlementRun;
@@ -61,6 +62,16 @@ import java.util.UUID;
  * transfer stays where it is and waits out an exponential backoff - this class reads
  * {@link PaymentRail.RailRefusal#retryable()} rather than a message, and an unclassified failure is treated as
  * retryable because a run failed on the strength of an error nobody has explained is worse than a slow one.
+ *
+ * <p><strong>A rejection ends the run, and this class is where that end is written down.</strong> The gate below
+ * already refuses any run whose stored decisions include a rejection, whoever recorded it - which is what makes an
+ * answer written from outside this module safe in the dangerous direction: the settlement cannot happen. But a
+ * refusal is not a state. The endpoint that records an answer writes the decision row and nothing else (ADR 0020),
+ * so a rejection that arrives that way leaves a run reading {@code awaiting_approval} while its own rows say the
+ * group said no: a status that lies to every reader, including the member-facing endpoint, and a run the driver
+ * offers again on every pass for ever. So the gate's rejection also settles the run - the fate is recorded by the
+ * use case that records the run's other outcomes rather than by the driver, whose whole design is that it decides
+ * nothing (ADR 0018).
  */
 @Service
 public class ExecuteRunService implements ExecuteRun {
@@ -113,6 +124,7 @@ public class ExecuteRunService implements ExecuteRun {
         Result<ComputedRun> refusal = gates(run);
 
         if (refusal != null) {
+            recordTheRejection(run);
             return refusal;
         }
 
@@ -154,6 +166,39 @@ public class ExecuteRunService implements ExecuteRun {
     }
 
     /**
+     * Writes the run's fate when its own decisions say the group refused, and nothing otherwise.
+     *
+     * <p><strong>The judgement is not made here.</strong> {@link Quorum#rejected()} is the rule - a rejection from
+     * one of the run's own participants, which the read model already intersected for us - and this method only
+     * makes the stored status agree with it. That is the whole reason the write belongs beside the gate rather than
+     * in the driver: there is no second opinion about whether the run was rejected, only a second *reader* of the
+     * same one.
+     *
+     * <p>Three cases come through here and only the first writes anything.
+     *
+     * <ul>
+     *   <li>A run whose decisions include a rejection and whose status has not caught up: the status is written.
+     *       This is the crossing ADR 0020 left open - the API records the answer, and the run's status follows on
+     *       the worker's next look.</li>
+     *   <li>A run already {@code rejected}: nothing to write, and no write is attempted. A status write that
+     *       changes nothing is still a row lock and a WAL record per pass, on a terminal run the driver keeps
+     *       offering.</li>
+     *   <li>A run refused for any other reason - no quorum yet, currency outstanding, a rail that cannot settle -
+     *       with no rejection on the record: nothing to write, because none of those end the run.</li>
+     * </ul>
+     *
+     * <p>The write is one statement in one transaction, as every other write in this class is, and it happens
+     * before the caller is answered so that the refusal it returns is already true of the stored run.
+     */
+    private void recordTheRejection(ComputedRun run) {
+        if (!run.quorum().rejected() || run.run().status() == RunStatus.REJECTED) {
+            return;
+        }
+
+        inTransaction(() -> runs.updateStatus(run.run().withStatus(RunStatus.REJECTED)));
+    }
+
+    /**
      * Every gate, in the order that produces the most useful refusal, or null when the run may proceed.
      *
      * <p>The rejection check is here as well as in the run's status, and that duplication is deliberate: the
@@ -166,7 +211,7 @@ public class ExecuteRunService implements ExecuteRun {
 
         if (run.quorum().rejected() || run.run().status() == RunStatus.REJECTED) {
             return Result.fail(new RunRefusals.RunRejected(runId,
-                    run.quorum().rejecters().stream().findFirst().orElse(null)));
+                    run.quorum().countedRejections().stream().findFirst().orElse(null)));
         }
 
         if (!run.quorum().met()) {

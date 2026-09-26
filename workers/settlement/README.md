@@ -51,26 +51,33 @@ java -jar workers-settlement.jar --reductxn.command=fund --reductxn.run=<uuid> \
      --reductxn.funding-ref=<reference>
 ```
 
-Exit codes: `0` done, `1` refused by the domain, `2` the invocation was wrong. **No command approves a run** -
-approving is a member's act, and there is no member surface yet (ADR 0018).
+Exit codes: `0` done, `1` refused by the domain, `2` the invocation was wrong. **No command approves or rejects a
+run** - answering is a member's act, and the member's surface is `apps/api` rather than an operator's command
+(ADR 0018, 0020).
 
 ## Who writes a run's decisions
 
-Another deployable does. `apps/api` records a member's approval into `settlement_decisions` through
-`POST /v1/runs/{runId}/approve`, because the member's surface is there and the run is here, and the two modules may
+Another deployable does. `apps/api` records a member's answer into `settlement_decisions` through
+`POST /v1/runs/{runId}/decisions`, because the member's surface is there and the run is here, and the two modules may
 not depend on each other (RULE B6). It is safe for a reason rather than by trust: quorum is a pure function over
-the run's own rows (ADR 0016), so `Quorum.counted()` intersects the answers with the run's participants and an
-answer from somebody the run does not concern counts for nothing, whoever wrote it. The worst a mistaken write can
-do is record one member's approval.
+the run's own rows (ADR 0016), so the answers are intersected with the run's participants and an answer from somebody
+the run does not concern counts for nothing, whoever wrote it. The worst a mistaken write can do is record one
+member's approval.
 
-The crossing is pinned from this side by `RecordedApprovalsTest`, which writes the same row with the same SQL as
-`apps/api`'s adapter and asserts that the run's arithmetic judges it - including that two answers recorded from the
-API settle a cycle, and that one is not a quorum. The word `'approve'` is fixed by `V502`'s check constraint, so
-the other deployable writes a vocabulary it does not own.
+**Both answers cross that boundary, and they do not mean the same thing.** An approval is counted; a refusal ends the
+run. So `ExecuteRunService`'s gate refuses any run whose stored decisions include a refusal *and writes the run's
+fate* - `rejected` - when the stored status has not caught up. That is the piece a status written from outside cannot
+provide: the API records rows and not states (ADR 0020), so without it a refusal would leave a run reading
+`awaiting_approval` for ever while its own rows said the group said no. The write lives beside the gate rather than in
+the driver, because the driver's design is that it decides nothing and the gate already reads the decisions
+(ADR 0022).
 
-**Not on this surface: rejections.** A rejection ends the run, and that transition is `DecideOnRun`'s - a rejection
-recorded from outside would leave a run waiting for ever rather than `rejected`, which is why the API's endpoint is
-approve-only and why ADR 0020 names the consumer that would be needed.
+The crossing is pinned from this side by `RecordedDecisionsTest`, which writes the same rows with the same SQL as
+`apps/api`'s adapter and asserts that the run's arithmetic judges them: two approvals recorded from the API settle a
+cycle with nothing else touching the worker, one is not a quorum, a stranger's answer - either word - counts for
+nothing, and a refusal written from outside leaves the run waiting until this worker's next look ends it. The
+vocabulary is fixed by `V502`'s check constraint, so the other deployable writes words it does not own, and a word
+the run does not know is refused by the row rather than by a list either module keeps.
 
 ## When a rail does not answer
 

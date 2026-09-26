@@ -2,8 +2,11 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-26
-- **Implemented:** `apps/api` (`POST /v1/runs/{runId}/approve`, `ApproveRun`, `Approvals`, `JooqApprovals`),
-  `workers/settlement` (`RecordedApprovalsTest`), the OpenAPI contract's approval operation
+- **Implemented:** `apps/api` (`POST /v1/runs/{runId}/decisions`, `RecordDecision`, `Decisions`, `JooqDecisions`),
+  `workers/settlement` (`RecordedDecisionsTest`), the OpenAPI contract's decision operation
+- **Amended:** 2026-09-26 - the operation was `POST /v1/runs/{runId}/approve` and the types were named for approvals
+  until a refusal became expressible; they are now named for the answer, and the request body's meaning is unchanged
+  (ADR 0022)
 - **Related:** ADR 0012, 0016, 0017, 0018; RULE B6, B17, S1; `docs/specs/settlement.md` section 4.1
 
 ## Context
@@ -42,11 +45,11 @@ judged by the same arithmetic as one written by the worker's own use case.
 **2. The API records; it does not judge.** The endpoint contains no quorum arithmetic, no membership check and no
 lifecycle check. It refuses exactly three things, each of which it can see from where it stands:
 
-- the run does not exist (`404`, `api.approval_no_such_run`) - there is nothing to answer;
-- this member has already answered (`409`, `api.approval_already_answered`) - the primary key on
+- the run does not exist (`404`, `api.no_such_run`) - there is nothing to answer;
+- this member has already answered (`409`, `api.decision_already_answered`) - the primary key on
   `(run_id, member_id)` is the guard, so "one answer per member" holds for two requests arriving together and not
   only for one;
-- the run's own rows refuse the answer (`422`, `api.approval_not_acceptable`) - the group's clearing account is a
+- the run's own rows refuse the answer (`422`, `api.decision_not_acceptable`) - the group's clearing account is a
   participant in a run's arithmetic and not a member of it, the schema says so, and this reports the refusal
   rather than translating a client's mistake into a `500`.
 
@@ -62,8 +65,8 @@ than discovered later.
 **5. The contract gains the field the operation needed.** `requestBody: { memberId }` (required), a `200` schema
 (`Approval`, with no `counted` field), and the `400`/`404`/`409`/`422` responses the implementation returns.
 
-**6. The crossing is pinned by two tests, one on each side.** `ApproveRunApiTest` writes through the endpoint and
-asserts the row's columns, the word and the instant; `workers/settlement`'s `RecordedApprovalsTest` writes *the
+**6. The crossing is pinned by two tests, one on each side.** `DecisionApiTest` writes through the endpoint and
+asserts the row's columns, the word and the instant; `workers/settlement`'s `RecordedDecisionsTest` writes *the
 same statement* and asserts that the run's arithmetic judges it - that two answers recorded from the API settle a
 cycle, that one is not a quorum, that an answer from a member the run does not concern counts for nothing, that an
 answer written by the API and one written by the worker's own use case are the same arithmetic, and that the
@@ -73,8 +76,8 @@ test rather than a deployment.
 
 ## Consequences
 
-- **A cycle can now be approved and settled from a client.** `ApproveRunApiTest` records the answers and
-  `RecordedApprovalsTest` proves that two of them, and nothing else, take a run from `awaiting_approval` to
+- **A cycle can now be approved and settled from a client.** `DecisionApiTest` records the answers and
+  `RecordedDecisionsTest` proves that two of them, and nothing else, take a run from `awaiting_approval` to
   `done` with the movement booked.
 - **The API knows one table it does not own.** The cost is real and bounded: the table's name and four columns
   are written down in `JooqApprovals`, `platform/persistence`'s owner map still assigns the schema to

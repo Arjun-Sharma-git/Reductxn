@@ -8,7 +8,7 @@ import java.util.UUID;
 /**
  * Reading a settlement run: this module's projection over {@code workers/settlement}'s rows.
  *
- * <p>The arrangement is the read twin of {@code Approvals}. {@code settlement_runs}, {@code settlement_partitions},
+ * <p>The arrangement is the read twin of {@code Decisions}. {@code settlement_runs}, {@code settlement_partitions},
  * {@code settlement_transfers} and {@code settlement_decisions} belong to the worker - its migrations are the
  * {@code 5xx} range, this module owns none of them - and this deployable reads them because the member's surface is
  * here and the run is there, the two modules may not depend on each other (RULE B6) and there is no broker in the

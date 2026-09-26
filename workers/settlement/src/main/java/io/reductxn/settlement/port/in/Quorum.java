@@ -155,7 +155,27 @@ public record Quorum(Set<UUID> members, Set<UUID> debtors, Set<UUID> approvers, 
     }
 
     /**
-     * Whether anyone has refused.
+     * The rejections that count: those of members.
+     *
+     * <p><strong>The same intersection as {@link #countedApprovals()}, and it matters more here.</strong> An
+     * approval from somebody the run does not concern is inert - the run still needs its own members - but a
+     * rejection is *terminal*: it ends the run. Reading the raw rows would let anybody stop any group's settlement
+     * by writing one decision row, and until identity exists the row's {@code member_id} is a claim a client makes
+     * rather than a fact the server knows (ADR 0016, and the same reason a stranger's approval is shown and not
+     * counted). The asymmetry with approvals is exactly why this is not the same method: an unguarded approval
+     * makes a quorum harder, an unguarded rejection makes a settlement impossible.
+     *
+     * <p>{@link #rejecters()} still reports every row that was written, for the reason its sibling gives: a fact
+     * that is hidden is a fact nobody fixes.
+     */
+    public Set<UUID> countedRejections() {
+        Set<UUID> counted = new TreeSet<>(rejecters);
+        counted.retainAll(members);
+        return Collections.unmodifiableSet(counted);
+    }
+
+    /**
+     * Whether a member has refused, which ends the run.
      *
      * <p>A single rejection is enough, and that is a decision rather than an oversight. The spec says approval
      * is granted once for the whole run - the group approves one settlement of one set of commitments, not a
@@ -164,6 +184,6 @@ public record Quorum(Set<UUID> members, Set<UUID> debtors, Set<UUID> approvers, 
      * goes to {@code rejected}, where the group can open another cycle.
      */
     public boolean rejected() {
-        return !rejecters.isEmpty();
+        return !countedRejections().isEmpty();
     }
 }

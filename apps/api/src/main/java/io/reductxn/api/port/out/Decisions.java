@@ -1,6 +1,6 @@
 package io.reductxn.api.port.out;
 
-import io.reductxn.api.port.in.NewApproval;
+import io.reductxn.api.port.in.NewDecision;
 
 import java.util.UUID;
 
@@ -20,12 +20,12 @@ import java.util.UUID;
  * it. The worst a mistaken write here can do is record one member's approval, and the run still cannot execute
  * without quorum, its funding covered and a rail that settles its currencies.
  *
- * <p>The shape this writes is pinned from both sides: {@code ApproveRunApiTest} here, and
- * {@code RecordedApprovalsTest} in {@code workers/settlement}, which writes the same row with the same SQL and
+ * <p>The shape this writes is pinned from both sides: {@code DecisionApiTest} here, and
+ * {@code RecordedDecisionsTest} in {@code workers/settlement}, which writes the same row with the same SQL and
  * checks that the run's arithmetic judges it. A change to that table which broke the crossing would fail one of
  * them rather than a deployment.
  */
-public interface Approvals {
+public interface Decisions {
 
     /** Whether there is a run with this id at all, which is the one thing a client's request cannot tell us. */
     boolean hasRun(UUID runId);
@@ -39,7 +39,7 @@ public interface Approvals {
      * a client deserves a code rather than a {@code 500} - which is also the difference between reading-then-writing
      * (a race nobody sees) and letting the row's own constraints be the guard.
      */
-    Written record(NewApproval approval);
+    Written record(NewDecision approval);
 
     /** What the store did with an answer. */
     enum Written {

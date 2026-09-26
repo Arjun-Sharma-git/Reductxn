@@ -1,14 +1,14 @@
 package io.reductxn.api.web.v1;
 
 import io.reductxn.api.port.in.ReadRun;
-import io.reductxn.api.port.in.ApproveRun;
-import io.reductxn.api.port.in.NewApproval;
-import io.reductxn.api.port.in.RecordedApproval;
+import io.reductxn.api.port.in.RecordDecision;
+import io.reductxn.api.port.in.NewDecision;
+import io.reductxn.api.port.in.RecordedDecision;
 import io.reductxn.api.port.in.RunRefusals;
 import io.reductxn.api.port.in.RunReport;
-import io.reductxn.api.web.dto.ApprovalMapper;
+import io.reductxn.api.web.dto.DecisionMapper;
 import io.reductxn.api.web.dto.RunMapper;
-import io.reductxn.api.web.dto.ApproveRunRequest;
+import io.reductxn.api.web.dto.DecisionRequest;
 import io.reductxn.api.web.error.ExpectedFailures;
 import io.reductxn.kernel.api.DomainError;
 import io.reductxn.kernel.api.Result;
@@ -30,14 +30,15 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * {@code POST /v1/runs/{runId}/approve}, per the contract.
+ * {@code POST /v1/runs/{runId}/decisions}, {@code GET /v1/runs/{runId}} and {@code GET /v1/runs/{runId}/transfers},
+ * per the contract.
  *
- * <p><strong>The first endpoint in this module that is about something it does not own.</strong> The run, its
- * partitions and its decision rows belong to {@code workers/settlement}; this records a member's answer into them,
- * because a member's surface is here and the two deployables do not depend on each other (RULE B6). What that costs
- * and what it buys is ADR 0020's subject. What it means for this class is narrower: it parses, it reads the clock,
- * it hands the use case a command, and it turns refusals into the contract's problem bodies - it computes no
- * quorum and checks no lifecycle.
+ * <p><strong>The first endpoints in this module that are about something it does not own.</strong> The run, its
+ * partitions and its decision rows belong to {@code workers/settlement}; this records a member's answer into them and
+ * projects them back, because a member's surface is here and the two deployables do not depend on each other (RULE
+ * B6). What that costs and what it buys is ADR 0020's subject for the write and ADR 0021's for the read. What it
+ * means for this class is narrower: it parses, it reads the clock, it hands the use case a command, and it turns
+ * refusals into the contract's problem bodies - it computes no quorum, checks no lifecycle and derives no figure.
  *
  * <p><strong>The path id is taken as a {@code String} and parsed here rather than bound as a {@code UUID}.</strong>
  * The declaration would be shorter and would answer a malformed id with Spring's own {@code 400}, whose body carries
@@ -48,20 +49,28 @@ import java.util.UUID;
 @RequestMapping("/v1/runs")
 public class RunsController {
 
-    private final ApproveRun approveRun;
+    private final RecordDecision recordDecision;
     private final ReadRun readRun;
     private final Clock clock;
 
-    public RunsController(ApproveRun approveRun, ReadRun readRun, Clock clock) {
-        this.approveRun = Objects.requireNonNull(approveRun, "approveRun");
+    public RunsController(RecordDecision recordDecision, ReadRun readRun, Clock clock) {
+        this.recordDecision = Objects.requireNonNull(recordDecision, "recordDecision");
         this.readRun = Objects.requireNonNull(readRun, "readRun");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
-    @PostMapping("/{runId}/approve")
-    public ResponseEntity<Object> approve(
+    /**
+     * {@code POST /v1/runs/{runId}/decisions}: a member's answer, yes or no.
+     *
+     * <p>The operation is named for the answer rather than for one of them, and that is a correction the second
+     * answer forced: a path called {@code /approve} that records refusals would be the kind of near-miss this
+     * module's read side already refuses to publish (ADR 0021). The request body keeps its old meaning - absent
+     * {@code decision} is an approval - so the change is in the path and the response, not in what a client sends.
+     */
+    @PostMapping("/{runId}/decisions")
+    public ResponseEntity<Object> decide(
             @PathVariable String runId,
-            @RequestBody(required = false) ApproveRunRequest request,
+            @RequestBody(required = false) DecisionRequest request,
             HttpServletRequest http) {
 
         DomainError malformed = malformedRequest(runId, request);
@@ -69,17 +78,17 @@ public class RunsController {
             return problem(malformed, http.getRequestURI());
         }
 
-        NewApproval command = ApprovalMapper.toCommand(UUID.fromString(runId), request, clock.instant());
-        Result<RecordedApproval> result = approveRun.approve(command);
+        NewDecision command = DecisionMapper.toCommand(UUID.fromString(runId), request, clock.instant());
+        Result<RecordedDecision> result = recordDecision.record(command);
 
-        if (result instanceof Result.Ok<RecordedApproval> recorded) {
-            // 200 rather than 201: nothing was created that a client can fetch, and the contract says "Approval
+        if (result instanceof Result.Ok<RecordedDecision> recorded) {
+            // 200 rather than 201: nothing was created that a client can fetch, and the contract says "Decision
             // recorded" for this status. The body echoes what the row says, so a client that recorded an answer
-            // has something to show a member.
-            return ResponseEntity.ok(ApprovalMapper.toResponse(recorded.value()));
+            // has something to show a member - including which answer it was.
+            return ResponseEntity.ok(DecisionMapper.toResponse(recorded.value()));
         }
 
-        return problem(((Result.Failure<RecordedApproval>) result).error(), http.getRequestURI());
+        return problem(((Result.Failure<RecordedDecision>) result).error(), http.getRequestURI());
     }
 
     /**
@@ -142,7 +151,7 @@ public class RunsController {
      * store, because those are conditions rather than malformations - and they arrive as refusals a client can
      * branch on.
      */
-    private static DomainError malformedRequest(String runId, ApproveRunRequest request) {
+    private static DomainError malformedRequest(String runId, DecisionRequest request) {
         DomainError path = malformedRunId(runId);
         if (path != null) {
             return path;

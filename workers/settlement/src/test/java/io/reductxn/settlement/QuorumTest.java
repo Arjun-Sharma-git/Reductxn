@@ -138,7 +138,11 @@ class QuorumTest {
 
     @Test
     void aRejectionIsAStateRatherThanTheAbsenceOfAnApproval() {
-        List<NetPosition> positions = List.of(position(ALICE, -10_000L), position(BORIS, 10_000L));
+        // Three members, and the refusal comes from one of them who owes nothing - so this run has the approvals
+        // the rule asks for (a majority, and its one debtor personally) *and* a refusal. That is the case the
+        // asymmetry exists for, and the reason execution reads the decisions as well as the quorum.
+        List<NetPosition> positions = List.of(
+                position(ALICE, -10_000L), position(BORIS, 10_000L), position(CAROL, 1L));
 
         Quorum rejected = Quorum.of(positions, Set.of(ALICE, BORIS), Set.of(CAROL));
 
@@ -148,6 +152,22 @@ class QuorumTest {
                 .as("quorum and consent are different questions: this run has the approvals it needs and a "
                         + "refusal, which is why execution checks the decisions as well as this")
                 .isTrue();
+    }
+
+    @Test
+    void aRejectionFromSomeoneTheRunDoesNotConcernIsReportedAndNotCounted() {
+        List<NetPosition> positions = List.of(position(ALICE, -10_000L), position(BORIS, 10_000L));
+
+        Quorum quorum = Quorum.of(positions, Set.of(), Set.of(STRANGER));
+
+        assertThat(quorum.rejecters()).contains(STRANGER);
+        assertThat(quorum.countedRejections()).isEmpty();
+        assertThat(quorum.rejected())
+                .as("and this is the half that has to be guarded rather than merely reported: an approval that does "
+                        + "not count leaves a run short of a quorum, while a rejection that does not count ends it. "
+                        + "A row anybody can write must not be able to stop a group's settlement - least of all "
+                        + "while a member id is a claim a client makes rather than a fact the server knows")
+                .isFalse();
     }
 
     @Test
