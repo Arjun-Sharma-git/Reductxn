@@ -11,25 +11,29 @@ package io.reductxn.settlement.port.in;
  *                                     +-> awaiting_fx_funding --> executing
  * </pre>
  *
- * <p>The whole vocabulary is here, and only part of it is reachable. That is deliberate rather than
+ * <p>The whole vocabulary is here, and all of it is now reachable. That was deliberate rather than
  * unfinished: a lifecycle is a written-down agreement about what states mean, and the alternative - adding
  * states as they are needed - is how {@code netted} and {@code settled} ended up in the contract before
- * anything could produce them. Reachable today:
+ * anything could produce them. Where each state comes from:
  *
  * <ul>
  *   <li>{@link #PENDING} and {@link #COMPUTING} - written while a run is opened and its plan computed, in one
  *       transaction, so neither is observable from outside it. They are stored because a run that is
  *       interrupted mid-computation has to be identifiable rather than absent.</li>
  *   <li>{@link #AWAITING_APPROVAL} - the plan is computed and the group has not approved it. RULE S1's quorum
- *       is what moves it on, and quorum does not exist yet.</li>
+ *       moves it on (ADR 0020), and a counted refusal ends it here as {@link #REJECTED} (ADR 0022).</li>
  *   <li>{@link #AWAITING_FX_FUNDING} - RULE S4: some currency's {@code fx_clearing} position is non-zero, so
  *       the group has to bring that currency in from outside. A real blocking state, not a warning.</li>
+ *   <li>{@link #EXECUTING} - the gates are satisfied and the rail is being asked to move the plan's transfers.
+ *       A later pass resolves whatever the rail left in flight.</li>
+ *   <li>{@link #DONE} - every transfer confirmed.</li>
+ *   <li>{@link #FAILED} - "failed (partial)": reduction partially applied is a first-class outcome (RULE S3),
+ *       never a rollback, because money that has moved cannot be unmoved.</li>
  * </ul>
  *
- * <p>{@link #EXECUTING}, {@link #DONE}, {@link #REJECTED} and {@link #FAILED} need a rail and a quorum, which
- * is the next slice rather than this one. {@code FAILED} is specifically "failed (partial)": reduction
- * partially applied is a first-class outcome (RULE S3), never a rollback, because money that has moved cannot
- * be unmoved.
+ * <p>{@link #REJECTED} is the one terminal state a member caused, and the difference is visible in what a
+ * later execution attempt says: the run's status and the refusal both name a member's answer rather than
+ * "this is over".
  */
 public enum RunStatus {
 
@@ -45,6 +49,20 @@ public enum RunStatus {
     /** The wire and column form: lower case with underscores, as the spec writes the states. */
     public String wireName() {
         return name().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /**
+     * Whether nothing more will ever happen to a run in this state: {@code done}, {@code failed} or
+     * {@code rejected}.
+     *
+     * <p>Written as a positive list rather than "not the three waiting states", so a ninth state added later
+     * fails to compile into this method's switch-style reasoning instead of being silently treated as finished -
+     * the same habit {@link #ofWireName} has. A run that is over is never driven again
+     * ({@code ExecuteRunService}), and its remaining transfers are an operator's problem, which is what the
+     * escalation report exists to show (ADR 0024).
+     */
+    public boolean isTerminal() {
+        return this == DONE || this == FAILED || this == REJECTED;
     }
 
     /**

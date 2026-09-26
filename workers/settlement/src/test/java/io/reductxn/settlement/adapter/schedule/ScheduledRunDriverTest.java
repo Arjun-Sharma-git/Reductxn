@@ -1,8 +1,14 @@
 package io.reductxn.settlement.adapter.schedule;
 
+
+
+
 import io.reductxn.kernel.api.Result;
 import io.reductxn.settlement.port.in.DriveRuns;
 import io.reductxn.settlement.port.in.DrivenRuns;
+import io.reductxn.settlement.port.in.Escalation;
+import io.reductxn.settlement.port.in.Escalations;
+import io.reductxn.settlement.port.in.ReadEscalations;
 import io.reductxn.settlement.port.in.RunStatus;
 
 import org.junit.jupiter.api.Test;
@@ -31,6 +37,7 @@ class ScheduledRunDriverTest {
     private static final Instant NOW = Instant.parse("2026-09-26T12:00:00Z");
     private static final Duration WINDOW = Duration.ofMinutes(2);
     private static final int BATCH = 25;
+    private static final Escalation ESCALATION = new Escalation(Duration.ofHours(2));
 
     @Test
     void aTickAsksForTheRunsThatHaveNotBeenAttemptedWithinTheWindow() {
@@ -81,7 +88,59 @@ class ScheduledRunDriverTest {
     }
 
     private ScheduledRunDriver driver(DriveRuns port) {
-        return new ScheduledRunDriver(port, Clock.fixed(NOW, ZoneOffset.UTC), WINDOW, BATCH);
+        return driver(port, new RecordingEscalations());
+    }
+
+    private ScheduledRunDriver driver(DriveRuns port, ReadEscalations escalations) {
+        return new ScheduledRunDriver(
+                port, escalations, ESCALATION, Clock.fixed(NOW, ZoneOffset.UTC), WINDOW, BATCH);
+    }
+
+    @Test
+    void aTickAsksForWhateverTheRailHasBeenSilentOnLongerThanThePolicy() {
+        RecordingDriver port = new RecordingDriver();
+        RecordingEscalations escalations = new RecordingEscalations();
+
+        driver(port, escalations).drive();
+
+        assertThat(escalations.cutOffs)
+                .as("the cadence turns patience into the instant a query compares against, which is what keeps the "
+                        + "policy in one place and out of the SQL")
+                .containsExactly(ESCALATION.cutOff(NOW));
+    }
+
+    @Test
+    void aTickThatCannotReadTheEscalationReportStillSurvives() {
+        RecordingDriver port = new RecordingDriver();
+        RecordingEscalations escalations = new RecordingEscalations();
+        escalations.fault = new IllegalStateException("the report query went away");
+
+        assertThatCode(() -> driver(port, escalations).drive())
+                .as("the report is a report: a database problem while reading it must not be reported as a failed "
+                        + "settlement pass, and the runs that were driven stay driven")
+                .doesNotThrowAnyException();
+
+        assertThat(port.cutOffs)
+                .as("and it is read outside the drive's own guard, so a bad pass still escalates")
+                .hasSize(1);
+    }
+
+    /** A port that records the cut-off it was asked about, and can be told to fail. */
+    private static final class RecordingEscalations implements ReadEscalations {
+
+        private final List<Instant> cutOffs = new ArrayList<>();
+        private RuntimeException fault;
+
+        @Override
+        public Escalations silentLongerThan(Instant cutOff, int limit) {
+            cutOffs.add(cutOff);
+
+            if (fault != null) {
+                throw fault;
+            }
+
+            return Escalations.none(cutOff);
+        }
     }
 
     /** A port that records what it was asked, and can be told to fail. */

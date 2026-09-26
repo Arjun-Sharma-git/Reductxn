@@ -6,6 +6,7 @@ import io.reductxn.settlement.port.in.FundingRequest;
 import io.reductxn.settlement.port.in.GateConclusion;
 import io.reductxn.settlement.port.in.RunDecision;
 import io.reductxn.settlement.port.in.SettlementRun;
+import io.reductxn.settlement.port.in.SilentTransfer;
 import io.reductxn.settlement.port.in.TransferStatus;
 
 import java.time.Instant;
@@ -195,7 +196,38 @@ public interface Runs {
      *                            {@code submitted} for one the rail already has
      * @param consecutiveUnanswered the count after this failure, which is what {@code nextAttemptAt} was
      *                            computed from
+     * @param unansweredSince     when this spell of silence began: the caller keeps the start it already had, and
+     *                            starts one here when there was none. Passed rather than decided in SQL for the
+     *                            reason the count is - the two facts describe one spell, and an adapter deciding
+     *                            where it began could disagree with the count stored beside it
      */
     void markTransferUnanswered(UUID transferId, TransferStatus status, String railDetail, Instant at,
-            int consecutiveUnanswered, Instant nextAttemptAt);
+            int consecutiveUnanswered, Instant nextAttemptAt, Instant unansweredSince);
+
+    /**
+     * The transfers whose rail has been silent since at or before {@code cutOff}: what an escalation policy is
+     * about, oldest silence first.
+     *
+     * <p><strong>The cut-off is the caller's, and the policy is not.</strong> How long a rail may go unanswered
+     * before somebody has to look is a judgement about a deployment ({@code Escalation}), so the policy computes
+     * the instant and this query compares against it - the same arrangement as {@code driveDue}'s window, where
+     * the staleness that matters is configuration and the query is a comparison.
+     *
+     * <p>Transfers with an answer are not in it, because an answer clears {@code unanswered_since}: the result is
+     * exactly the transfers somebody has to decide about, and nothing else.
+     *
+     * @param cutOff a transfer is included when its silence began at or before this instant
+     * @param limit  the most to return, so a report cannot become a novel. The oldest are taken first, which is
+     *               the order a broken rail should be looked at in
+     */
+    List<SilentTransfer> findSilentTransfers(Instant cutOff, int limit);
+
+    /**
+     * How many transfers are silent at or before {@code cutOff}, however many that is.
+     *
+     * <p>Separate from {@link #findSilentTransfers} because a report says both "how bad is this" and "which ones":
+     * a list truncated by its limit would understate the first, and an operator deciding whether to open the rail's
+     * status page needs the number rather than the first twenty.
+     */
+    int countSilentTransfers(Instant cutOff);
 }
