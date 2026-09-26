@@ -503,7 +503,37 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** Current net position per member over open obligations */
+        /**
+         * Current net position per member over open obligations
+         * @description What each member owes or is owed right now, one entry per member **per currency**.
+         *
+         *     **This is the preview's own computation, as of now.** It is the same read the netting preview performs
+         *     (ADR 0039): the group's open obligations at this instant, partitioned by currency, netted per partition, and
+         *     flattened into positions. That is deliberate rather than convenient - a group that previews one thing and
+         *     reads another has been told two things, and a second composition path is how the two answers start to
+         *     differ. The consequence is honest and worth stating: this read needs the tax rules the plan needs, because
+         *     the netting engine assesses tax on the transfers it emits, so a group with no rule in force for a currency
+         *     it holds is told that here rather than being shown a number whose arithmetic nobody can reproduce.
+         *
+         *     **No `asOf`, unlike the preview.** A balance is the question "what do we owe each other now", and a member
+         *     who wants a past instant is asking for a what-if - which is what the preview's `asOf` is for. Two ways to
+         *     ask one question, with the same set of obligations, would be two answers.
+         *
+         *     **A member in two currencies appears twice**, once per currency, because ADR 0012 refuses a cross-currency
+         *     total: every entry carries its own currency and nothing is summed. `direction` is `pay`, `receive` or
+         *     `flat`, and `flat` is included - a member who owes and is owed the same is a member, and a row that
+         *     vanished would look like a member who left.
+         *
+         *     **The clearing account can appear as a position.** A cross-currency obligation is booked through
+         *     `fx_clearing`, so a group that has crossed currencies has a position whose `userId` is that account rather
+         *     than a member - it is the group's own external requirement, not a person. The schema carries no way to tell
+         *     the two apart yet, which is recorded as a gap rather than papered over: a client shows the identifier for it,
+         *     the same way it shows one for a member it has no name for.
+         *
+         *     There is no `404` for a group nobody has heard of, for the reason the members, runs and cycles lists give:
+         *     groups are not tables in this build, so an empty array is true of a group with nothing open and of a group
+         *     that does not exist.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -524,6 +554,7 @@ export interface paths {
                         "application/json": components["schemas"]["NetPosition"][];
                     };
                 };
+                400: components["responses"]["Problem"];
             };
         };
         put?: never;

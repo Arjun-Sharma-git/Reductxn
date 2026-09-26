@@ -70,7 +70,7 @@ export const PREVIEW: NettingPreview = {
 /** The reference data, and the preview, for one group. */
 export async function stubApi(
   page: Page,
-  options: { readonly preview?: NettingPreview } = {},
+  options: { readonly preview?: NettingPreview; readonly balances?: Balances } = {},
 ): Promise<void> {
   await page.route('**/v1/currencies', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CURRENCIES) }),
@@ -83,6 +83,14 @@ export async function stubApi(
       body: JSON.stringify(options.preview ?? PREVIEW),
     }),
   );
+
+  await page.route('**/v1/groups/*/balances', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(options.balances ?? BALANCES),
+    }),
+  );
 }
 
 /** A group with nothing open in it: the same shape, with no partitions and nothing to settle. */
@@ -91,6 +99,27 @@ export const EMPTY_PREVIEW: NettingPreview = {
   partitions: [],
   bestCase: { positions: [], transfers: [] },
 };
+
+// --- Balances ------------------------------------------------------------------------------------------
+
+export type Balances =
+  paths['/groups/{groupId}/balances']['get']['responses']['200']['content']['application/json'];
+
+/**
+ * The balances read, in the shape the contract gives it: a flat list of positions, one per member per currency.
+ *
+ * The third entry is the currency clearing account rather than a person - the case the schema cannot label yet, and
+ * the one the screen has to show honestly (ADR 0039).
+ */
+export const BALANCES: Balances = [
+  { userId: '11111111-1111-4111-8111-111111111111', direction: 'pay', net: { amountMinor: 12_345_678, currency: 'INR' } },
+  { userId: '22222222-2222-4222-8222-222222222222', direction: 'receive', net: { amountMinor: 12_345_678, currency: 'INR' } },
+  { userId: '99999999-9999-4999-8999-999999999999', direction: 'flat', net: { amountMinor: 0, currency: 'INR' } },
+  { userId: '44444444-4444-4444-8444-444444444444', direction: 'receive', net: { amountMinor: 123_457, currency: 'JPY' } },
+];
+
+/** A group with no open commitments: an empty list rather than an error. */
+export const NO_BALANCES: Balances = [];
 
 // --- Obligations ---------------------------------------------------------------------------------------
 

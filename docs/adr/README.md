@@ -44,3 +44,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0036 | The list the main screen has always asked for | accepted |
 | 0037 | A rate that cannot be locked is not a reference rate | accepted |
 | 0038 | Every promise is either served or owned | accepted |
+| 0039 | A balance is the plan's positions, as of now | accepted |

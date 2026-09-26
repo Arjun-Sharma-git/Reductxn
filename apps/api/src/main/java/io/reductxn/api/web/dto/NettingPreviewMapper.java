@@ -2,11 +2,8 @@ package io.reductxn.api.web.dto;
 
 import io.reductxn.api.web.dto.NettingPreviewResponse.BestCase;
 import io.reductxn.api.web.dto.NettingPreviewResponse.Partition;
-import io.reductxn.api.web.dto.NettingPreviewResponse.Position;
 import io.reductxn.api.web.dto.NettingPreviewResponse.Transfer;
 import io.reductxn.ledger.api.Money;
-import io.reductxn.netting.api.NetDirection;
-import io.reductxn.netting.api.NetPosition;
 import io.reductxn.netting.api.NettingResult;
 import io.reductxn.netting.api.NettingResult.Algorithm;
 import io.reductxn.netting.api.TransferInstruction;
@@ -44,9 +41,9 @@ public final class NettingPreviewMapper {
 
         return new NettingPreviewResponse(
                 only == null ? null : only.currency().code(),
-                only == null ? null : money(grossTaxOf(only.netting())),
-                only == null ? null : money(only.netting().tax()),
-                only == null ? null : money(only.netting().taxSaved()),
+                only == null ? null : MoneyDto.of(grossTaxOf(only.netting())),
+                only == null ? null : MoneyDto.of(only.netting().tax()),
+                only == null ? null : MoneyDto.of(only.netting().taxSaved()),
                 plan.isEmpty() ? null : plan.partitions().stream()
                         .allMatch(partition -> partition.netting().provablyOptimal()),
                 List.copyOf(partitions),
@@ -60,9 +57,9 @@ public final class NettingPreviewMapper {
                 plan.currency().code(),
                 netting.grossTransferCount(),
                 netting.netTransferCount(),
-                money(grossTaxOf(netting)),
-                money(netting.tax()),
-                money(netting.taxSaved()),
+                MoneyDto.of(grossTaxOf(netting)),
+                MoneyDto.of(netting.tax()),
+                MoneyDto.of(netting.taxSaved()),
                 algorithmName(netting.algorithm()));
     }
 
@@ -78,19 +75,15 @@ public final class NettingPreviewMapper {
     }
 
     private static BestCase bestCase(SettlementPlan plan) {
-        List<Position> positions = new ArrayList<>();
+        List<NetPositionResponse> positions = new ArrayList<>();
         List<Transfer> transfers = new ArrayList<>();
 
         for (CurrencyPlan partition : plan.partitions()) {
-            partition.netting().positions().forEach(position -> positions.add(position(position)));
+            partition.netting().positions().forEach(position -> positions.add(NetPositionResponse.of(position)));
             partition.netting().transfers().forEach(transfer -> transfers.add(transfer(transfer)));
         }
 
         return new BestCase(List.copyOf(positions), List.copyOf(transfers));
-    }
-
-    private static Position position(NetPosition position) {
-        return new Position(position.userId(), directionName(position.direction()), money(position.net()));
     }
 
     /**
@@ -111,14 +104,6 @@ public final class NettingPreviewMapper {
     }
 
     /** Same reasoning as {@link #algorithmName}: the wire value is stated, not derived. */
-    private static String directionName(NetDirection direction) {
-        return switch (direction) {
-            case PAY -> "pay";
-            case RECEIVE -> "receive";
-            case FLAT -> "flat";
-        };
-    }
-
     private static Transfer transfer(TransferInstruction instruction) {
         return new Transfer(
                 instruction.fromUserId(),
@@ -127,12 +112,8 @@ public final class NettingPreviewMapper {
                 // only model of the clearing account (RULE B21), and a second copy of the id would be a
                 // second thing to keep in step.
                 FxClearing.isClearing(instruction.toUserId()) ? "fx_clearing" : "member",
-                money(instruction.amount()),
-                money(instruction.tax()),
+                MoneyDto.of(instruction.amount()),
+                MoneyDto.of(instruction.tax()),
                 "pending");
-    }
-
-    private static MoneyDto money(Money money) {
-        return new MoneyDto(money.amountMinor(), money.currency().code());
     }
 }

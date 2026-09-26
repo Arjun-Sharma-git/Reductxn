@@ -1,0 +1,15 @@
+{
+  "title": "Balances",
+  "lede": "What each member owes or is owed right now, over the group's open commitments. Nothing here has been settled, and nothing on this screen changes anything.",
+  "loading": "Working out what everybody owes…",
+  "empty": "Nothing is outstanding: this group has no open commitments, so nobody owes anybody anything.",
+  "list": {
+    "cardTitle": "Each member's position",
+    "cardDescription": "One row per member per currency, because a member who holds two currencies has two positions and adding them up needs a rate nobody agreed (ADR 0012). The figures are the plan's own, computed the same way the netting preview computes them.",
+    "caption": "What each member owes or is owed, by currency",
+    "member": "Member",
+    "direction": "Direction",
+    "net": "Net",
+    "unnamedNote": "A row shown by identifier is either the currency clearing account - the group's own requirement when a commitment crossed currencies, which the response cannot yet label - or a member the group's member list does not name. The identifier is shown rather than a guess."
+  }
+}
