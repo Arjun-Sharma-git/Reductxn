@@ -98,10 +98,10 @@ class ContractCoverageTest {
     /**
      * The operations the contract promises, the controllers do not serve, and somebody owns.
      *
-     * <p>These are the seventeen left when ADR 0037 closed the last of the reads the client was already calling.
-     * Each entry names the screen, slice or decision that would close it: members, cycles, runs, decisions,
-     * transfers, netting, obligations, currencies and rates have all left this list, and the three reads the audit
-     * found left it within two slices of being found.
+     * <p>These are the sixteen left when ADR 0039 served the balances read. Each entry names the screen, slice or
+     * decision that would close it: members, cycles, runs, decisions, transfers, netting, obligations, currencies,
+     * rates and now balances have all left this list, and the three reads the last-but-one audit found left it within
+     * two slices of being found.
      *
      * <p>The {@code POST /fx/quotes} entry is not a screen. It is recorded as a candidate for removal, and it is in
      * this map for the same reason the others are: an operation with no handler and no owner is the state that
@@ -118,9 +118,6 @@ class ContractCoverageTest {
             Map.entry("GET /groups/{groupId}/activity",
                     "activity - who did what. The member and invite screens link to it, and the rows it would read "
                             + "(decisions, invitations, membership changes) already exist"),
-            Map.entry("GET /groups/{groupId}/balances",
-                    "balances - one of the two screens MASTER-PLAN section 6 lists and its status row still names "
-                            + "as unbuilt"),
             Map.entry("GET /me",
                     "identity - the signed-in person. Without it the client falls back to a uuid, which is what made "
                             + "the missing-members read look deliberate for seven slices"),
