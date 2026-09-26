@@ -6,6 +6,9 @@
   `JooqRuns.findSilentTransfers`, `ScheduledRunDriver`, `SettlementCommand escalations`), and the terminal-run guard
   in `ExecuteRunService`
 - **Related:** ADR 0018, 0019, 0022; RULE S2, S3, B17, B21; `docs/specs/settlement.md` sections 4.2, 4.4
+- **Amended by:** ADR 0026 - the report this ADR introduced now carries a second reason (a rail that has the
+  instruction and will not confirm it), so its row type is `StuckTransfer` rather than `SilentTransfer`, and the two
+  policies that draw its lines are `Escalation` and `Reconciliation`
 
 ## Context
 
@@ -92,6 +95,11 @@ run is over".
   transfer left in `submitted` inside a `failed` run is the worst case for a person to have to guess about - the
   run says the settlement did not happen, and the rail may have moved the money anyway - and it is exactly the case
   a run-shaped report would have dropped.
+- **Amended since: the report grew a second reason, and the person it told can now answer it.** ADR 0025 gave the
+  operator a command for what the report tells them to ask about. ADR 0026 then found that the report could not see
+  a transfer a rail had *accepted* and would not confirm - such a rail is answering, so no silence ever begins - and
+  closed that gap by storing the acceptance instants and measuring a second policy against them. The decision here
+  is unchanged: the report tells, and what it tells about is now everything no rail has decided.
 
 ## Alternatives considered - and why rejected
 
