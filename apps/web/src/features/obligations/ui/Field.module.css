@@ -1,0 +1,26 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-1);
+  margin-block-end: var(--rn-space-4);
+  max-inline-size: 32rem;
+}
+
+.label {
+  font-weight: var(--rn-weight-medium);
+}
+
+/* A hint is not an error and must not look like one: muted, above the control, and never a substitute for the
+   label - it says what the field wants, not what it is. */
+.hint {
+  margin: 0;
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-xs);
+}
+
+.error {
+  margin: 0;
+  color: var(--rn-danger-text);
+  font-size: var(--rn-text-sm);
+  font-weight: var(--rn-weight-medium);
+}

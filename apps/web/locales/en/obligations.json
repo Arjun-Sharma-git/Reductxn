@@ -1,0 +1,61 @@
+{
+  "title": "What this group owes",
+  "lede": "Every commitment a member has recorded, and the form that records one. Nothing here has moved yet: an obligation is a promise, and a settlement cycle is what turns promises into payments.",
+  "loading": "Reading the ledger…",
+  "empty": "Nothing matches this view yet. Record a commitment below, or widen the filters.",
+  "filters": {
+    "label": "Filter the commitments",
+    "status": "Status",
+    "member": "Member",
+    "from": "From",
+    "to": "Until",
+    "anyStatus": "Any status",
+    "anyMember": "Anybody"
+  },
+  "list": {
+    "title": "Commitments",
+    "description": "Newest first. Amounts are what was promised, in the currency it was promised in.",
+    "caption": "The group's recorded commitments",
+    "debtor": "Owes",
+    "creditor": "Is owed",
+    "amount": "Amount",
+    "settlement": "Paid in",
+    "memo": "Reason",
+    "status": "Status",
+    "occurredAt": "Happened",
+    "settlementSame": "The same currency",
+    "settlementDifferent": "Settles in {currency}",
+    "recording": "Recording…"
+  },
+  "status": {
+    "open": "Open",
+    "netted": "In a plan",
+    "settled": "Settled",
+    "voided": "Voided"
+  },
+  "form": {
+    "title": "Record a commitment",
+    "description": "Who owes whom, how much, and why. Recording one does not move money; the group's next settlement cycle is what does.",
+    "debtor": "Who owes",
+    "debtorHint": "The member whose debt this is.",
+    "creditor": "Who is owed",
+    "amount": "How much",
+    "amountHint": "In the currency's own precision - rupees take two decimals, yen take none.",
+    "currency": "Currency",
+    "chooseMember": "Choose a member",
+    "chooseCurrency": "Choose a currency",
+    "settleIn": "Settle in",
+    "settleInHint": "Leave this alone unless the creditor is to be paid in another currency. That makes it a cross-currency commitment, and a rate is fixed when you record it.",
+    "settleInSame": "The same currency as above",
+    "indicativeRate": "Indicative rate: 1 {base} is {rate} {quote}, quoted {quotedAt}. The rate that counts is fixed when you record this.",
+    "rateLoading": "Looking up the rate…",
+    "memo": "Reason",
+    "memoHint": "What this was for, in the words of the members involved. It is stored exactly as written and never translated.",
+    "occurredAt": "When it happened",
+    "occurredAtHint": "The group's cycle boundary decides which cycle a commitment falls into, so a commitment for last week belongs to last week.",
+    "submit": "Record it",
+    "tryAgain": "Try again",
+    "recording": "Recording…",
+    "notWorthRetrying": "This was refused, and asking again would be refused the same way. Change what the message asks for and record it again."
+  }
+}

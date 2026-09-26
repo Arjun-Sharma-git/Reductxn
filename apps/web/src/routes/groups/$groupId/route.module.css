@@ -1,0 +1,29 @@
+.nav {
+  display: flex;
+  gap: var(--rn-space-2);
+  margin-block-end: var(--rn-space-5);
+  border-block-end: 1px solid var(--rn-border);
+}
+
+.link {
+  padding: var(--rn-space-2) var(--rn-space-4);
+  min-block-size: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--rn-text-muted);
+  text-decoration: none;
+  border-block-end: 3px solid transparent;
+  transition: color var(--rn-motion-fast) var(--rn-ease-standard);
+}
+
+.link:hover {
+  color: var(--rn-text);
+}
+
+/* The current view, marked in two ways: a border for the eye and `aria-current` (set by the link itself) for
+   everything else. Colour alone would be invisible to a reader who cannot see it. */
+.current {
+  color: var(--rn-text);
+  font-weight: var(--rn-weight-medium);
+  border-block-end-color: var(--rn-accent);
+}

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as GroupsGroupIdRouteRouteImport } from './routes/groups/$groupId/route'
 import { Route as GroupsGroupIdNettingRouteImport } from './routes/groups/$groupId/netting'
+import { Route as GroupsGroupIdObligationsRouteImport } from './routes/groups/$groupId/obligations'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,29 +29,51 @@ const GroupsGroupIdNettingRoute = GroupsGroupIdNettingRouteImport.update({
   path: '/netting',
   getParentRoute: () => GroupsGroupIdRouteRoute,
 } as any)
+const GroupsGroupIdObligationsRoute =
+  GroupsGroupIdObligationsRouteImport.update({
+    id: '/obligations',
+    path: '/obligations',
+    getParentRoute: () => GroupsGroupIdRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
+  '/groups/$groupId/obligations': typeof GroupsGroupIdObligationsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
+  '/groups/$groupId/obligations': typeof GroupsGroupIdObligationsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
+  '/groups/$groupId/obligations': typeof GroupsGroupIdObligationsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/groups/$groupId' | '/groups/$groupId/netting'
+  fullPaths:
+    | '/'
+    | '/groups/$groupId'
+    | '/groups/$groupId/netting'
+    | '/groups/$groupId/obligations'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/groups/$groupId' | '/groups/$groupId/netting'
-  id: '__root__' | '/' | '/groups/$groupId' | '/groups/$groupId/netting'
+  to:
+    | '/'
+    | '/groups/$groupId'
+    | '/groups/$groupId/netting'
+    | '/groups/$groupId/obligations'
+  id:
+    | '__root__'
+    | '/'
+    | '/groups/$groupId'
+    | '/groups/$groupId/netting'
+    | '/groups/$groupId/obligations'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -81,15 +104,24 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GroupsGroupIdNettingRouteImport
       parentRoute: typeof GroupsGroupIdRouteRoute
     }
+    '/groups/$groupId/obligations': {
+      id: '/groups/$groupId/obligations'
+      path: '/obligations'
+      fullPath: '/groups/$groupId/obligations'
+      preLoaderRoute: typeof GroupsGroupIdObligationsRouteImport
+      parentRoute: typeof GroupsGroupIdRouteRoute
+    }
   }
 }
 
 interface GroupsGroupIdRouteRouteChildren {
   GroupsGroupIdNettingRoute: typeof GroupsGroupIdNettingRoute
+  GroupsGroupIdObligationsRoute: typeof GroupsGroupIdObligationsRoute
 }
 
 const GroupsGroupIdRouteRouteChildren: GroupsGroupIdRouteRouteChildren = {
   GroupsGroupIdNettingRoute: GroupsGroupIdNettingRoute,
+  GroupsGroupIdObligationsRoute: GroupsGroupIdObligationsRoute,
 }
 
 const GroupsGroupIdRouteRouteWithChildren =

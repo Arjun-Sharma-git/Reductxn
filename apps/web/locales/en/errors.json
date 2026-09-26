@@ -41,5 +41,6 @@
   "amount.unknown_currency": "This deployment does not have {currency} in its currency catalogue yet, so the amount cannot be shown.",
   "amount.unsafe_integer": "That amount cannot be read exactly and has been refused rather than rounded.",
   "amount.negative": "An amount is a magnitude; who pays whom carries the direction.",
-  "amount.not_a_currency_code": "That is not a currency code."
+  "amount.not_a_currency_code": "That is not a currency code.",
+  "form.occurred_at_invalid": "Enter when this happened as a date and a time."
 }

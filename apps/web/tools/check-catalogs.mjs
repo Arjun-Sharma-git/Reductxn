@@ -31,7 +31,7 @@ const localesDir = join(root, 'locales');
 const sourceLocale = 'en';
 
 /** Namespaces the *client* owns: their codes have no server constant to match, so I3 does not apply to them. */
-const clientNamespaces = ['client.', 'amount.'];
+const clientNamespaces = ['client.', 'amount.', 'form.'];
 
 const failures = [];
 const reports = [];

@@ -32,6 +32,22 @@ describe('locales', () => {
     expect(availableLocales()).toEqual(['en', 'ru']);
   });
 
+  it('holds the flat keys a template literal builds, and the review state from _meta.json', () => {
+    // These two were broken once, in ways nothing else would have caught:
+    //
+    //   - `common.localeName.en` is a *flat* key containing a dot, the shape a template literal needs
+    //     (`t(`common.localeName.${code}`)`). It rendered as the raw key in a browser, and no unit test looked at
+    //     a dotted key.
+    //   - `locales/_meta.json` was read as a locale directory named `locales`, so the review state was always
+    //     empty and every locale was treated as unreviewed - which made the review-state test pass for the wrong
+    //     reason, since its subject (`ru`) is unreviewed either way.
+    expect(sourceCatalog().get('common.localeName.en')).toBe('English');
+    expect(sourceCatalog().get('common.localeName.ru')).toBe('Русский');
+    expect(sourceCatalog().get('errors.amount.too_many_decimals')).toContain('decimal places');
+    expect(reviewStateOf().get('en')).toBe(true);
+    expect(reviewStateOf().get('ru')).toBe(false);
+  });
+
   it('refuses an unreviewed locale on a screen that demands a reviewed one', () => {
     const state = reviewStateOf();
 

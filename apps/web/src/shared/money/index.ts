@@ -14,6 +14,6 @@ export {
   type CurrencyInfo,
   type Money,
 } from './money';
-export { formatMoney, formatMoneyOrRefusal } from './format';
+export { formatMoney, formatMoneyOrRefusal, formatRate } from './format';
 export { parseAmount } from './parse';
 export { digitsOf, group, type Digits } from './digits';

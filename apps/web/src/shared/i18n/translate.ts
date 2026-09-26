@@ -64,7 +64,20 @@ export function translate(locale: string, catalog: Catalog, key: string, values:
   // missing translation.
   const language = own === undefined ? SOURCE_LOCALE : locale;
 
-  return compiled(language, message).format(values).toString();
+  try {
+    return compiled(language, message).format(values).toString();
+  } catch {
+    /*
+     * A message that cannot be formatted must not take the screen down.
+     *
+     * The case that found this: `ledger.currency_mismatch` is documented as carrying `{expected}` and `{actual}`,
+     * and a server that answers without them (or a test stub that does) made `IntlMessageFormat` throw inside a
+     * render - which unmounts the tree and leaves a member looking at nothing. Showing the message with its
+     * placeholders visible is worse than showing it fully and much better than showing a blank page, and it is
+     * self-diagnosing: the placeholders name the parameters that are missing.
+     */
+    return message;
+  }
 }
 
 /**
