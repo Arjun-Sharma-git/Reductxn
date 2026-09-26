@@ -5,12 +5,15 @@ plugins {
     id("reductxn.testing-conventions")
 }
 
-// This module hosts repository-wide architecture tests. It sees every libs module and apps/api, so
-// ArchUnit can verify RULEs B1-B2, B5, B8, B10, B12-B15, B18-B21 across the whole graph in one place.
+// This module hosts repository-wide architecture tests. It sees every libs module, apps/api and
+// workers/settlement, so ArchUnit can verify RULEs B1-B2, B5, B6, B8, B10, B12-B16, B18-B22 across the
+// whole graph in one place.
 //
 // Every module listed here MUST also be listed below, or ArchUnit imports none of its classes and
 // every rule that mentions it passes without checking anything. ArchUnitVisibilityTest exists to
-// fail loudly when that happens, because the failure is otherwise invisible.
+// fail loudly when that happens, because the failure is otherwise invisible - and it caught exactly
+// this when workers/settlement gained its first sources: B6 and the worker's layer rules ran, found
+// no classes and failed, which is the honest version of "the check was blind".
 //
 // Spring is here for the same reason one level down: b15 names @Transactional and b20 names
 // MessageSource, and a rule that cannot see the type it forbids is a rule that checks nothing.
@@ -25,6 +28,7 @@ dependencies {
     testImplementation(project(":libs:booking"))
     testImplementation(project(":libs:rails"))
     testImplementation(project(":apps:api"))
+    testImplementation(project(":workers:settlement"))
 
     testImplementation(libs.spring.tx)
     testImplementation(libs.spring.context)

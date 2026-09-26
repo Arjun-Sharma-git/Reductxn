@@ -423,7 +423,9 @@ class ModuleBoundaryTest {
     @ArchTest
     static final ArchRule b15_transactional_only_in_application =
             methods().that().areAnnotatedWith(Transactional.class)
-                    .should().beDeclaredInClassesThat().resideInAPackage("io.reductxn.api.application..")
+                    .should().beDeclaredInClassesThat().resideInAnyPackage(
+                            "io.reductxn.api.application..",
+                            "io.reductxn.settlement.application..")
                     .because("RULE B15: a commit in an unexpected layer is a commit nobody reviewed");
 
     /**
@@ -440,9 +442,66 @@ class ModuleBoundaryTest {
      */
     @ArchTest
     static final ArchRule b16_row_types_never_leave_the_persistence_adapters =
-            noClasses().that().resideOutsideOfPackage("io.reductxn.api.adapter.persistence..")
+            noClasses().that().resideOutsideOfPackages(
+                            "io.reductxn.api.adapter.persistence..",
+                            "io.reductxn.settlement.adapter.persistence..")
                     .should().dependOnClassesThat().resideInAPackage("org.jooq..")
                     .because("RULE B16: a row type that escapes makes every caller depend on a table");
+
+    // --- workers/settlement: the same layers, in the second deployable ---------------------------------
+    //
+    // The worker arrived with sources, which is when these become checkable rather than aspirational - the
+    // same way apps/api's arrival made B12-B15 real. The rules are written against the module's packages
+    // rather than parameterised, deliberately: a rule that names both deployables is harder to read than two
+    // that name one each, and the failure message then says which module broke it.
+
+    /**
+     * RULE B6, the worker's half: it never depends on {@code apps/api}.
+     *
+     * <p>This rule had no subject while both deployables were empty, and it is the rule the whole
+     * {@code libs/planning} and {@code libs/booking} story exists to satisfy: shared logic moves <em>down</em>
+     * into {@code libs/*} rather than sideways between two deployables.
+     *
+     * <p>Two rules rather than one with two directions, because a failure then says which way the dependency
+     * went. The first draft combined them and did not compile, which is a poor reason - but the reason it is
+     * worth keeping split is that {@code andShould} has no way to carry a second `because`, so the combined
+     * form could only have stated one of the two.
+     */
+    @ArchTest
+    static final ArchRule b6_worker_never_depends_on_the_api =
+            noClasses().that().resideInAPackage("io.reductxn.settlement..")
+                    .should().dependOnClassesThat().resideInAPackage("io.reductxn.api..")
+                    .because("RULE B6: the worker and the API share tables through read models, never code");
+
+    /** RULE B6, the API's half: it never depends on the worker. */
+    @ArchTest
+    static final ArchRule b6_api_never_depends_on_the_worker =
+            noClasses().that().resideInAPackage("io.reductxn.api..")
+                    .should().dependOnClassesThat().resideInAPackage("io.reductxn.settlement..")
+                    .because("RULE B6: the API reads settlement tables through a read model, never through "
+                            + "this module's classes - which is what lets settlement scale out independently");
+
+    /**
+     * RULE B13: the worker's use cases reach the outside through ports, never a concrete adapter.
+     *
+     * <p>There is no {@code web} clause here because this module has no HTTP surface at all: its README says
+     * "public surface: none", and {@code spring.main.web-application-type=none} is set so that stays true. The
+     * layer rule that matters is therefore only that a use case cannot name an adapter, which is what keeps
+     * {@code ComputeRunService} testable without a database.
+     */
+    @ArchTest
+    static final ArchRule b13_settlement_application_calls_ports_not_implementations =
+            noClasses().that().resideInAPackage("io.reductxn.settlement.application..")
+                    .should().dependOnClassesThat().resideInAPackage("io.reductxn.settlement.adapter..")
+                    .because("RULE B13: a use case that names an adapter cannot be tested without one");
+
+    /** RULE B14: the worker's adapters implement ports; they do not know what called them. */
+    @ArchTest
+    static final ArchRule b14_settlement_adapters_never_touch_application =
+            noClasses().that().resideInAPackage("io.reductxn.settlement.adapter..")
+                    .should().dependOnClassesThat().resideInAPackage("io.reductxn.settlement.application..")
+                    .because("RULE B14: an adapter that calls a use case is a use case with two entry points "
+                            + "and no transaction boundary");
 
     /**
      * RULE B20: the API never returns localized prose, so it has no apparatus for composing any.

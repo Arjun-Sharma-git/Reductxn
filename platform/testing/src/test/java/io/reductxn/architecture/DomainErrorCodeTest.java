@@ -64,7 +64,7 @@ class DomainErrorCodeTest {
      * green while checking nothing. If a dependency is dropped from {@code platform/testing}, the
      * enumeration below quietly shrinks and every assertion still passes.
      */
-    private static final Set<String> MODULES_THAT_DECLARE_CODES = Set.of("fx", "ledger", "api");
+    private static final Set<String> MODULES_THAT_DECLARE_CODES = Set.of("fx", "ledger", "api", "settlement");
 
     @Test
     void everyDomainErrorHasAConventionAbidingUniqueCode() {

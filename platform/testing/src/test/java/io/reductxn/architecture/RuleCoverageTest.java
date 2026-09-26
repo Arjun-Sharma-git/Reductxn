@@ -138,12 +138,16 @@ class RuleCoverageTest {
                     + "state machine; a spec that says 'no silent rollback' can only be tested against "
                     + "something that can fail midway, which means a real rail"),
             Map.entry("S4", "the funding gate: no run while a currency's fx_clearing position is "
-                    + "non-zero and unfunded. libs/planning already reports each currency's clearing "
-                    + "position, which is this rule's input, so half of it is built. The other half is "
-                    + "the run transitioning to awaiting_fx_funding, which needs workers/settlement"),
-            Map.entry("S5", "the FX requirement is a reported number, never a hidden one. The plan "
-                    + "already reports the clearing leg separately from member transfers, so the data "
-                    + "exists; the 'who pays whom' report needs apps/api"));
+                    + "non-zero and unfunded. The blocking half is now real - workers/settlement computes the "
+                    + "plan, stores the clearing position per currency and a cross-currency cycle comes out "
+                    + "awaiting_fx_funding rather than awaiting_approval, asserted in ComputeRunTest. What is "
+                    + "missing is the other side of the gate: nothing executes at all yet, so a run cannot be "
+                    + "stopped from executing, and 'funded' has no way to become true"),
+            Map.entry("S5", "the FX requirement is a reported number, never a hidden one. The requirement is "
+                    + "now stored and reported per currency, with member transfers kept apart from the "
+                    + "clearing legs - ComputeRunTest asserts both for a cross-currency cycle. The "
+                    + "'who pays whom' report a group reads is what remains, and that is apps/api's surface "
+                    + "over these rows"));
 
     /**
      * Families whose gates are not this build's to run.

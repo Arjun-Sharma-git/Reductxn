@@ -42,7 +42,8 @@ class SchemaOwnershipTest {
             "apps/api", 1,
             "libs/netting", 2,
             "libs/ledger", 3,
-            "libs/fx", 4
+            "libs/fx", 4,
+            "workers/settlement", 5
     );
 
     private static final Pattern CREATE_TABLE =
