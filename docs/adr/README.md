@@ -36,3 +36,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0028 | The client starts with the screen that shows what netting saves | accepted |
 | 0029 | A refusal is a value, and a retry is the same attempt | accepted |
 | 0030 | A run has to be findable before it can be answered | accepted |
+| 0031 | The gates run somewhere that is not the machine that wrote the change | accepted |
