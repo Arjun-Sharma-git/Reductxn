@@ -752,3 +752,92 @@ export async function stubInvitesApi(
 
   return { acceptances };
 }
+
+// --- Identity ------------------------------------------------------------------------------------------
+
+export type TokenPair = paths['/auth/otp/verify']['post']['responses']['200']['content']['application/json'];
+
+/** A session, as the API issues one: two opaque tokens and half an hour. */
+export const TOKEN_PAIR: TokenPair = {
+  accessToken: 'access-token-from-the-stub',
+  refreshToken: 'refresh-token-from-the-stub',
+  expiresIn: 1800,
+};
+
+/** The signed-in person, as `GET /me` serves them: the deployment's name for them is their number. */
+export const ME = { id: '7a1e5b30-2f5c-4a1e-9c3d-2b6a4f8e1d90', displayName: '+919812345678', kycTier: 'none' };
+
+export type IdentityRecorder = {
+  /** Every code the screen handed back, so a test can see what the server would have been asked. */
+  readonly verified: readonly string[];
+  /** How many times a code was asked for. */
+  requested(): number;
+};
+
+/**
+ * The identity API: asking for a code, handing it back, and reading who is signed in.
+ *
+ * The access token the stub issues is a fixed string rather than a random one, because what the tests assert is that the
+ * client *sends* what it was given - `GET /me` with that exact bearer header - and a random token would make that
+ * assertion impossible to write. That is also why `/v1/me` refuses a request without the right header: a stub that
+ * answered everybody would make "the client sends the token" untestable.
+ *
+ * `refusal` is how a test asks for the answer that matters: a code this deployment will not accept. The status and the
+ * code are separate because identity has three refusals across two statuses (401 for a code or a session, 429 for asking
+ * too often), and a test that conflated them would pass for the wrong one.
+ */
+export async function stubIdentityApi(
+  page: Page,
+  options: { readonly refusal?: { readonly status: number; readonly code: string } } = {},
+): Promise<IdentityRecorder> {
+  const verified: string[] = [];
+  let requested = 0;
+
+  await page.route('**/v1/auth/otp/request', (route) => {
+    requested += 1;
+
+    return route.fulfill({ status: 202, body: '' });
+  });
+
+  await page.route('**/v1/auth/otp/verify', (route) => {
+    verified.push(route.request().postData() ?? '');
+
+    if (options.refusal !== undefined) {
+      return route.fulfill({
+        status: options.refusal.status,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'about:blank',
+          title: 'Unauthorized',
+          status: options.refusal.status,
+          detail: 'stubbed refusal',
+          code: options.refusal.code,
+        }),
+      });
+    }
+
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(TOKEN_PAIR) });
+  });
+
+  await page.route('**/v1/me', (route) => {
+    const authorization = route.request().headers()['authorization'];
+
+    if (authorization !== `Bearer ${TOKEN_PAIR.accessToken}`) {
+      return route.fulfill({
+        status: 401,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'about:blank',
+          title: 'Unauthorized',
+          status: 401,
+          detail: 'stubbed refusal',
+          code: 'api.not_signed_in',
+        }),
+      });
+    }
+
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ME) });
+  });
+
+  return { verified, requested: () => requested };
+}

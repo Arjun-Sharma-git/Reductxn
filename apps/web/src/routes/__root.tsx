@@ -1,6 +1,9 @@
 import { createRootRoute, Link, Outlet, useMatches, useSearch } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 
+import { currentUserQuery } from '@/entities/identity';
+import { useSignOut } from '@/features/sign-in';
 import { availableLocales, bestMatch, DEFAULT_LOCALE, LocaleProvider, useTranslations } from '@/shared/i18n';
 import { env } from '@/shared/config/env';
 import { AppHeaderControls } from '@/shared/ui';
@@ -84,6 +87,7 @@ function Shell() {
         <Link to="/" className="rn-app-brand">
           {env.appName}
         </Link>
+        <Account />
         <AppHeaderControls availableLocales={availableLocales()} />
       </header>
 
@@ -91,5 +95,40 @@ function Shell() {
         <Outlet />
       </main>
     </>
+  );
+}
+
+/**
+ * Who is signed in, in the header - or the way to become somebody.
+ *
+ * **A failed read is the signed-out state rather than an error to show.** `GET /me` answers `401` to a visitor, so this
+ * treats a refusal as "no name to show" and offers a sign-in link: a header that rendered a problem notice at every
+ * anonymous visitor would be shouting at the ordinary case.
+ *
+ * **It is here rather than in a feature's screen** because it belongs to the shell - it is true of every screen at once.
+ * The read comes from `entities/identity` and the sign-out from `features/sign-in`, which is the direction imports are
+ * allowed to flow (RULE F1): a route may reach both.
+ */
+function Account() {
+  const { t } = useTranslations();
+
+  const me = useQuery(currentUserQuery());
+  const signOut = useSignOut();
+
+  if (me.isSuccess) {
+    return (
+      <span className="rn-app-account">
+        <span>{t('common.signedInAs', { name: me.data.displayName })}</span>
+        <button type="button" className="rn-app-account-action" onClick={signOut}>
+          {t('common.signOut')}
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <Link to="/sign-in" className="rn-app-account">
+      {t('common.signIn')}
+    </Link>
   );
 }

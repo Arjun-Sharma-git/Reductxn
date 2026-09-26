@@ -3,6 +3,7 @@ package io.reductxn.api.web.error;
 import io.reductxn.api.port.in.DecisionRefusals;
 import io.reductxn.api.port.in.InviteRefusals;
 import io.reductxn.api.port.in.MemberRefusals;
+import io.reductxn.api.port.in.SignInRefusals;
 import io.reductxn.api.port.in.RunRefusals;
 import io.reductxn.api.port.in.ObligationRefusals;
 import io.reductxn.fx.api.AmountTooSmallToConvertException;
@@ -84,7 +85,18 @@ public final class ExpectedFailures {
             // The server cannot answer yet. A retry may succeed, which is the opposite of the 422 above and
             // the reason they are not one status: a client that conflated them would give up on a request
             // that would work later, or retry one that never will.
-            Map.entry(UnavailableRateException.CODE, HttpStatus.SERVICE_UNAVAILABLE));
+            Map.entry(UnavailableRateException.CODE, HttpStatus.SERVICE_UNAVAILABLE),
+
+            // Sign-in. The 401s are one answer for several causes on purpose - an unknown token, an expired one, a
+            // rotated-away one, a wrong code, a code that ran out of attempts - because telling a caller which of them it
+            // was tells somebody guessing whether they are guessing at something. The code names the condition from the
+            // client's side: "this is not a session" or "that code is not one this deployment accepts".
+            Map.entry(SignInRefusals.NotSignedIn.CODE, HttpStatus.UNAUTHORIZED),
+            Map.entry(SignInRefusals.OtpNotAccepted.CODE, HttpStatus.UNAUTHORIZED),
+
+            // The one refusal the contract declared before anything served it: an endpoint that sends a message on every
+            // request is a way to spend somebody else's money, so asking too often is refused rather than ignored.
+            Map.entry(SignInRefusals.TooManyCodes.CODE, HttpStatus.TOO_MANY_REQUESTS));
 
     private ExpectedFailures() {
     }

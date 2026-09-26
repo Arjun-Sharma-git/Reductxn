@@ -1,6 +1,7 @@
 import type { paths } from './schema';
 
 import { env } from '@/shared/config/env';
+import { forgetSession, sessionFrom, storeSession, storedSession } from '@/shared/session';
 
 /**
  * The only place in the client that calls `fetch` (RULE F5).
@@ -126,6 +127,25 @@ export async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
+  const response = await send(path, options);
+
+  if (response.status !== 401) {
+    return unwrap<T>(response);
+  }
+
+  // A 401 with a session in hand means the access token has aged out - not that the caller is not allowed, and not that
+  // the request was wrong. Renewing once and trying again is the whole of what a refresh token is for, and **once** is
+  // deliberate: a client that retried in a loop would hammer an endpoint that answers 401 for a token that is already
+  // gone (ADR 0042).
+  if (!(await renewSession())) {
+    return unwrap<T>(response);
+  }
+
+  return unwrap<T>(await send(path, options));
+}
+
+/** One request, no renewal. Split out so the retry above is the only place that knows about it. */
+async function send(path: string, options: RequestOptions): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json' };
 
   if (options.body !== undefined) {
@@ -136,24 +156,71 @@ export async function request<T>(
     headers['Idempotency-Key'] = options.idempotencyKey;
   }
 
-  const response = await fetch(url(path, options.query), {
+  // The session's access token, when there is one (ADR 0042). Sent on every request rather than only on the paths that
+  // need it: which paths require a token is the server's decision, and one operation reads it today while the rest
+  // tolerate it - so a client that guessed would be a client that breaks when enforcement lands.
+  const session = storedSession();
+
+  if (session !== null) {
+    headers['Authorization'] = `Bearer ${session.accessToken}`;
+  }
+
+  return fetch(url(path, options.query), {
     method: options.method ?? 'GET',
     headers,
-    // The session cookie, when identity lands. Same-origin now, and no wildcard credentials.
+    // No credentials: this API authenticates with a bearer header, not a cookie, and a wildcard-plus-cookie
+    // combination would be a CSRF surface nothing here defends (ADR 0042).
     credentials: 'same-origin',
     ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
+}
 
+/** The value or the refusal, which is the one place a response becomes one of the two. */
+async function unwrap<T>(response: Response): Promise<T> {
   if (!response.ok) {
     throw new ApiProblemError(await toProblem(response));
   }
 
-  if (response.status === 204 || response.headers.get('content-length') === '0') {
-    return undefined as T;
+  // The body decides, rather than the `content-length` header. `202 Accepted` and `204 No Content` have no value to
+  // return, and a server is not obliged to announce that with a header - Spring's `202` from `POST /auth/otp/request` does
+  // not, and calling `json()` on the empty body throws a parse error. That throw was reported to a member as "the server
+  // could not be reached", which is a lie about a request that worked; a browser test found it (ADR 0042).
+  const body = await response.text();
+
+  return (body === '' ? undefined : JSON.parse(body)) as T;
+}
+
+/**
+ * Renews the session with the stored refresh token, and answers whether there is a usable pair now.
+ *
+ * It uses {@link send} rather than {@link request}, which is what stops the renewal from recursing into itself when the
+ * refresh is also refused. A refusal means the session is over - the token was rotated away, or the window closed - so the
+ * stored pair is forgotten: keeping it would be a client that keeps sending a token it knows is dead.
+ */
+async function renewSession(): Promise<boolean> {
+  const session = storedSession();
+
+  if (session === null) {
+    return false;
   }
 
-  return (await response.json()) as T;
+  const response = await fetch(url('/auth/refresh', undefined), {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ refreshToken: session.refreshToken }),
+  });
+
+  if (!response.ok) {
+    forgetSession();
+
+    return false;
+  }
+
+  storeSession(sessionFrom((await response.json()) as Parameters<typeof sessionFrom>[0]));
+
+  return true;
 }
 
 /** A path idempotency key for the calls that move money (P8). */
