@@ -99,7 +99,7 @@ Execution flows through `libs/rails`. Required behaviours of every adapter:
    rejected). Only retryable failures are retried, with exponential backoff and a circuit breaker.
 4. A reconciliation sweep polls for transfers stuck in `submitted` beyond a threshold.
 
-**Status: 1 and 2 are implemented; 3 and 4 are named gaps.**
+**Status: 1, 2, 3 and 4 are implemented; what is left is escalation.**
 
 **1 and 2.** The port's contract says submit is idempotent, and `MockRail` implements it as a memory:
 it answers a re-submission with the state it already holds rather than confirming a movement twice. The
@@ -112,13 +112,37 @@ it would hold a database transaction open across every network call, and a rollb
 would erase the only record that money moved. The driver that calls this pass is not `@Transactional` for the
 same reason, one level up: a transaction spanning a whole batch would span every rail call in it.
 
-**3 is not implemented, and the port cannot express it yet.** `PaymentRail.submit` returns
-`Result<RailReference>`, which says *that* the rail refused and not whether the refusal was retryable -
-there is nowhere in the contract to put that classification, and the spec asks for it. What the worker does
-in the meantime is fail in the safe direction rather than the clever one: a call that did not complete
-leaves the transfer `authorized` and the run `executing` (nothing was refused and nothing moved), a
-transfer refused at the domain level is terminal (the run is `failed`), and the driver retries the former.
-Backoff, a circuit breaker and a classification on the port are the next rail slice.
+**3 is implemented, and it needed a port change to be.** `PaymentRail` now has a sealed `RailRefusal` with two
+shapes: `RailUnreachable` (the rail did not answer - a network error, a 429, a 5xx, or a rail the breaker has
+stopped calling) and `RailRejected` (the rail answered that it will not take the instruction). Both carry a
+stable code and the rail's own words, and `retryable()` answers the only question a caller has. The
+classification replaced an inference: the worker used to read every `Result.fail` as retryable and every
+`failed` status as terminal, which is correct for the mock and wrong for any adapter that answers a 400 with a
+failure.
+
+Two consequences worth stating. A **terminal refusal now fails the transfer and the run** (S3): before this, a
+rail that *answered* "no" through a failure result left the transfer offered for ever. And a **refused poll is
+read as "we still do not know"** whatever its classification, because polling has no side effects - a terminal
+reading would turn a rail's refusal to answer a question into money marked as not having moved.
+
+**Retries back off, and the wait is the transfer's.** `Backoff` (base 30s, cap 15m by default) computes the next
+attempt from *consecutive calls that went unanswered*, and any answer resets the count - so a rail that is
+working is never made to wait for failures it has recovered from. Despite the default cadence, a transfer that
+is waiting is not offered to the rail at all, including by an operator's manual pass: the wait is the rail's
+health, not a stampede guard. `V506` stores the count and the instant; a transfer with nothing to wait for has
+a null instant.
+
+**And a rail that is down is left alone.** `Rails.withCircuitBreaker` decorates any rail: after N consecutive
+unanswered calls the rail is not called for the cooldown, and then exactly one call is allowed through as a
+probe. An answer of any kind closes it - a rail with an opinion is a working rail - and while it is open it
+answers `RailUnreachable` with the cooldown in the detail, so a caller needs no branch for it. The state is in
+memory, because a breaker is a memory of a recent bad spell in this process and a restart is allowed to forget
+it. ADR 0019 records all of this.
+
+**What is left of this section is escalation.** A rail that never answers is retried with backoff until the cap
+and then polled for ever; nothing decides when patience has run out, and nothing tells a human. The material for
+it is in the rows (`unanswered_attempts`, `next_attempt_at`, `rail_detail`) and the policy is deliberately not
+invented here.
 
 **4 is implemented as a driver, with one difference from the letter of this section and a reason.** The sweep
 was specified as a threshold on a `submitted` transfer; what was built is a driver whose threshold is on the
@@ -219,7 +243,7 @@ leave the group short. Mitigations, in order of preference:
 - Whether per-currency partitions may be executed independently once approved, which would let a
 ## 8. Implementation status
 
-**Implemented in `workers/settlement`, tested against a container (74 tests across ten classes):** opening a
+**Implemented in `workers/settlement`, tested against a container (84 tests across thirteen classes):** opening a
 run for a `(group, as-of)` pair, computing the plan through `libs/planning`, and recording it as rows - one
 partition per currency, one net position per participant per currency, one transfer per movement with its RULE
 S2 rail reference, and the identities of the commitments it nets. The run's status is decided in the use case,
