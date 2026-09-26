@@ -11,10 +11,14 @@ import io.reductxn.settlement.port.in.Escalation;
 import io.reductxn.settlement.port.in.Escalations;
 import io.reductxn.settlement.port.in.FundingRequest;
 import io.reductxn.settlement.port.in.PartitionOutcome;
+import io.reductxn.settlement.port.in.PlannedTransfer;
 import io.reductxn.settlement.port.in.ReadEscalations;
 import io.reductxn.settlement.port.in.RecordFxFunding;
+import io.reductxn.settlement.port.in.ResolveTransfer;
 import io.reductxn.settlement.port.in.RunRequest;
 import io.reductxn.settlement.port.in.SilentTransfer;
+import io.reductxn.settlement.port.in.TransferResolution;
+import io.reductxn.settlement.port.in.TransferStatus;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
@@ -40,6 +44,12 @@ import java.util.UUID;
  *
  *   java -jar workers-settlement.jar --reductxn.command=fund --reductxn.run=&lt;uuid&gt; \
  *        --reductxn.currency=JPY --reductxn.amount-minor=224 --reductxn.funding-ref=&lt;reference&gt;
+ *
+ *   java -jar workers-settlement.jar --reductxn.command=escalations [--reductxn.limit=&lt;n&gt;]
+ *
+ *   java -jar workers-settlement.jar --reductxn.command=resolve --reductxn.run=&lt;uuid&gt; \
+ *        --reductxn.transfer=&lt;uuid&gt; --reductxn.outcome=confirmed|failed \
+ *        --reductxn.by=&lt;who&gt; --reductxn.basis=&lt;what they looked at&gt;
  * </pre>
  *
  * <p><strong>Why a command line rather than an endpoint.</strong> This module has no HTTP surface and must not
@@ -53,6 +63,12 @@ import java.util.UUID;
  * a command that approved on a member's behalf would let an operator settle a group's money with a keystroke no
  * member made. Until members exist and the API can carry their answers, approvals are recorded through the port
  * (which is what the tests do) and this command refuses to pretend otherwise.
+ *
+ * <p><strong>And the one place an operator does decide: {@code resolve}.</strong> A transfer no rail will answer
+ * cannot be decided by the worker (ADR 0024), so somebody who has asked the rail says what it turned out to be.
+ * That command is the exception that proves the rule above: it does not act on a member's behalf, it records
+ * something a person knows and names them, and the name is what makes the keystroke accountable. It takes the
+ * basis the person acted on as well, because the write can complete a run or end one.
  *
  * <p><strong>Exit codes are part of the interface</strong>, because a shell is a client: {@code 0} when the
  * command did what it was asked, {@code 1} when the domain refused - no such run, nothing to settle, a quorum
@@ -84,6 +100,7 @@ public class SettlementCommand {
     private final DriveRuns driveRuns;
     private final RecordFxFunding recordFxFunding;
     private final ReadEscalations readEscalations;
+    private final ResolveTransfer resolveTransfer;
     private final Escalation escalation;
     private final Clock clock;
     private final Duration window;
@@ -94,6 +111,7 @@ public class SettlementCommand {
             DriveRuns driveRuns,
             RecordFxFunding recordFxFunding,
             ReadEscalations readEscalations,
+            ResolveTransfer resolveTransfer,
             Escalation escalation,
             Clock clock,
             @Value("${reductxn.settlement.drive.window:PT2M}") Duration window,
@@ -103,6 +121,7 @@ public class SettlementCommand {
         this.driveRuns = driveRuns;
         this.recordFxFunding = recordFxFunding;
         this.readEscalations = readEscalations;
+        this.resolveTransfer = resolveTransfer;
         this.escalation = escalation;
         this.clock = clock;
         this.window = window;
@@ -127,8 +146,9 @@ public class SettlementCommand {
             case "drive" -> drive(args, out);
             case "fund" -> fund(args, out);
             case "escalations" -> escalations(args, out);
+            case "resolve" -> resolve(args, out);
             default -> usage(out, "unknown command '" + command.get(0)
-                    + "'. This worker knows: compute, drive, fund");
+                    + "'. This worker knows: compute, drive, fund, escalations, resolve");
         });
     }
 
@@ -312,8 +332,74 @@ public class SettlementCommand {
             }
         }
 
-        out.println("The worker cannot resolve these: whether the money moved is the rail's answer to give. A "
-                + "submitted transfer is the one to ask about, because the rail accepted it before it went quiet.");
+        out.println("Whether the money moved is the rail's answer to give. Ask the rail about a submitted transfer "
+                + "first - it accepted the instruction before it went quiet - and record what you find with "
+                + "--reductxn.command=resolve --reductxn.run=<run> --reductxn.transfer=<transfer> "
+                + "--reductxn.outcome=confirmed|failed --reductxn.by=<you> --reductxn.basis=<what you looked at>.");
+
+        return OK;
+    }
+
+    /**
+     * Records what a person found out about a transfer no rail would decide: the way back from {@code escalations}.
+     *
+     * <p><strong>Two options exist for one reason: the write is a claim about money.</strong> {@code by} says who is
+     * making it and {@code basis} says what they were looking at, and the use case refuses either being blank. That
+     * is the whole of this project's answer to "who may assert that money moved": a person may, and only in a form
+     * that names them. Nothing checks the name - there are no identities in this build - so this is an attribution
+     * rather than an authorisation, and a deployment that needs the difference has to bring it.
+     *
+     * <p><strong>It is the one command that writes a fate rather than triggering work</strong>, and it says what it
+     * did: which transfer, in which run, who asserted it, and whether the ledger now holds a movement. A refusal
+     * (already answered, never offered to a rail, no such transfer) is the domain saying no and exits {@code 1},
+     * exactly as the other commands' refusals do.
+     */
+    private int resolve(ApplicationArguments args, PrintStream out) {
+        OptionalInt missing = require(args, out, "run", "transfer", "outcome", "by", "basis");
+        if (missing.isPresent()) {
+            return missing.getAsInt();
+        }
+
+        UUID runId;
+        UUID transferId;
+        TransferResolution.Outcome outcome;
+
+        try {
+            runId = UUID.fromString(option(args, "run").orElseThrow());
+            transferId = UUID.fromString(option(args, "transfer").orElseThrow());
+            outcome = TransferResolution.Outcome.ofWireName(option(args, "outcome").orElseThrow());
+        } catch (IllegalArgumentException malformed) {
+            return usage(out, "run and transfer must be uuids and outcome 'confirmed' or 'failed': "
+                    + malformed.getMessage());
+        }
+
+        Result<ComputedRun> resolved = resolveTransfer.resolve(new TransferResolution(
+                runId, transferId, outcome, option(args, "by").orElseThrow(), option(args, "basis").orElseThrow()));
+
+        if (resolved instanceof Result.Failure<ComputedRun> refusal) {
+            return refused(out, refusal.error().code() + ": " + refusal.error().message());
+        }
+
+        ComputedRun run = resolved.orElseThrow();
+        PlannedTransfer transfer = run.transfers().stream()
+                .filter(each -> each.id().equals(transferId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "transfer " + transferId + " was resolved and is not in the run read back from its rows"));
+
+        out.printf("resolve: transfer %s is %s%n", transfer.railRef(), transfer.status().wireName());
+        out.printf("  %s from %s to %s, in run %s of group %s%n", minorUnits(transfer.amount()),
+                transfer.fromUserId(), transfer.toUserId(), run.run().id(), run.run().groupId());
+        out.printf("  asserted by %s at %s, on the basis of %s%n",
+                transfer.resolvedBy(), transfer.resolvedAt(), transfer.resolvedBasis());
+        out.printf("  the ledger %s%n", transfer.status() == TransferStatus.CONFIRMED
+                ? "now holds the movement: one settlement entry, derived from this transfer"
+                : "holds nothing new: the money did not move, so there is no posting to make");
+
+        long answered = run.transfers().stream().filter(each -> each.status().isResolved()).count();
+
+        out.printf("run %s is %s: %d of %d transfer(s) answered%n",
+                run.run().id(), run.run().status().wireName(), answered, run.transfers().size());
 
         return OK;
     }

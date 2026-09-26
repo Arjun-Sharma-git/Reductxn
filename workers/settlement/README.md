@@ -52,6 +52,11 @@ java -jar workers-settlement.jar --reductxn.command=fund --reductxn.run=<uuid> \
 
 # what no rail will decide: the transfers a rail has gone quiet on, oldest silence first
 java -jar workers-settlement.jar --reductxn.command=escalations [--reductxn.limit=50]
+
+# what a person found out about one of them (RULE S6): the way back from the report above
+java -jar workers-settlement.jar --reductxn.command=resolve --reductxn.run=<uuid> \
+     --reductxn.transfer=<uuid> --reductxn.outcome=confirmed|failed \
+     --reductxn.by=<who> --reductxn.basis=<what they looked at>
 ```
 
 Exit codes: `0` done, `1` refused by the domain, `2` the invocation was wrong. **No command approves or rejects a
@@ -118,8 +123,34 @@ every pass, because a silence that has not ended is still happening.
 **It does not resolve them, and that is the decision rather than an omission.** The absence of an answer is not
 evidence of anything except silence: marking such a transfer `failed` would assert the money did not move, and
 marking it `confirmed` would assert that it did - and for a `submitted` transfer, which the rail accepted before
-going quiet, nobody knows which. So the report is what tells a person *which movement to ask the rail about*; letting
-them record the answer is the next step, and it is a decision about who may assert that money moved.
+going quiet, nobody knows which. So the report is what tells a person *which movement to ask the rail about*.
+
+## When a person knows the answer
+
+`--reductxn.command=resolve` is the way back from the report (ADR 0025, RULE S6). It takes the run, the transfer,
+the outcome (`confirmed` or `failed`), `--reductxn.by` and `--reductxn.basis` - all five required - and writes the
+transfer's state with `V509`'s `resolved_by`, `resolved_basis` and `resolved_at` beside it. An unpriced claim about
+money cannot be built: `TransferResolution` refuses an attribution in pieces, so there is no way to record that money
+moved without saying who says so and what they looked at.
+
+**Nothing verifies the name.** There are no identities in this build - membership, sessions and roles are
+`apps/api`'s and do not exist yet - so this is an *attribution*, not an authentication, and the ADR says so rather
+than implying otherwise. When identities exist, the column becomes a foreign key and the command becomes an act
+somebody was authorised to take.
+
+**The write is deliberately small.** It calls no rail (the operator already has the answer, and asking again would
+make the command depend on the very silence it exists for), touches no other transfer (an operator resolving one
+movement has not asked for the run to be attempted), and books exactly what a confirmation books - the same
+`Bookings.settlement` entry derived from the transfer, in the same transaction as the state write - or nothing at
+all when the answer is that the money did not move. It clears the silence, so the report stops naming the transfer
+it came from, and it lets `RunOutcome` decide the run's fate: the rule `ExecuteRunService` used, extracted so that
+two writers of one fact cannot disagree.
+
+Three things are refused, each because the assertion cannot be true of the row: a transfer that already has an
+answer (and the refusal names who decided, when and on what basis, which is what an operator re-running after a slow
+response needs to see), a transfer no rail was ever asked about (`pending` - there is no answer to have found out),
+and a transfer that is not in the run named. What is *not* required is that the transfer be past
+`escalation.after`: patience is the worker's prompt to a human, not a permission a human needs.
 
 One thing this slice found and fixed: a run that has `failed` was not covered by the guard that stops a finished run
 being driven again, so a manual `drive --run=<a failed run>` offered that run's remaining `authorized` transfers to
@@ -187,11 +218,16 @@ compute and in `apps/api`'s preview, both of which apply the same rule. Without 
 same debts and move the group's money twice for one promise. A `failed` run settles nothing, so its commitments
 stay open (RULE S3).
 
-Nothing schedules any of it: the tests call the use cases, and a scheduler or an operator's command is a later
-slice. And **nothing is posted to the ledger** when a run executes - the rail moves the money and the run records
-it, but the obligations the cycle netted are still open. That is the next slice and it is a boundary question
-(RULE B6, B17) rather than an omission. `docs/specs/settlement.md` section 8 has the detail, with a reason per
-gap.
+**Two adapters trigger it, because different things have to be triggered by different actors** (ADR 0018).
+`ScheduledRunDriver` is the cadence: on a timer it offers every run whose progress is possible to `ExecuteRun`,
+least recently attempted first and bounded by a window and a batch size (ADR 0019's classification is what it does
+with the two kinds of refusal). `SettlementCommand` is the operator's shell for what only a person can decide -
+opening a cycle (when a cycle is due is a group's schedule, and group schedules do not exist), recording that
+currency arrived, reporting what no rail will decide, and recording what one turned out to have done.
+`docs/specs/settlement.md` section 8 has the detail, with a reason per remaining gap: a *cycle* still has no
+trigger, a member's approval reaches the worker only through `apps/api` (ADR 0020), nothing posts the currency a
+group brings in from outside (the group account is the ledger's open question), and the reconciliation sweep's
+detection exists while its job and threshold do not.
 
 **The rail is a deployment choice, named rather than assumed.** `reductxn.rail.name` selects it (default `mock`,
 reached through `libs/rails`'s factory because its implementations are internal - RULE B10), and an unknown name
@@ -199,28 +235,33 @@ fails at startup rather than falling back: a worker that moved money through a r
 failure that line exists to prevent.
 
 **Owned-table note:** the fourth and fifth tables arrived with the first run, and two more with quorum and
-funding. `settlement_partitions` exists because the plan's per-currency figures - gross, net, tax, tax saved -
+funding. `settlement_run_gates` and its shortfall rows arrived with ADR 0023, and `V503`-`V509` have added columns
+rather than tables: what the rail said about a transfer, the retry wait, the spell of silence an escalation policy
+measures, the verdict's fields, and - with ADR 0025 - the three that record who resolved a transfer, on what basis
+and when. `settlement_partitions` exists because the plan's per-currency figures - gross, net, tax, tax saved -
 cannot be re-derived from the transfers: they are the netting engine's answers about the partition, and
 re-deriving them would mean running the engine again to read a run. `settlement_decisions` is keyed by
 `(run_id, member_id)`, which is what makes a decision final at the database and not only in the guard that checked
 first. `settlement_fx_fundings` is keyed by the caller's `funding_ref`, which is the same idempotency rule (S2)
 applied to the other thing in this module that can half-happen.
 
-**Tests:** `./gradlew :workers:settlement:test` (Testcontainers, real Postgres; 84 tests across thirteen classes).
+**Tests:** `./gradlew :workers:settlement:test` (Testcontainers, real Postgres; 125 tests across seventeen classes).
 The tests drive the inbound ports rather than the service classes, and they verify *stored* state: per-currency
 zero-sum read back from the rows (N1), every participant zeroed by applying the plan's own transfers (N2), the
 clearing account's residual, that the rail was asked exactly once per transfer and not at all when a gate
 refused, and - for the ledger side - that the entries rebuilt from their own rows verify as a chain
 (`EntryChain`) and leave every position flat (`Balances`, L8).
 
-Three of those classes are about the *trigger* rather than the rules. `DriveRunsTest` executes runs through the
+Several of those classes are about the *trigger* rather than the rules. `DriveRunsTest` executes runs through the
 driver alone - no test touches `ExecuteRun` - and asserts that a run which cannot progress is left where it was
 with the gate's reason, that a transfer a rail never confirmed is resolved by a later pass, and that a pass is
 bounded and takes the least recently attempted first. `SettlementCommandTest` walks the operator's command line
-against the real bean and the real database, including an approved, funded run settled to `done` from a shell.
-`RailRetryTest` and `BrokenRailTest` cover a rail that does not answer, and they move time rather than sleeping:
-`MovingClockConfiguration` replaces the clock bean, which is possible because nothing below `application` reads a
-clock of its own.
+against the real bean and the real database, including an approved, funded run settled to `done` from a shell and a
+resolution recorded from one. `EscalationTest` is about the policy - it moves the clock hours forward to assert what
+patience means - and `ResolveTransferTest` is about what a person's answer may and may not do, including the cases
+the worker cannot decide for itself. `RailRetryTest` and `BrokenRailTest` cover a rail that does not answer, and they
+move time rather than sleeping: `MovingClockConfiguration` replaces the clock bean, which is possible because nothing
+below `application` reads a clock of its own.
 
 **Owner:** backend reviewer.
 

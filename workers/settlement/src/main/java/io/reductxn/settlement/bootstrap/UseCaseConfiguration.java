@@ -8,10 +8,14 @@ import io.reductxn.rails.api.Rails;
 import io.reductxn.settlement.application.Backoff;
 import io.reductxn.settlement.application.DriveRunsService;
 import io.reductxn.settlement.application.ReadEscalationsService;
+import io.reductxn.settlement.application.ResolveTransferService;
 import io.reductxn.settlement.port.in.DriveRuns;
 import io.reductxn.settlement.port.in.Escalation;
 import io.reductxn.settlement.port.in.ExecuteRun;
 import io.reductxn.settlement.port.in.ReadEscalations;
+import io.reductxn.settlement.port.in.ResolveTransfer;
+import io.reductxn.settlement.port.out.ChainHeads;
+import io.reductxn.settlement.port.out.JournalEntries;
 import io.reductxn.settlement.port.out.Runs;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -163,5 +167,24 @@ public class UseCaseConfiguration {
     @Bean
     ReadEscalations readEscalations(Runs runs) {
         return new ReadEscalationsService(runs);
+    }
+
+    /**
+     * Recording what a person found out about a transfer no rail would decide: the way back from the report above.
+     *
+     * <p>The same collaborators a confirmation uses in {@code ExecuteRunService} - the ledger, the chain heads and
+     * one clock - because a resolution books a movement exactly as a confirmation does. What it deliberately does not
+     * take is the rail: a resolution records something somebody already knows, so it makes no call, and a bean
+     * without a rail cannot make one by accident.
+     */
+    @Bean
+    ResolveTransfer resolveTransfer(
+            Runs runs,
+            JournalEntries journalEntries,
+            ChainHeads chainHeads,
+            Clock clock,
+            PlatformTransactionManager transactionManager) {
+
+        return new ResolveTransferService(runs, journalEntries, chainHeads, clock, transactionManager);
     }
 }

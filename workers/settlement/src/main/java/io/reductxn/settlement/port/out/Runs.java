@@ -175,6 +175,26 @@ public interface Runs {
     void markTransfer(UUID transferId, TransferStatus status, String railDetail, Instant at);
 
     /**
+     * Writes one transfer's state from a person's answer, and records who gave it on what basis (RULE S6).
+     *
+     * <p>Distinct from {@link #markTransfer} because that write records what a <em>rail</em> said, and the two are
+     * different facts about the same row: a rail's answer fills {@code rail_detail}, a person's fills
+     * {@code resolved_by}/{@code resolved_basis}/{@code resolved_at}, and a reader has to be able to tell which one
+     * decided a transfer. {@code rail_detail} is deliberately left alone here - it is the last thing the rail said
+     * when it was asked, which stays true after somebody else answers the question.
+     *
+     * <p>The silence and the wait are cleared as {@link #markTransfer} clears them, because the transfer has an
+     * answer either way: leaving {@code unanswered_since} set would keep a decided transfer in the escalation report,
+     * and the value type refuses the combination outright.
+     *
+     * @param status where the person's answer puts the transfer: {@code confirmed} or {@code failed}, never a
+     *               waiting state
+     * @param by     who asserted it, recorded verbatim and unverified - an attribution, not an authentication
+     * @param basis  what they looked at when they decided
+     */
+    void resolveTransfer(UUID transferId, TransferStatus status, Instant at, String by, String basis);
+
+    /**
      * Records that we are about to offer this transfer to the rail, before the call is made.
      *
      * <p>Separate from {@link #markTransfer} because it is the one write that is not an outcome: the retry
