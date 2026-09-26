@@ -112,12 +112,6 @@ class ComputeRunTest extends WorkerDatabaseTest {
         assertThat(countIn("settlement_transfers")).isZero();
     }
 
-    private ComputedRun computed(RunRequest request) {
-        Result<ComputedRun> result = computeRun.compute(request);
-        assertThat(result.isOk()).as("expected a computed run, got %s", result).isTrue();
-        return ((Result.Ok<ComputedRun>) result).value();
-    }
-
     /** The sum of the stored net positions for a currency, read from the column rather than from the plan. */
     private long sumOfStoredPositions(String currencyCode) {
         Long sum = jdbc.queryForObject(

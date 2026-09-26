@@ -2,7 +2,10 @@ package io.reductxn.settlement.bootstrap;
 
 import io.reductxn.planning.api.SettlementPlanner;
 import io.reductxn.planning.api.SettlementPlans;
+import io.reductxn.rails.api.PaymentRail;
+import io.reductxn.rails.api.Rails;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -41,5 +44,30 @@ public class UseCaseConfiguration {
     @Bean
     Clock clock() {
         return Clock.systemUTC();
+    }
+
+    /**
+     * The rail this worker submits settlement transfers to.
+     *
+     * <p><strong>Named by configuration rather than chosen in code, and unknown names fail at startup.</strong> A
+     * deployment that asked for a rail this build does not have must not silently get a different one: the only
+     * way to move money here is through this bean, so a fallback would mean money moving somewhere nobody
+     * configured. The default is {@code mock}, which moves nothing and confirms everything - that is the honest
+     * default for a project with no CBDC connection yet (MASTER-PLAN phase 2), and it is a default rather than a
+     * hidden choice because it is written down here and in the module's properties.
+     *
+     * <p>The mock is reached through {@link Rails#mock()} rather than by naming its class: implementations live in
+     * {@code io.reductxn.rails.internal..}, which nothing outside that module may import (RULE B10), so the
+     * factory in its {@code api} package is the only door.
+     */
+    @Bean
+    PaymentRail paymentRail(@Value("${reductxn.rail.name:mock}") String name) {
+        if (!"mock".equals(name)) {
+            throw new IllegalStateException(
+                    "no payment rail named '" + name + "' is in this build. Configured rails: mock. A worker that "
+                            + "fell back to another rail would be moving money through something nobody chose");
+        }
+
+        return Rails.mock();
     }
 }

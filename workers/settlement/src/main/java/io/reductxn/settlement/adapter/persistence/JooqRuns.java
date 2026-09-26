@@ -9,9 +9,15 @@ import io.reductxn.planning.api.CurrencyPlan;
 import io.reductxn.planning.api.FxClearing;
 import io.reductxn.planning.api.SettlementPlan;
 import io.reductxn.settlement.port.in.ComputedRun;
+import io.reductxn.settlement.port.in.Funding;
+import io.reductxn.settlement.port.in.FundingRequest;
 import io.reductxn.settlement.port.in.PartitionOutcome;
+import io.reductxn.settlement.port.in.PlannedTransfer;
+import io.reductxn.settlement.port.in.Quorum;
+import io.reductxn.settlement.port.in.RunDecision;
 import io.reductxn.settlement.port.in.RunStatus;
 import io.reductxn.settlement.port.in.SettlementRun;
+import io.reductxn.settlement.port.in.TransferStatus;
 import io.reductxn.settlement.port.out.Runs;
 
 import org.jooq.DSLContext;
@@ -31,6 +37,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
 /**
@@ -77,6 +85,7 @@ public class JooqRuns implements Runs {
 
     private static final Field<UUID> POSITION_RUN = DSL.field("run_id", UUID.class);
     private static final Field<String> POSITION_CURRENCY = DSL.field("currency_code", String.class);
+    private static final Field<Short> POSITION_EXPONENT = DSL.field("currency_exponent", Short.class);
     private static final Field<UUID> POSITION_PARTICIPANT = DSL.field("participant_id", UUID.class);
     private static final Field<Long> POSITION_NET = DSL.field("net_minor", Long.class);
 
@@ -89,7 +98,23 @@ public class JooqRuns implements Runs {
     private static final Field<Long> TRANSFER_AMOUNT = DSL.field("amount_minor", Long.class);
     private static final Field<String> TRANSFER_RAIL_REF = DSL.field("rail_ref", String.class);
     private static final Field<String> TRANSFER_STATUS = DSL.field("status", String.class);
+    private static final Field<String> TRANSFER_DETAIL = DSL.field("rail_detail", String.class);
     private static final Field<OffsetDateTime> TRANSFER_CREATED = DSL.field("created_at", OffsetDateTime.class);
+
+    private static final Table<Record> DECISIONS = DSL.table("settlement_decisions");
+    private static final Field<UUID> DECISION_RUN = DSL.field("run_id", UUID.class);
+    private static final Field<UUID> DECISION_MEMBER = DSL.field("member_id", UUID.class);
+    private static final Field<String> DECISION_VALUE = DSL.field("decision", String.class);
+    private static final Field<OffsetDateTime> DECISION_AT = DSL.field("decided_at", OffsetDateTime.class);
+
+    private static final Table<Record> FUNDINGS = DSL.table("settlement_fx_fundings");
+    private static final Field<UUID> FUNDING_ID = DSL.field("id", UUID.class);
+    private static final Field<UUID> FUNDING_RUN = DSL.field("run_id", UUID.class);
+    private static final Field<String> FUNDING_CURRENCY = DSL.field("currency_code", String.class);
+    private static final Field<Short> FUNDING_EXPONENT = DSL.field("currency_exponent", Short.class);
+    private static final Field<Long> FUNDING_AMOUNT = DSL.field("amount_minor", Long.class);
+    private static final Field<String> FUNDING_REF = DSL.field("funding_ref", String.class);
+    private static final Field<OffsetDateTime> FUNDING_AT = DSL.field("funded_at", OffsetDateTime.class);
 
     private static final String PENDING = "pending";
 
@@ -155,6 +180,89 @@ public class JooqRuns implements Runs {
                                 + "in one transaction, so this means the rows went somewhere else"));
     }
 
+    @Override
+    public Optional<ComputedRun> findRunById(UUID runId) {
+        Objects.requireNonNull(runId, "runId");
+
+        Record runRow = dsl.select(RUN_CYCLE)
+                .from(RUNS)
+                .where(RUN_ID.eq(runId))
+                .fetchOne();
+
+        if (runRow == null) {
+            return Optional.empty();
+        }
+
+        Record cycle = dsl.select(CYCLE_ID, CYCLE_GROUP, CYCLE_AS_OF, CYCLE_CREATED)
+                .from(CYCLES)
+                .where(CYCLE_ID.eq(runRow.get(RUN_CYCLE)))
+                .fetchOne();
+
+        if (cycle == null) {
+            throw new IllegalStateException(
+                    "run " + runId + " refers to cycle " + runRow.get(RUN_CYCLE) + ", which is not in "
+                            + "settlement_cycles. The two are written together, so this means a cycle row was "
+                            + "deleted rather than that a run was opened without one");
+        }
+
+        return Optional.of(describe(cycle));
+    }
+
+    @Override
+    public void updateStatus(SettlementRun run) {
+        Objects.requireNonNull(run, "run");
+
+        dsl.update(RUNS)
+                .set(RUN_STATUS, run.status().wireName())
+                .where(RUN_ID.eq(run.id()))
+                .execute();
+    }
+
+    @Override
+    public void recordDecision(RunDecision decision, Instant decidedAt) {
+        Objects.requireNonNull(decision, "decision");
+        Objects.requireNonNull(decidedAt, "decidedAt");
+
+        // A plain insert: the primary key on `(run_id, member_id)` is what makes a second decision impossible,
+        // and swallowing the conflict here would hide the race the use case's guard could not close.
+        dsl.insertInto(DECISIONS)
+                .columns(DECISION_RUN, DECISION_MEMBER, DECISION_VALUE, DECISION_AT)
+                .values(decision.runId(), decision.memberId(), decision.decision().wireName(),
+                        decidedAt.atOffset(ZoneOffset.UTC))
+                .execute();
+    }
+
+    @Override
+    public void recordFunding(FundingRequest request, Instant fundedAt) {
+        Objects.requireNonNull(request, "request");
+        Objects.requireNonNull(fundedAt, "fundedAt");
+
+        // `do nothing` on the reference, because the reference is the caller's idempotency key (RULE S2): a
+        // retry after a timeout records one funding rather than a second arrival that never happened.
+        dsl.insertInto(FUNDINGS)
+                .columns(FUNDING_ID, FUNDING_RUN, FUNDING_CURRENCY, FUNDING_EXPONENT, FUNDING_AMOUNT, FUNDING_REF,
+                        FUNDING_AT)
+                .values(fundingIdOf(request.runId(), request.fundingRef()), request.runId(),
+                        request.currency().code(), (short) request.currency().minorUnitExponent(),
+                        request.amount().amountMinor(), request.fundingRef(), fundedAt.atOffset(ZoneOffset.UTC))
+                .onConflict(FUNDING_REF)
+                .doNothing()
+                .execute();
+    }
+
+    @Override
+    public void markTransfer(UUID transferId, TransferStatus status, String railDetail, Instant at) {
+        Objects.requireNonNull(transferId, "transferId");
+        Objects.requireNonNull(status, "status");
+        Objects.requireNonNull(at, "at");
+
+        dsl.update(TRANSFERS)
+                .set(TRANSFER_STATUS, status.wireName())
+                .set(TRANSFER_DETAIL, railDetail)
+                .where(TRANSFER_ID.eq(transferId))
+                .execute();
+    }
+
     /** The partition's summary, its positions and its transfers. One partition, one currency, no totals. */
     private void writePartition(SettlementRun run, CurrencyPlan partition) {
         Currency currency = partition.currency();
@@ -216,6 +324,18 @@ public class JooqRuns implements Runs {
     }
 
     /**
+     * A funding's identity, derived from its run and the caller's reference.
+     *
+     * <p>Derived for the same reason every other id here is: the unique constraint on the reference is what
+     * forbids one arrival being counted twice, and deriving the id from the same pair means a duplicate insert
+     * collides on the primary key too - so a race is a duplicate rather than two rows that differ only in their
+     * ids.
+     */
+    static UUID fundingIdOf(UUID runId, String fundingRef) {
+        return UUID.nameUUIDFromBytes((runId + ":funding:" + fundingRef).getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
      * The run's plan as stored, per currency.
      *
      * <p>Two queries for the whole run plus one for its partitions, and the per-currency gathering happens here
@@ -242,22 +362,79 @@ public class JooqRuns implements Runs {
 
         UUID runId = runRow.get(RUN_ID);
 
-        Map<String, List<Record>> transfersByCurrency = new HashMap<>();
-        for (Record row : dsl.select(TRANSFER_CURRENCY, TRANSFER_FROM, TRANSFER_TO, TRANSFER_AMOUNT)
+        List<PlannedTransfer> transfers = new ArrayList<>();
+        Map<String, List<PlannedTransfer>> transfersByCurrency = new HashMap<>();
+        for (Record row : dsl.select(TRANSFER_ID, TRANSFER_CURRENCY, TRANSFER_EXPONENT, TRANSFER_FROM, TRANSFER_TO,
+                        TRANSFER_AMOUNT, TRANSFER_RAIL_REF, TRANSFER_STATUS, TRANSFER_DETAIL)
                 .from(TRANSFERS)
                 .where(TRANSFER_RUN.eq(runId))
                 .orderBy(TRANSFER_RAIL_REF.asc())
                 .fetch()) {
-            transfersByCurrency.computeIfAbsent(row.get(TRANSFER_CURRENCY), ignored -> new ArrayList<>()).add(row);
+
+            Currency currency = Currency.of(row.get(TRANSFER_CURRENCY), row.get(TRANSFER_EXPONENT));
+            PlannedTransfer transfer = new PlannedTransfer(
+                    row.get(TRANSFER_ID),
+                    currency,
+                    row.get(TRANSFER_FROM),
+                    row.get(TRANSFER_TO),
+                    Money.of(row.get(TRANSFER_AMOUNT), currency),
+                    row.get(TRANSFER_RAIL_REF),
+                    TransferStatus.ofWireName(row.get(TRANSFER_STATUS)),
+                    row.get(TRANSFER_DETAIL));
+
+            transfers.add(transfer);
+            transfersByCurrency.computeIfAbsent(currency.code(), ignored -> new ArrayList<>()).add(transfer);
         }
 
+        // Every position, not only the clearing ones: quorum is computed over the members the run concerns, which
+        // is a question about all of them. Rebuilt through NetPosition so a row that broke an invariant fails
+        // here rather than being counted into a quorum.
+        List<NetPosition> positions = new ArrayList<>();
         Map<String, Long> clearingByCurrency = new HashMap<>();
-        for (Record row : dsl.select(POSITION_CURRENCY, POSITION_NET)
+
+        for (Record row : dsl.select(POSITION_CURRENCY, POSITION_EXPONENT, POSITION_PARTICIPANT, POSITION_NET)
                 .from(POSITIONS)
                 .where(POSITION_RUN.eq(runId))
-                .and(POSITION_PARTICIPANT.eq(FxClearing.ACCOUNT_ID))
+                .orderBy(POSITION_CURRENCY.asc(), POSITION_PARTICIPANT.asc())
                 .fetch()) {
-            clearingByCurrency.put(row.get(POSITION_CURRENCY), row.get(POSITION_NET));
+
+            Currency currency = Currency.of(row.get(POSITION_CURRENCY), row.get(POSITION_EXPONENT));
+            long net = row.get(POSITION_NET);
+
+            if (FxClearing.isClearing(row.get(POSITION_PARTICIPANT))) {
+                clearingByCurrency.put(currency.code(), net);
+            } else {
+                positions.add(new NetPosition(row.get(POSITION_PARTICIPANT), Money.of(net, currency)));
+            }
+        }
+
+        Set<UUID> approvers = new TreeSet<>();
+        Set<UUID> rejecters = new TreeSet<>();
+
+        for (Record row : dsl.select(DECISION_MEMBER, DECISION_VALUE)
+                .from(DECISIONS)
+                .where(DECISION_RUN.eq(runId))
+                .orderBy(DECISION_MEMBER.asc())
+                .fetch()) {
+
+            UUID member = row.get(DECISION_MEMBER);
+
+            if (RunDecision.Decision.ofWireName(row.get(DECISION_VALUE)) == RunDecision.Decision.APPROVE) {
+                approvers.add(member);
+            } else {
+                rejecters.add(member);
+            }
+        }
+
+        List<Money> fundings = new ArrayList<>();
+        for (Record row : dsl.select(FUNDING_CURRENCY, FUNDING_EXPONENT, FUNDING_AMOUNT)
+                .from(FUNDINGS)
+                .where(FUNDING_RUN.eq(runId))
+                .orderBy(FUNDING_REF.asc())
+                .fetch()) {
+
+            Currency currency = Currency.of(row.get(FUNDING_CURRENCY), row.get(FUNDING_EXPONENT));
+            fundings.add(Money.of(row.get(FUNDING_AMOUNT), currency));
         }
 
         List<PartitionOutcome> partitions = new ArrayList<>();
@@ -280,31 +457,40 @@ public class JooqRuns implements Runs {
                 runRow.get(RUN_COMPUTED).toInstant(),
                 runRow.get(RUN_CREATED).toInstant());
 
-        return new ComputedRun(run, partitions);
+        // The requirement is taken from the partitions, in report order, and the coverage from the rows. Two
+        // readings of the same run give the same Funding, which is what makes "is it funded?" a single answer.
+        List<Money> requirements = partitions.stream()
+                .filter(PartitionOutcome::requiresExternalFunding)
+                .map(PartitionOutcome::externalRequirement)
+                .toList();
+
+        return new ComputedRun(run, partitions, transfers, Quorum.of(positions, approvers, rejecters),
+                Funding.of(requirements, fundings));
     }
 
     /** One partition's summary, with its transfers counted and split, and its clearing position from the rows. */
     private PartitionOutcome partitionOutcome(
-            Record partition, Map<String, List<Record>> transfersByCurrency, Map<String, Long> clearingByCurrency) {
+            Record partition, Map<String, List<PlannedTransfer>> transfersByCurrency,
+            Map<String, Long> clearingByCurrency) {
 
         Currency currency = Currency.of(partition.get(PARTITION_CURRENCY), partition.get(PARTITION_EXPONENT));
         String code = currency.code();
 
-        List<Record> transfers = transfersByCurrency.getOrDefault(code, List.of());
+        List<PlannedTransfer> transfers = transfersByCurrency.getOrDefault(code, List.of());
 
         int memberCount = 0;
         int clearingCount = 0;
         Money memberTotal = Money.zero(currency);
 
-        for (Record transfer : transfers) {
-            boolean touchesClearing = FxClearing.isClearing(transfer.get(TRANSFER_FROM))
-                    || FxClearing.isClearing(transfer.get(TRANSFER_TO));
+        for (PlannedTransfer transfer : transfers) {
+            boolean touchesClearing = FxClearing.isClearing(transfer.fromUserId())
+                    || FxClearing.isClearing(transfer.toUserId());
 
             if (touchesClearing) {
                 clearingCount++;
             } else {
                 memberCount++;
-                memberTotal = memberTotal.plus(Money.of(transfer.get(TRANSFER_AMOUNT), currency));
+                memberTotal = memberTotal.plus(transfer.amount());
             }
         }
 

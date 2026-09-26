@@ -7,25 +7,41 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * What a run computed: the run itself, and one outcome per currency it touches.
+ * A run as it stands, with the plan it will execute and the two gates in front of it.
  *
- * <p>The same shape as {@code SettlementPlan}, deliberately, and the correspondence is the point: the plan is
- * what {@code libs/planning} decided, this is what the run stored and will report. If the two ever disagreed,
- * a group would be approving one thing while the run executed another - so the adapter takes the plan and
- * writes it, and the summaries here are derived from the stored rows rather than from the plan a second time.
+ * <p>The same shape as {@code SettlementPlan}, extended by everything the run has since decided or been told:
+ * who has approved, what has been funded, and what each transfer's state is. If the plan and this ever
+ * disagreed about an amount, a group would be approving one thing while the run executed another - so the
+ * adapter takes the plan, writes it, and derives every figure here from the stored rows rather than from the
+ * plan a second time.
  *
- * <p>Partitions are ordered by currency code, as in the plan, so two readings of the same run produce the same
- * report and an auditor can diff them.
+ * <p>Partitions are ordered by currency code and transfers by rail reference, so two readings of the same run
+ * produce the same report and an auditor can diff them.
  *
- * @param run        the run as it now stands
+ * <p><strong>This is the report the funding gate and the quorum are read from.</strong> Both could be
+ * recomputed by a caller from the plan and the approvals, and that is precisely what must not happen: the gate
+ * is a rule, and two derivations of one rule are two answers waiting to disagree.
+ *
+ * @param run        the run itself
  * @param partitions one per currency, sorted by currency code
+ * @param transfers  every transfer the plan records, ordered by rail reference
+ * @param quorum     who the run concerns and who has answered
+ * @param funding    what it needs from outside and what has arrived
  */
-public record ComputedRun(SettlementRun run, List<PartitionOutcome> partitions) {
+public record ComputedRun(
+        SettlementRun run,
+        List<PartitionOutcome> partitions,
+        List<PlannedTransfer> transfers,
+        Quorum quorum,
+        Funding funding) {
 
     public ComputedRun {
         Objects.requireNonNull(run, "run");
-        Objects.requireNonNull(partitions, "partitions");
-        partitions = List.copyOf(partitions);
+        Objects.requireNonNull(transfers, "transfers");
+        Objects.requireNonNull(quorum, "quorum");
+        Objects.requireNonNull(funding, "funding");
+        partitions = List.copyOf(Objects.requireNonNull(partitions, "partitions"));
+        transfers = List.copyOf(transfers);
 
         for (int index = 1; index < partitions.size(); index++) {
             String previous = partitions.get(index - 1).currency().code();
@@ -61,4 +77,10 @@ public record ComputedRun(SettlementRun run, List<PartitionOutcome> partitions) 
     public boolean requiresExternalFunding() {
         return run.requiresExternalFunding();
     }
+
+    /** The transfers that still have work to do, in rail-reference order. */
+    public List<PlannedTransfer> unresolvedTransfers() {
+        return transfers.stream().filter(transfer -> !transfer.status().isResolved()).toList();
+    }
 }
+

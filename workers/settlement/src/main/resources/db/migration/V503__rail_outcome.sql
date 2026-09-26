@@ -1,0 +1,24 @@
+-- What the rail said about a transfer.
+--
+-- `V503` continues this module's `5xx` range. It is a separate migration from V502 because it records something
+-- different in kind: V502 holds what people and other systems have *told* the run, and this holds what a rail
+-- *answered* while the run was executing.
+--
+-- **`rail_detail` is free text on purpose.** It is the rail's own words - "insufficient funds", "account
+-- closed", a network error's message - and normalizing them into a code here would mean inventing a vocabulary
+-- for failures this project has not seen yet. What must not be free text is the *state*: `status` stays a
+-- constrained vocabulary, because a run's report has to be machine-readable, while the reason a group reads is
+-- prose. The two are stored separately so that neither has to be the other.
+--
+-- **What is deliberately not here: `submitted_at`.** The reconciliation sweep in section 4.4 will measure a
+-- stuck transfer against the moment it was submitted, and that means a timestamp and a partial index on
+-- `status = 'submitted'` - but nothing reads either today, and a column nothing reads is a claim rather than a
+-- fact. It arrives with the sweep, in one `ALTER TABLE`, which is what the version range is for.
+--
+-- **And a correction that cannot go where it belongs.** V501's comment on `settlement_runs.status` says that
+-- four of the eight states are reachable. That is no longer true - execution makes all eight reachable - but
+-- editing V501 would change the checksum of a migration every existing environment has already applied, which
+-- Flyway validates on startup. A comment is not worth a migration failure, so the correction is here, in the
+-- spec's implementation status, and in the READMEs.
+ALTER TABLE settlement_transfers ADD COLUMN rail_detail text;
+
