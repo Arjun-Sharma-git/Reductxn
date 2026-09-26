@@ -142,6 +142,30 @@
   flex-wrap: wrap;
 }
 
+/* The ask form: one field, a hint that is not an error, and an error that is not a hint. The two are styled apart
+   because they mean different things - a hint says what the control wants, a refusal says what went wrong - and a
+   reader who cannot tell them apart has to read every sentence. */
+.cycleForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-1);
+  margin-block-end: var(--rn-space-5);
+  max-inline-size: 32rem;
+}
+
+.hint {
+  margin: 0;
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-xs);
+}
+
+.refusal {
+  margin: 0;
+  color: var(--rn-danger-text);
+  font-size: var(--rn-text-sm);
+  font-weight: var(--rn-weight-medium);
+}
+
 .reject {
   background: var(--rn-surface);
   color: var(--rn-danger-text);

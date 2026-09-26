@@ -21,7 +21,7 @@ import {
 } from '../model/input';
 import { nextAttemptKey, useRecordObligation } from '../mutations';
 import { Field } from './Field';
-import { fromLocalInput, toLocalInput } from './localTime';
+import { fromLocalInput, toLocalInput } from '@/shared/lib/localTime';
 import styles from './RecordObligationForm.module.css';
 
 /**

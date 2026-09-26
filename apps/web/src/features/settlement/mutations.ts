@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
+import { groupCyclesQuery, type OpenedCycle, type OpenCycleBody } from '@/entities/cycle';
 import { groupRunsQuery, runQuery, type RecordedDecision } from '@/entities/run';
 import { request } from '@/shared/api/client';
 
@@ -29,6 +30,37 @@ export type DecisionVariables = {
   readonly memberId: string;
   readonly decision: DecisionWord;
 };
+
+/**
+ * Opening a settlement cycle: a member saying the group's books are closed at an instant.
+ *
+ * **No idempotency key, and here that is a property of the operation rather than a decision about retries.** P8 asks
+ * every state-changing operation to be idempotent, and opening a cycle is idempotent on `(group, asOf)` by
+ * construction: the pair is a unique constraint, a second request for the same instant answers `200` with the cycle
+ * that already exists, and a retry whose response was lost collides with the row the first attempt wrote rather than
+ * opening a second settlement. The instant is required by the contract for the same reason - a default of "now"
+ * would make two clicks two different cycles - so there is nothing here for a key to add.
+ *
+ * **Nothing is written optimistically.** Whether this call opened the cycle or found it, and whether a plan exists
+ * over it, are the server's answers, and a row invented in the cache would be this screen guessing at both. What the
+ * member gets instead is the answer: the cycles card re-reads the list, which is where "asked, waiting since" comes
+ * from.
+ */
+export function useOpenCycle(groupId: string) {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: (variables: OpenCycleBody) =>
+      request<OpenedCycle>('/groups/' + groupId + '/cycles', { method: 'POST', body: variables }),
+
+    onSuccess: () => {
+      // The cycles list is what changed, and only it. The group's runs cannot have changed: a plan over a cycle the
+      // worker has never seen does not exist yet, so invalidating that read would be a refetch that returns the same
+      // page (ADR 0034).
+      void client.invalidateQueries({ queryKey: groupCyclesQuery(groupId).queryKey });
+    },
+  });
+}
 
 export function useDecide(groupId: string, runId: string) {
   const client = useQueryClient();

@@ -1,4 +1,20 @@
 {
+  "cycles": {
+    "cardTitle": "Settlement cycles",
+    "cardDescription": "Close the group's books at an instant, and see what has become of every cycle the group has asked for. A plan appears on a cycle once the settlement worker has computed it.",
+    "asOf": "Close the books at",
+    "asOfHint": "The instant the cycle settles as of: everything recorded at or before it, and not already settled, is what it will settle. It is required, and it is what identifies the cycle - the same instant asked for twice is one settlement.",
+    "open": "Open a cycle",
+    "opened": "Cycle opened for {at}. A plan appears here once the worker has computed it.",
+    "alreadyComputed": "{at} was already settled. The plan over it is below.",
+    "empty": "This group has not closed its books yet. Opening a cycle is what starts a settlement.",
+    "caption": "The group's settlement cycles",
+    "closedAt": "Books closed at",
+    "askedAt": "Asked",
+    "plan": "Plan",
+    "waiting": "Waiting to be computed",
+    "openPlan": "Open the plan"
+  },
   "runs": {
     "title": "Settlement plans",
     "lede": "Every run this group has computed, newest first. A run is the plan for one group cycle: who pays whom, and what it costs. Opening one is how a member reads it before saying yes.",
