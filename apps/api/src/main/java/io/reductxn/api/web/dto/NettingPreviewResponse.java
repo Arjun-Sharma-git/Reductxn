@@ -75,8 +75,4 @@ public record NettingPreviewResponse(
             MoneyDto tax,
             String status) {
     }
-
-    /** Integer minor units plus a currency code. Never a floating-point value (P1). */
-    public record MoneyDto(long amountMinor, String currency) {
-    }
 }

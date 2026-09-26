@@ -55,6 +55,11 @@ abstract class DatabaseTest {
 
     @BeforeEach
     void resetSchema() {
+        // Postings before entries, because a posting references its entry. The order is not a formality: a
+        // truncate in the other order fails on the foreign key, which is the constraint doing its job on the
+        // fixture rather than on the code.
+        jdbc.execute("DELETE FROM postings");
+        jdbc.execute("DELETE FROM journal_entries");
         jdbc.execute("DELETE FROM obligations");
         jdbc.execute("DELETE FROM tax_rules");
 

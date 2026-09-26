@@ -25,10 +25,13 @@ import java.util.UUID;
  * module README says so.
  *
  * <p>The transaction boundary is here, which is what RULE B15 is about - no {@code @Transactional}
- * anywhere else in the module. Note that no transaction manager exists yet: it arrives with
- * {@code platform/persistence}, so this annotation currently marks the boundary rather than enforcing it.
- * It is written now because moving boundaries afterwards is a rewrite, and because the rule that keeps
- * them in one layer is checkable today.
+ * anywhere else in the module. A transaction manager does exist now that {@code platform/persistence} is
+ * wired: {@code spring-boot-starter-jooq} brings spring-jdbc with it, so Boot's
+ * {@code DataSourceTransactionManagerAutoConfiguration} supplies a {@code JdbcTransactionManager} and jOOQ's
+ * DSLContext joins the transaction rather than opening its own connection. That was not true when this
+ * comment was first written, and it matters beyond tidiness: the record-obligation use case's chain lock is
+ * held for the length of the transaction, so a boundary that did not exist would have been a lock that did
+ * not either.
  *
  * <p>Resolving tax per currency rather than once is not incidental: a rule is keyed by
  * {@code (jurisdiction, currency, effective date)} (ADR 0006), so a multicurrency cycle resolves it per
