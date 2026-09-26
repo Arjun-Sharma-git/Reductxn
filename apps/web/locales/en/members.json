@@ -1,0 +1,30 @@
+{
+  "title": "Members",
+  "lede": "Who is in this group. Every screen that names a person - a debtor, a creditor, a filter, an answer - reads this list, so a member missing here is a person those screens can only show as an identifier.",
+  "loading": "Reading the group's members...",
+  "list": {
+    "cardTitle": "The group's members",
+    "cardDescription": "Recorded membership, in the order people joined. The role is recorded rather than enforced: nothing in this build consults it yet.",
+    "caption": "Members of this group",
+    "name": "Name",
+    "role": "Role",
+    "userId": "User id",
+    "empty": "Nobody is a member yet. Record somebody below, and they can be named in a commitment."
+  },
+  "role": {
+    "admin": "Admin",
+    "member": "Member"
+  },
+  "add": {
+    "cardTitle": "Record a member",
+    "cardDescription": "Adds somebody to this group, so other screens can name them. Recording the same person twice is the same person: the group keeps one membership.",
+    "userId": "User id",
+    "userIdHint": "The person's identifier, as a uuid - for example 11111111-1111-4111-8111-111111111111. There is no directory to pick from yet, so this is the handle.",
+    "displayName": "Name",
+    "displayNameHint": "What the group calls them. There is nobody to look a name up in, so this is the name.",
+    "role": "Role",
+    "roleHint": "Recorded, not enforced: a build without identity has no admin whose word the role would weigh more than a member's.",
+    "submit": "Record the member",
+    "recorded": "{name} is a member of this group now."
+  }
+}

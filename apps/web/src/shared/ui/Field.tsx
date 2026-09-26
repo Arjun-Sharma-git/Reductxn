@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 
 import { useTranslations } from '@/shared/i18n';
 
-import type { Refusal } from '../model/input';
 import styles from './Field.module.css';
 
 /**
@@ -16,6 +15,15 @@ import styles from './Field.module.css';
  * This is a primitive rather than a component library entry: it exists because five fields on one screen need the
  * same four lines of structure, and because getting `aria-describedby` wrong once is enough to make a form
  * unusable with a screen reader.
+ *
+ * **It moved here when a second feature wanted it** (ADR 0035), which is this module's own rule: a feature's
+ * internals are private (RULE F8), so the choice was to copy it into `features/members` or to let both screens share
+ * it, and the second screen is what this barrel was waiting for. The refusal prop is now structural - `{ code }` -
+ * rather than an obligations type, so a feature can pass its own refusal value without this module depending on it.
+ *
+ * The message is looked up by code alone. A refusal may carry parameters, and this control does not render them: the
+ * catalog's sentences are written to read correctly without them, which is what makes "one code, one sentence" true
+ * across screens.
  */
 export function Field({
   id,
@@ -27,7 +35,7 @@ export function Field({
   readonly id: string;
   readonly label: string;
   readonly hint?: string;
-  readonly refusal?: Refusal | undefined;
+  readonly refusal?: { readonly code: string } | undefined;
   readonly children: ReactNode;
 }) {
   const { t } = useTranslations();

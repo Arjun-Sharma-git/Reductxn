@@ -11,6 +11,11 @@ import { request, type paths } from '@/shared/api/client';
  */
 export type Member = paths['/groups/{groupId}/members']['get']['responses']['200']['content']['application/json'][number];
 
+/** What recording a member sends. The contract's `MemberRequest`, so a field the server does not have fails typecheck. */
+export type NewMember = NonNullable<
+  paths['/groups/{groupId}/members']['post']['requestBody']
+>['content']['application/json'];
+
 export const membersQuery = (groupId: string) =>
   queryOptions({
     queryKey: ['groups', groupId, 'members'] as const,
