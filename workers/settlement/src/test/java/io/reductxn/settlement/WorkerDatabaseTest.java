@@ -1,6 +1,13 @@
 package io.reductxn.settlement;
 
+import io.reductxn.kernel.api.Result;
 import io.reductxn.settlement.port.in.ComputeRun;
+import io.reductxn.settlement.port.in.ComputedRun;
+import io.reductxn.settlement.port.in.DecideOnRun;
+import io.reductxn.settlement.port.in.ExecuteRun;
+import io.reductxn.settlement.port.in.RecordFxFunding;
+import io.reductxn.settlement.port.in.RunDecision;
+import io.reductxn.settlement.port.in.RunRequest;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +19,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * A real Postgres for the worker's tests, with the fixtures a run needs.
@@ -79,13 +88,22 @@ abstract class WorkerDatabaseTest {
     protected JdbcTemplate jdbc;
 
     /**
-     * The inbound port, not the service class.
+     * The inbound ports, not the service classes.
      *
-     * <p>Deliberate: the port is what a caller would have, so a test driving the service directly would stop
-     * being evidence about the interface anyone uses - and the class could be replaced without touching a test.
+     * <p>Deliberate: a port is what a caller would have, so a test driving a service directly would stop being
+     * evidence about the interface anyone uses - and the class could be replaced without touching a test.
      */
     @Autowired
     protected ComputeRun computeRun;
+
+    @Autowired
+    protected DecideOnRun decideOnRun;
+
+    @Autowired
+    protected RecordFxFunding recordFxFunding;
+
+    @Autowired
+    protected ExecuteRun executeRun;
 
     @BeforeEach
     void resetSchema() {
@@ -94,6 +112,8 @@ abstract class WorkerDatabaseTest {
         jdbc.execute("DELETE FROM settlement_transfers");
         jdbc.execute("DELETE FROM net_positions");
         jdbc.execute("DELETE FROM settlement_partitions");
+        jdbc.execute("DELETE FROM settlement_decisions");
+        jdbc.execute("DELETE FROM settlement_fx_fundings");
         jdbc.execute("DELETE FROM settlement_runs");
         jdbc.execute("DELETE FROM settlement_cycles");
 
@@ -189,5 +209,37 @@ abstract class WorkerDatabaseTest {
     /** How many rows a table holds, for the tests that assert nothing was written. */
     protected int countIn(String table) {
         return jdbc.queryForObject("SELECT count(*) FROM " + table, Integer.class);
+    }
+
+    /** Computes a run for the fixture group, insisting that it worked. */
+    protected ComputedRun computed(RunRequest request) {
+        return ok(computeRun.compute(request));
+    }
+
+    /** One member's answer, insisting that it was accepted. */
+    protected ComputedRun decided(UUID runId, UUID memberId, RunDecision.Decision decision) {
+        return ok(decideOnRun.decide(new RunDecision(runId, memberId, decision)));
+    }
+
+    /** The value of a call that had to succeed. */
+    protected static ComputedRun ok(Result<ComputedRun> result) {
+        assertThat(result.isOk()).as("expected success, got %s", result).isTrue();
+        return ((Result.Ok<ComputedRun>) result).value();
+    }
+
+    /**
+     * The error of a refusal that had to happen.
+     *
+     * <p>The code rather than the message, because the message is for a human and the code is the contract - and a
+     * test that pinned the prose would fail every time it was improved.
+     */
+    protected static io.reductxn.kernel.api.DomainError refusalOf(Result<?> result) {
+        assertThat(result.isFailure()).as("expected a refusal, got %s", result).isTrue();
+        return ((Result.Failure<?>) result).error();
+    }
+
+    /** The code of a refusal that had to happen. */
+    protected static String refusalCode(Result<?> result) {
+        return refusalOf(result).code();
     }
 }

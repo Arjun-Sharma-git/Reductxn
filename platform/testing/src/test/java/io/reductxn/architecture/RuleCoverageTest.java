@@ -47,8 +47,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       reads as coverage.</li>
  *   <li><strong>Each "enforced by" reference must resolve.</strong> An {@code ArchTest} field must exist
  *       <em>and carry the annotation</em>, so a rule that exists but is never evaluated is caught; a
- *       Gradle guard must be declared in {@code build-logic}. This is the part that would have caught
- *       B11 on the day it was written.</li>
+ *       Gradle guard must be declared in {@code build-logic}; and a test in another module is resolved by
+ *       reading its source for the {@code @Test} method named (see {@link #checkSourceReference} - the
+ *       module's tests are not on this module's classpath, and a behavioural rule that could not be
+ *       claimed at all was being filed as deferred instead). This is the part that would have caught B11
+ *       on the day it was written.</li>
  * </ol>
  *
  * <p><strong>Reading the specs matters as much as reading the plan.</strong> The first version of this
@@ -109,6 +112,22 @@ class RuleCoverageTest {
             Map.entry("B19", List.of("ModuleBoundaryTest#b19_no_other_domain_module_knows_about_fx")),
             Map.entry("B21", List.of(
                     "ModuleBoundaryTest#b21_planning_depends_only_on_kernel_ledger_netting_and_fx")),
+            // The settlement lifecycle rules (RULE S1-S5). Their enforcement is a test in another module, which is
+            // a form this map could not previously name at all - see checkSourceReference for why, and why reading
+            // the source is the only honest way to resolve one.
+            Map.entry("S1", List.of(
+                    "io.reductxn.settlement.QuorumTest#everyDebtorMustConfirmPersonally",
+                    "io.reductxn.settlement.ExecuteRunTest#aRunWithoutQuorumDoesNotExecute")),
+            Map.entry("S2", List.of(
+                    "io.reductxn.settlement.ExecuteRunTest#replayingAnExecutedRunAsksTheRailForNothingNew",
+                    "io.reductxn.rails.api.MockRailTest#resubmittingReturnsWhatItAlreadyHasRatherThanMovingAgain")),
+            Map.entry("S3", List.of(
+                    "io.reductxn.settlement.ExecuteRunTest#aRefusedTransferLeavesTheRunFailedAndTheOthersConfirmed")),
+            Map.entry("S4", List.of(
+                    "io.reductxn.settlement.ExecuteRunTest#aRunBlockedOnFundingDoesNotExecute",
+                    "io.reductxn.settlement.RecordFxFundingTest#aCrossCurrencyRunStaysBlockedUntilEveryCurrencyIsCovered")),
+            Map.entry("S5", List.of(
+                    "io.reductxn.settlement.ComputeRunTest#aCrossCurrencyCycleWaitsForFundingAndReportsTheRequirementPerCurrency")),
             // A principle that also has a mechanical guard: money is an integer minor unit, and no
             // floating-point type may appear in domain code.
             Map.entry("P1", List.of("build-logic#forbidFloatingPointMoney")),
@@ -127,25 +146,7 @@ class RuleCoverageTest {
             // bigger than a module, and each names the missing mechanism rather than the missing work.
             Map.entry("R1", "the fixed top-level layout. Enforceable and deliberately not enforced: the "
                     + "check would fail the build for adding a directory, and an ADR is already the "
-                    + "documented barrier. Judged to be friction without a matching benefit"),
-            Map.entry("S1", "quorum before a run executes. Needs the run lifecycle and per-member "
-                    + "confirmations, which belong to workers/settlement - no sources yet"),
-            Map.entry("S2", "idempotent execution end to end. Needs rail adapters, persisted state and "
-                    + "the Testcontainers replay test the spec itself names"),
-            Map.entry("S3", "partial application is a first-class outcome, not a rollback. Needs the run "
-                    + "state machine; a spec that says 'no silent rollback' can only be tested against "
-                    + "something that can fail midway, which means a real rail"),
-            Map.entry("S4", "the funding gate: no run while a currency's fx_clearing position is "
-                    + "non-zero and unfunded. The blocking half is now real - workers/settlement computes the "
-                    + "plan, stores the clearing position per currency and a cross-currency cycle comes out "
-                    + "awaiting_fx_funding rather than awaiting_approval, asserted in ComputeRunTest. What is "
-                    + "missing is the other side of the gate: nothing executes at all yet, so a run cannot be "
-                    + "stopped from executing, and 'funded' has no way to become true"),
-            Map.entry("S5", "the FX requirement is a reported number, never a hidden one. The requirement is "
-                    + "now stored and reported per currency, with member transfers kept apart from the "
-                    + "clearing legs - ComputeRunTest asserts both for a cross-currency cycle. The "
-                    + "'who pays whom' report a group reads is what remains, and that is apps/api's surface "
-                    + "over these rows"));
+                    + "documented barrier. Judged to be friction without a matching benefit"));
 
     /**
      * Families whose gates are not this build's to run.
@@ -233,6 +234,66 @@ class RuleCoverageTest {
                 .isEmpty();
     }
 
+    /**
+     * Resolves a reference to a test in another module by reading the source it names.
+     *
+     * <p><strong>Why reading a file rather than reflection.</strong> {@code platform/testing} sees every module's
+     * <em>published</em> classes and none of their tests, so {@code Class.forName} cannot reach
+     * {@code ExecuteRunTest} however the reference is written. The alternatives were to claim such a rule as
+     * deferred while it is enforced - which is what this map did for S1-S5, and is a lie in the direction that
+     * reads better - or to check the source. {@code SchemaOwnershipTest} already reads migration files for the same
+     * reason: some facts are about what a repository contains rather than about what a JVM can load.
+     *
+     * <p><strong>What this proves and what it does not.</strong> It proves that a test method with that name
+     * exists, carries {@code @Test}, and lives in the class the reference names - so a rule cannot be claimed as
+     * enforced by naming something that does not run. It cannot prove the test asserts what the rule says; nothing
+     * mechanical can, and the claim is a written decision either way.
+     */
+    private static String checkSourceReference(String className, String member) throws IOException {
+        String relative = className.replace('.', '/') + ".java";
+        Path source = null;
+
+        for (String container : List.of("libs", "apps", "workers", "platform")) {
+            Path containerRoot = repositoryRoot().resolve(container);
+            if (!Files.isDirectory(containerRoot)) {
+                continue;
+            }
+
+            try (var modules = Files.list(containerRoot)) {
+                for (Path module : modules.filter(Files::isDirectory).toList()) {
+                    Path candidate = module.resolve("src/test/java").resolve(relative);
+                    if (Files.isRegularFile(candidate)) {
+                        source = candidate;
+                        break;
+                    }
+                }
+            }
+
+            if (source != null) {
+                break;
+            }
+        }
+
+        if (source == null) {
+            return "no test source for " + className + " exists under any module's src/test/java, so this claim "
+                    + "points at nothing";
+        }
+
+        String text = Files.readString(source);
+        Pattern method = Pattern.compile(
+                "@Test\\b[\\s\\S]{0,300}?\\bvoid\\s+" + Pattern.quote(member) + "\\s*\\(");
+
+        if (!method.matcher(text).find()) {
+            return text.contains(member + "(")
+                    ? "the source of " + className + " has a method named '" + member + "' with no @Test, so "
+                            + "nothing runs it"
+                    : "the source of " + className + " has no test method named '" + member + "', so this claim "
+                            + "is stale";
+        }
+
+        return null;
+    }
+
     /** Null when the reference resolves, otherwise the reason it does not. */
     private static String checkReference(String reference) throws IOException {
         String[] parts = reference.split("#", 2);
@@ -245,6 +306,14 @@ class RuleCoverageTest {
             return conventions.contains("val " + parts[1])
                     ? null
                     : "no verification task named '" + parts[1] + "' is declared in build-logic";
+        }
+
+        // A reference to a test in another module, named by its fully-qualified class name. It cannot be resolved
+        // by reflection: a module's test sources are not on this module's classpath, which is precisely the
+        // boundary that made a behavioural rule's enforcement unclaimable here until now - S1 to S5 are enforced
+        // by tests in workers/settlement, and this map could not name one.
+        if (parts[0].contains(".")) {
+            return checkSourceReference(parts[0], parts[1]);
         }
 
         try {

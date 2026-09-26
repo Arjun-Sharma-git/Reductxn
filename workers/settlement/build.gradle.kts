@@ -11,8 +11,10 @@ plugins {
 // of them, so it moved down into a pure module rather than being implemented twice. The same applies to
 // `libs/booking` for the entries a run books when it executes.
 //
-// No `libs/rails` yet: nothing submits anything until execution lands, and a dependency with no call site is a
-// claim about the architecture that the compiler cannot check.
+// `libs/rails` is depended on now, because execution landed: this module is the one that submits a run's
+// transfers, so the seam to the outside world is called from here and from nowhere else. `apps/api` still
+// neither knows nor cares that a rail exists (RULE B6) - it reads a run's tables through its own read model,
+// and the money moves on the worker's side of the boundary.
 dependencies {
     implementation(platform(libs.spring.boot.bom))
 
@@ -30,6 +32,7 @@ dependencies {
     implementation(project(":libs:netting"))
     implementation(project(":libs:planning"))
     implementation(project(":libs:fx"))
+    implementation(project(":libs:rails"))
     implementation(project(":platform:persistence"))
 
     testImplementation(libs.spring.boot.starter.test)

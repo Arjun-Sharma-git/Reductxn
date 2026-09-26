@@ -456,7 +456,7 @@ application code.
 | `groups`, `group_members`, `invites` | `apps/api` - group |
 | `ledger_accounts`, `journal_entries`, `postings` | `libs/ledger` (schema per `docs/specs/ledger.md`) |
 | `obligations` | `apps/api` - obligation |
-| `settlement_cycles`, `settlement_runs`, `settlement_transfers`, `net_positions` | `workers/settlement` |
+| `settlement_cycles`, `settlement_runs`, `settlement_partitions`, `net_positions`, `settlement_transfers`, `settlement_decisions`, `settlement_fx_fundings` | `workers/settlement` - the run |
 | `tax_rules`, `tax_assessments` | `libs/netting` - tax |
 | `fx_rates`, `fx_quotes`, `currencies` | `libs/fx` (schema per `docs/specs/fx.md`) |
 | ICU message catalogs | `apps/web` - in the build artefact, never in the database |
@@ -746,7 +746,11 @@ Modularity is proven by how cheaply the system absorbs change. These recipes mus
 
 ### 10.1 Add a new payment rail
 1. Implement `PaymentRail` in `libs/rails/internal/<name>/`.
-2. Register the adapter in `apps/api/adapter/rail/`.
+2. Expose it through the factory in `libs/rails/api` (`Rails`) and register it in the deployable that executes
+   runs - `workers/settlement/bootstrap`, not `apps/api`. **This step was wrong until execution landed**: it said
+   to register the adapter in `apps/api/adapter/rail/`, which was written when `apps/api` was the only deployable.
+   Rails are called by whoever submits a run's transfers, and that is the worker (RULE B6 keeps `apps/api` from
+   knowing a rail exists at all).
 3. Add the rail to `tax_rules` (rails can differ in tax treatment).
 4. Add a WireMock contract test plus a reconciliation test.
 5. **No changes** to `libs/netting`, `apps/api/application`, or `apps/web`.
@@ -957,7 +961,7 @@ lives in a document is no longer the situation for either.
 
 ## Appendix B - Verified state
 
-**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 194 tests, none failing:
+**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 236 tests, none failing:
 
 | Suite | Tests | What it proves |
 |---|---|---|
@@ -976,6 +980,13 @@ lives in a document is no longer the situation for either.
 | `SettlementPlannerTest` | 14 | ADR 0012's worked example, the clearing split, per-currency tax, order independence, refused input |
 | `SettlementPlannerPropertyTest` | 6 | **X7** and the composition properties: zero-sum including `fx_clearing`, partition completeness, the two legs netting to the clearing position, reproducibility |
 | `ComputeRunTest` | 5 | The settlement worker's whole inbound surface, against a container: a single-currency cycle planned and left `awaiting_approval`, a cross-currency one left `awaiting_fx_funding` with the requirement reported per currency, a retry returning the same run and writing no second plan, a cycle with nothing in it refused rather than recorded as an empty run, and the plan's own transfers applied to the stored positions - which zeroes every participant in every currency (N2, per currency, read back from the rows) |
+| `QuorumTest` | 8 | RULE S1's arithmetic, without a database: a majority of the run's own participants, every net debtor personally (including a member who owes in one currency and is owed in another), the clearing account counted as a participant and never as a member, a stranger's approval shown and not counted, and a stable report order |
+| `FundingTest` | 6 | RULE S4's arithmetic, without a database: partial arrivals summing, each currency covered on its own, a surplus covering rather than being carried into another currency, and a funding nothing was waiting for reported rather than dropped |
+| `DecideOnRunTest` | 8 | Quorum over a container: the members taken from the run's own plan, a majority that excludes the debtor who is paying being refused, a non-participant and the clearing account refused, a second answer refused, and a rejection stored with who made it |
+| `RecordFxFundingTest` | 9 | The escaping half of `awaiting_fx_funding`: a cross-currency run blocked until *every* currency is covered, partial arrivals recorded with the shortfall reported, over-funding recorded, a currency the plan never asked for refused, and a retried funding recorded once |
+| `ExecuteRunTest` | 11 | RULES S1-S4 against a container and a rail the test controls: nothing reaches the rail without quorum or funding, an approved and funded run confirms every transfer exactly once, a replay asks the rail for nothing new, a refused transfer fails the run while the confirmed ones stay confirmed, a rail that has not answered leaves the run `executing` and is *polled* rather than re-submitted, a rail that cannot be reached leaves the transfer `authorized`, a currency the rail cannot settle is refused before anything moves, a rejected run never executes, and a cycle that nets to nothing is `done` without a movement |
+| `MockRailTest` | 5 | The only rail this build has: what it settles, that it confirms and returns the caller's reference, that a re-submission returns what it already holds (RULE S2 at the rail), and that an unknown reference or an unsupported currency is answered rather than ignored |
+
 | `ReductxnApplicationTest` | 1 | That the API's context starts against a container with every owning module's migration applied - `apps/api`'s obligations, `libs/ledger`'s entries and postings, `libs/fx`'s currencies, rates and quotes, `libs/netting`'s tax rules - which is the arrangement most likely to break silently, since a migration that never ran leaves a schema that looks migrated |
 | `MigrationsConfigurationTest` | 2 | That the migration guard refuses to start when Flyway finds nothing, and delegates to migrate when it finds the fixture - against a real Postgres, in a schema of its own |
 | `NettingPreviewApiTest` | 5 | The contract's preview through every layer, over rows written with SQL and read back through jOOQ: the single-currency shape, a multicurrency group reported as partitions rather than collapsed into one, an empty plan, framework errors as problem+json, and `asOf` meaning "open at that instant" rather than "created before it" |
@@ -1037,32 +1048,37 @@ change, so it is stated explicitly:
 | `platform/persistence` | - | **Implemented and tested** | 2 tests green. jOOQ and Flyway wiring, PgBouncer-compatible JDBC settings, and a guard that refuses to start when Flyway finds no migrations |
 | `libs/booking` | ADR 0012, 0013; L7, L9; RULE B6, B22 | **Implemented, tested, and called** | 7 tests green, one of them a 300-case property. Both shapes book correctly, L9 is asserted with the verifier that will run against the stored entries, and L7's accounting half moved out of the deferral map. It is no longer an abstraction without a caller: `POST /obligations` books through it, so the decision this module contains is the decision the ledger now records |
 | `fx_clearing` postings | ADR 0012 | **Implemented** | A cross-currency commitment books the linked pair: the debtor's side in the debt currency and the creditor's side in the settlement currency, with the clearing account as counterparty of each. The tests read the rows back and assert the clearing account holds the owed amount in one currency and owes the converted amount in the other - which is L8's measurement, and the only statement the ledger can make about a pair without a rate (RULE B19) |
-| The run: computing a cycle's plan, and the funding state | ADR 0012; RULE S4 | **Implemented for computing; nothing executes** | `workers/settlement` has sources, a schema (`V501`, five tables) and 5 tests against a container. It opens a run per `(group, as-of)`, computes the plan through `libs/planning`, and records it as partitions, net positions and transfers with their RULE S2 rail references - then leaves the run `awaiting_approval`, or `awaiting_fx_funding` when any currency's `fx_clearing` position is non-zero. Quorum, execution, rail submission and the funding gate's other side are not there: nothing executes, so no run can be stopped from executing and "funded" has no way to become true. Rate ingestion is still the operational gap it was |
+| `libs/rails` | ADR 0001; RULE B4, S2 | **Implemented: one adapter, tested** | 5 tests green. The port and `MockRail`, reached only through `Rails.mock()` (RULE B10 keeps the implementation internal). The mock confirms what it accepts, settles the three currencies the catalogue seeds, refuses anything else terminally, and answers a re-submission with the state it already holds - which is RULE S2's idempotency at the rail rather than only in the worker |
+| The run: quorum, funding, and execution on a rail | ADR 0012, 0016; RULE S1-S4 | **Implemented and executed** | `workers/settlement` has sources, a schema (`V501`-`V503`, seven tables) and 47 tests against a container. It opens a run per `(group, as-of)`, computes the plan through `libs/planning`, records it, gates it on quorum (S1: a majority of the run's own participants, and every net debtor personally) and on funding (S4: the exact external requirement per currency, recorded as it arrives), and submits the transfers to a rail - confirming them, or failing the run partially with the rail's own reason when something is refused (S3). All eight run states are reachable. What is still missing: nothing schedules a computation, retryable failures are retried by re-running the pass rather than by backoff and a circuit breaker, no sweep resolves transfers left in flight, and **nothing is posted to the ledger when a run executes** - the rail moves the money and the run records it, but the obligations the cycle settled are not yet discharged, which is the next slice and a boundary question rather than an oversight |
 | Localization | ADR 0014 | **Not implemented** | No catalogs, no `shared/i18n`, no locale resolution |
 | RULEs F10-F12 | ADR 0014 | **Not enforced** | Listed in section 8 as gates, not yet written. B20 was in this row and is enforced now |
 
-So the honest position has moved, and it moved once: **this codebase writes to its ledger now, for the first time,
-and it writes one shape.** `POST /obligations` records a commitment, books the entry that commitment produces,
-and stores both in one transaction - and the tests do not inspect the result, they verify it: the rows are
-rebuilt as ledger types and handed to `EntryChain` and `Balances`, the verifiers an offline job will run. That
-is the wire from the decision to the record, and the decision is now one `libs/booking` makes rather than one
-no code calls.
+So the honest position has moved again, and this time the product does something no test can undo: **a run
+executes, and money moves.** `workers/settlement` now carries a cycle from a computed plan through quorum
+(RULE S1), the external-funding requirement (RULE S4) and a rail submission that records what the rail said - and
+the tests drive it through the inbound ports against a real Postgres and a rail they control, asking the rail
+itself whether it was asked twice rather than trusting the worker's own rows to say so.
 
-What is deliberately narrower than "recording works":
+What is deliberately narrower than "settlement works":
 
-- **No run that executes.** The worker now *computes* a run and records its plan, and a cross-currency cycle
-  comes out blocked on funding rather than on approval. Nothing settles: there is no quorum, no rail adapter and
-  no way for a currency's requirement to become funded, so `executing`, `done`, `rejected` and `failed` are
-  vocabulary rather than reachable states. Nothing schedules a computation either - the tests call the use case,
-  and a scheduler or an operator's command is a later slice.
-- **No rate ingestion.** The tables exist, the provider reads them and the record path writes quotes, but
-  nothing writes a *rate*. A deployment with no loader answers every cross-currency request `503`, which is the
-  fail-closed behaviour the contract describes.
-- **No funding gate.** A run gated on its funding needs the run.
+- **Nothing is posted to the ledger.** A run that reaches `done` has had its transfers confirmed by the rail, and
+  the ledger still holds the obligations that cycle netted. That is the next slice, and it is a boundary question
+  rather than an omission: discharging an obligation means writing in `apps/api`'s tables or publishing an event,
+  and neither the worker writing another module's rows nor the API writing the worker's is allowed (RULE B6, B17).
+  Until it is decided, L8's end-of-cycle claim cannot be asserted at all - `PropertyCoverageTest` names that.
+- **Nothing schedules anything.** The tests call the use cases; a scheduler or an operator's command is a later
+  slice, and the honest form of that sentence is that a service nothing calls is indistinguishable from a
+  service that works.
+- **Retryability is not classified.** The rail port returns a `Result`, so a failure that could not reach the
+  rail leaves a transfer `authorized` and the run `executing`, and re-running the pass retries it - but the
+  spec's backoff, circuit breaker and reconciliation sweep are not there, and a `submitted` transfer waits for a
+  later pass rather than for a job that resolves it.
+- **No rate ingestion**, unchanged: the tables exist, nothing writes a rate, and every cross-currency request
+  fails closed.
 - **Localization is still Phase 1 scaffolding**, before the first screen exists to retrofit.
 
-The order that follows from that: quorum and execution on a rail - which is what makes the funding gate a gate
-rather than a state - then rate ingestion as an operational path, then the client.
+The order that follows: the settlement posting (discharging what a settled cycle settled), then rate ingestion as
+an operational path, then a scheduler, then the client.
 
 
 Toolchain constraints discovered by actually running the build. All are now pinned with reasons:
@@ -1095,6 +1111,11 @@ Toolchain constraints discovered by actually running the build. All are now pinn
 | **A fail-closed path needs a status the contract may not have** | The contract promised `settleInCurrency` would "fail closed if no fresh rate is available (code `fx.rate_stale`)" and listed `422` as the only failure. `fx.rate_unavailable` is not a 422: the request is answerable, the server just cannot answer it yet, and a client that retried a 422 forever or gave up on a 503 would be wrong in opposite directions. So the contract was edited first (RULE C1) to add a `503` with the two codes distinguished, and the code enforces the distinction in one map. `HttpStatus.UNPROCESSABLE_ENTITY` also turned out to be deprecated in Spring 7 in favour of RFC 9110's `UNPROCESSABLE_CONTENT` - the same 422 on the wire. |
 | **Two written rules disagreed about what a code is namespaced by** | The contract says a code's first segment names "the owning domain module" and its examples are `ledger.*`, `fx.*`, `settlement.*`, which reads like `obligation.*` for an obligation. `DomainErrorCodeTest` derives the namespace from the package's module segment instead, and every class in `apps/api` sits in `io.reductxn.api..`. The rules agree for the libraries and diverge for the one deployable that owns several domains, so the codes are `api.obligation_*` - the mechanical rule won because it is the one that runs, and the divergence is recorded where the constants are. The same guard then reshaped the design: it requires one `public static final String CODE` per `DomainError`, so a single record holding four codes - the first shape - could not be enumerated for the parity gate, and became one type per code. |
 | **A read model is per reader, and that is a real cost** | The worker needs the group's open obligations and the tax rule in force, and it may not call `apps/api` (RULE B6), so it reads both tables with its own projection - including a copy of the tax-rule read model, of which about a hundred and fifty lines are the rule-shape mapping rather than the query. Stated rather than glossed: this is what a read model *is*, the two are projections of one table rather than two models of one concept, and the guards that matter are repeated deliberately so that drift shows up as both of them throwing on the same input. If a third reader appears, that mapping is the thing to extract into a module of its own - which section 12 says needs an ADR, which is why it was copied today rather than invented. |
+| **The natural transaction boundary is the wrong one, and only for the one use case that talks to the outside world** | Every use case in this repository is `@Transactional` and should be. `ExecuteRunService` must not be: the rail is outside the database, so one transaction would hold a connection open across every submission, and - the part that matters - a rollback after a transfer confirmed would erase the only record that money moved. The fix is a `TransactionTemplate` around each individual write, which is the same thing the spec asks for in a different vocabulary ("every state transition is persisted before the next call is made"). What makes this worth recording is that the exception is invisible in review: the annotated version is shorter, reads more consistently, and is correct until the first partial failure. |
+| **A doc and its code can disagree while both read as correct** | `FundingNotRequired` was documented as covering "needs it and has it" - a replay of a completed funding - and the code refused only currencies the plan never required, recording an over-funding instead. The docs were considered rather than sloppy (both were written to be read), and the disagreement was only visible in the failure of a test that asserted the documented behaviour. The resolution was to keep the code and fix the doc, because recording money that arrived is the more honest behaviour; the retry case is handled by the reference being the funding's identity. A second instance in the same slice: a comment claimed `Quorum`'s sets were sorted "so the report is stable", and they were built with `Set.copyOf`, which has no iteration order at all. Two claims written before the mechanism, in one slice, is the pattern rather than the incident. |
+| **A shared test double leaks, and the failures land in the wrong tests** | The rail used by `ExecuteRunTest` is a singleton Spring bean, which is what lets a test assert "the rail saw this once". The cost appeared immediately: the test that restricted the rail to INR so an unsupported currency could be refused left it restricted, and tests running afterwards failed with `RailCannotSettle` for a currency they had every right to settle. The reported failure named the wrong test, which is the part worth remembering - a fixture that carries state across tests produces failures that read as product bugs in code nobody touched. Fixed by resetting the double rather than by ordering the tests. |
+| **A rule enforced by a test in another module could not be claimed at all** | `RuleCoverageTest` resolves each "enforced by" reference by reflection, and reflection cannot see another module's test classes - they are not on its classpath. So there was no way to write "S1 is enforced by `ExecuteRunTest`", and the map filed S1-S5 as *deferred* while the code enforced them: the failure this whole file exists to prevent, committed by the file itself, in the direction that reads better. Behavioural rules simply could not be claimed. The map now resolves a fully-qualified test name by reading the source it names and requiring an `@Test` method with that name, which is the same technique `SchemaOwnershipTest` uses for migrations - some facts are about a repository rather than about a JVM. Verified by sabotage: naming a method that does not exist fails the build. |
+
 | **A test's fixture could not see the migration it needed** | The worker's tests need `obligations` to exist, and that table's migration lives in `apps/api`, which the worker may not depend on. In a deployment this is a non-issue - two deployables, one schema, each jar bringing its own migrations - but in the worker's test container only its own classpath's migrations ran, so the table was missing. The fix keeps the boundary: the test points Flyway at the API's migration *file* rather than depending on the module, which is exactly what a deployment has without the dependency. |
 | **A rule and a README disagreed about where an adapter lives** | `libs/fx`'s README and its port both said rate adapters live in `apps/api/adapter/rate`, and RULE B16 - which keeps every jOOQ type inside `adapter/persistence` so no row type can escape - makes that impossible for an adapter that reads a table. The build said so the moment the provider was written, and the enforced rule won: the adapter moved and both sentences were corrected. Worth recording because the prose had been there longer and read as authoritative; the difference is that one of them runs. |
 | **An unavailable rate and a stale one are different answers, and the port's wording hid it** | `FxRateProvider` asks for "the most recent *usable* rate", and a provider that honoured that literally could never produce `fx.rate_stale` - a stale rate would simply not be returned, and the caller would see the same absence as a pair nobody had ever quoted. Those two need opposite client behaviour (retry later, or do not bother), and the contract gives them different statuses for that reason. So the adapter returns the newest rate *at or before the instant and judges it*: expired is `StaleRateException`, absent is `UnavailableRateException`. That reading of the port is stated in the adapter, because it is a reading rather than the port's own words. |
@@ -1146,11 +1167,14 @@ now `ledger.currency_mismatch`, because the convention that four `fx.*` codes ha
 that the namespace is the owning module, and two spellings of one error is how a client catalog grows a
 key nobody can find.
 
-**Not yet verified:** `apps/api`, `workers/settlement`, `apps/web` and the `platform/*` modules have no
-sources. `apps/api`, `workers/settlement`, `platform/observability`, `platform/persistence` and
-`platform/security` are already declared in `settings.gradle.kts`, so they are real (empty) Gradle
-projects and a module boundary rule already covers them - they simply contain nothing yet. This
-paragraph previously said they were not yet declared, which was wrong. Those are Phase 1 work.
+**Verified how:** `./gradlew clean build` from a fresh clone, which is the check that previously caught a source
+file `.gitignore` was excluding. `apps/api`, `workers/settlement`, `libs/rails` and `platform/persistence` all have
+sources and tests now, and every module declared in `settings.gradle.kts` is a real Gradle project covered by the
+boundary rules. The modules with no code are the ones whose phase has not arrived: `apps/web` (Phase 1, and 0%),
+`platform/security` and `platform/observability` (Phase 3), and `infra/*` beyond the compose stack.
+
+This paragraph used to say that `apps/api` and `workers/settlement` "have no sources" and that those were Phase 1
+work, which had been untrue for several slices - a stale claim in the document that exists to say what is true.
 
 
 *End of master plan. Changes to this document follow section 12.*

@@ -49,4 +49,15 @@ public record SettlementRun(
     public boolean requiresExternalFunding() {
         return status == RunStatus.AWAITING_FX_FUNDING;
     }
+
+    /**
+     * The same run, in another state.
+     *
+     * <p>A copy rather than a rebuilt record, so a status change cannot quietly alter when the run was computed
+     * or which cycle it belongs to. The use case moves a run between states; it does not get to reconstruct one.
+     */
+    public SettlementRun withStatus(RunStatus newStatus) {
+        Objects.requireNonNull(newStatus, "newStatus");
+        return new SettlementRun(id, groupId, cycleId, newStatus, asOf, computedAt, createdAt);
+    }
 }
