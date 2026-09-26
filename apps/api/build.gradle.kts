@@ -19,6 +19,8 @@ dependencies {
     implementation(project(":libs:ledger"))
     implementation(project(":libs:netting"))
     implementation(project(":libs:planning"))
+    implementation(project(":platform:persistence"))
 
     testImplementation(libs.spring.boot.starter.test)
+    testImplementation(libs.testcontainers.postgresql)
 }
