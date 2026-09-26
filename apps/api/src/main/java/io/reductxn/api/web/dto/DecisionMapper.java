@@ -1,21 +1,28 @@
 package io.reductxn.api.web.dto;
 
-import io.reductxn.api.port.in.NewApproval;
-import io.reductxn.api.port.in.RecordedApproval;
+import io.reductxn.api.port.in.NewDecision;
+import io.reductxn.api.port.in.RecordedDecision;
 
 import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Between the contract's shapes and the ports' types, for the approval operation.
+ * Between the contract's shapes and the ports' types, for the decision operation.
  *
  * <p>The only class that knows both, as with the other two mappers in this package: the use case speaks
- * {@link NewApproval} and {@link RecordedApproval}, the wire speaks {@link ApproveRunRequest} and
- * {@link ApprovalResponse}.
+ * {@link NewDecision} and {@link RecordedDecision}, the wire speaks {@link DecisionRequest} and
+ * {@link DecisionResponse}.
+ *
+ * <p>This is also where a request that does not say which answer it means becomes one, which is a property of the
+ * wire format rather than of the use case: absent means approve, because approval is the common answer and because
+ * the request that existed before refusals did has to keep meaning what it meant.
  */
-public final class ApprovalMapper {
+public final class DecisionMapper {
 
-    private ApprovalMapper() {
+    /** The answer a request means when it does not say. */
+    private static final String APPROVE = "approve";
+
+    private DecisionMapper() {
     }
 
     /**
@@ -25,11 +32,14 @@ public final class ApprovalMapper {
      *            for an answer, and rightly: "when did you answer" is the moment the server recorded it, and a
      *            client-supplied instant would be a claim about a member's intent that nobody could check
      */
-    public static NewApproval toCommand(UUID runId, ApproveRunRequest request, Instant now) {
-        return new NewApproval(runId, request.memberId(), now);
+    public static NewDecision toCommand(UUID runId, DecisionRequest request, Instant now) {
+        String answer = request.decision() == null ? APPROVE : request.decision();
+
+        return new NewDecision(runId, request.memberId(), answer, now);
     }
 
-    public static ApprovalResponse toResponse(RecordedApproval recorded) {
-        return new ApprovalResponse(recorded.runId(), recorded.memberId(), recorded.recordedAt());
+    public static DecisionResponse toResponse(RecordedDecision recorded) {
+        return new DecisionResponse(recorded.runId(), recorded.memberId(), recorded.decision(),
+                recorded.recordedAt());
     }
 }

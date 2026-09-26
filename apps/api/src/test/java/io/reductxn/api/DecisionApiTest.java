@@ -20,22 +20,27 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * A member approving a run, through every layer, against a real database.
+ * A member answering a run, through every layer, against a real database - either answer.
  *
  * <p><strong>This test's real subject is a row this module does not own.</strong> {@code apps/api} writes into
  * {@code workers/settlement}'s decision rows because the member's surface is here and the run there, with no
  * dependency between the two deployables and no broker in the build (ADR 0020). So the assertions are about the
- * <em>shape</em> of what was written - the run, the member, the word {@code 'approve'}, the instant - because that
- * row is the whole of what crosses. {@code workers/settlement}'s {@code RecordedApprovalsTest} writes the same row
- * with the same SQL and checks that the run's arithmetic judges it, and between them a change to that table fails a
- * test rather than a deployment.
+ * <em>shape</em> of what was written - the run, the member, the word, the instant - because that row is the whole of
+ * what crosses. {@code workers/settlement}'s {@code RecordedDecisionsTest} writes the same rows with the same SQL and
+ * checks that the run's arithmetic judges them: an approval counts toward quorum, and a refusal ends the run. Between
+ * them a change to that table fails a test rather than a deployment.
+ *
+ * <p><strong>Both words are tested, and the second one is the interesting half.</strong> A refusal is the answer
+ * whose consequence is terminal, so its crossing is asserted twice: here that the row says {@code 'reject'} and that
+ * this module wrote <em>no status</em> - the run's lifecycle is not this deployable's to move - and in the worker
+ * that the run ends on its next look.
  *
  * <p>A run exists here as a fixture rather than as a settlement: written with SQL, because this module cannot run
  * one and may not call the module that does (RULE B6) - the arrangement the preview's read model already uses for
  * the run it excludes.
  */
 @SpringBootTest
-class ApproveRunApiTest extends DatabaseTest {
+class DecisionApiTest extends DatabaseTest {
 
     private static final UUID GROUP = new UUID(0L, 7L);
     private static final UUID ALICE = new UUID(0L, 70L);
@@ -61,7 +66,7 @@ class ApproveRunApiTest extends DatabaseTest {
         UUID runId = awaitingApprovalRun();
         Instant before = Instant.now();
 
-        approve(runId, ALICE)
+        answer(runId, ALICE)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.runId").value(runId.toString()))
                 .andExpect(jsonPath("$.memberId").value(ALICE.toString()));
@@ -88,11 +93,11 @@ class ApproveRunApiTest extends DatabaseTest {
     void theSameMemberAnsweringTwiceIsRefusedRatherThanOverwritten() throws Exception {
         UUID runId = awaitingApprovalRun();
 
-        approve(runId, ALICE).andExpect(status().isOk());
+        answer(runId, ALICE).andExpect(status().isOk());
 
-        approve(runId, ALICE)
+        answer(runId, ALICE)
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("api.approval_already_answered"));
+                .andExpect(jsonPath("$.code").value("api.decision_already_answered"));
 
         assertThat(countAnswersFor(runId))
                 .as("still one answer: a decision is final, and the primary key is what makes that true rather "
@@ -104,8 +109,8 @@ class ApproveRunApiTest extends DatabaseTest {
     void twoMembersEachAnswerOnce() throws Exception {
         UUID runId = awaitingApprovalRun();
 
-        approve(runId, ALICE).andExpect(status().isOk());
-        approve(runId, BORIS).andExpect(status().isOk());
+        answer(runId, ALICE).andExpect(status().isOk());
+        answer(runId, BORIS).andExpect(status().isOk());
 
         assertThat(countAnswersFor(runId))
                 .as("one row per member, which is what a quorum counts")
@@ -116,7 +121,7 @@ class ApproveRunApiTest extends DatabaseTest {
     void aRunThatDoesNotExistIsNotFoundRatherThanAnswered() throws Exception {
         UUID unknown = UUID.randomUUID();
 
-        approve(unknown, ALICE)
+        answer(unknown, ALICE)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("api.no_such_run"));
 
@@ -127,9 +132,9 @@ class ApproveRunApiTest extends DatabaseTest {
     void anAnswerTheRunCannotHoldIsRefusedByItsOwnRows() throws Exception {
         UUID runId = awaitingApprovalRun();
 
-        approve(runId, FX_CLEARING)
+        answer(runId, FX_CLEARING)
                 .andExpect(status().isUnprocessableContent())
-                .andExpect(jsonPath("$.code").value("api.approval_not_acceptable"));
+                .andExpect(jsonPath("$.code").value("api.decision_not_acceptable"));
 
         assertThat(countAnswersFor(runId))
                 .as("the clearing account is a participant in the run's arithmetic and not a member of it, so the "
@@ -139,24 +144,77 @@ class ApproveRunApiTest extends DatabaseTest {
     }
 
     @Test
+    void aMemberRefusesAndTheRunCanReadTheRefusal() throws Exception {
+        UUID runId = awaitingApprovalRun();
+
+        answerWith(runId, ALICE, "reject")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decision").value("reject"));
+
+        var answer = jdbc.queryForMap(
+                "SELECT decision FROM settlement_decisions WHERE member_id = ?", ALICE);
+
+        assertThat(answer.get("decision"))
+                .as("the second word crosses the same boundary as the first. The worker's RecordedDecisionsTest "
+                        + "writes this row itself and watches the run end, so the pair of them pin the crossing from "
+                        + "both sides - and neither deployable has a copy of the vocabulary the other uses")
+                .isEqualTo("reject");
+
+        assertThat(jdbc.queryForObject("SELECT status FROM settlement_runs WHERE id = ?", String.class, runId))
+                .as("and this module wrote no status. The run's lifecycle is the worker's (ADR 0020), so a refusal "
+                        + "recorded here leaves the run waiting until the worker's next look ends it - which is the "
+                        + "worker's test to assert. If this ever fails, the API has started driving a state machine "
+                        + "it does not own")
+                .isEqualTo("awaiting_approval");
+    }
+
+    @Test
+    void anAnswerThatIsNotInTheRunsVocabularyIsRefusedByItsOwnRows() throws Exception {
+        UUID runId = awaitingApprovalRun();
+
+        answerWith(runId, ALICE, "maybe")
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.code").value("api.decision_not_acceptable"));
+
+        assertThat(countAnswersFor(runId))
+                .as("the list of answers lives in the migration's check constraint rather than in a Java enum, so "
+                        + "this module has nothing to keep in step with it - and a word the run does not know is a "
+                        + "coded 422 rather than a 500")
+                .isZero();
+    }
+
+    @Test
     void aRequestWithoutAMemberOrWithAnIdThatIsNotAnId() throws Exception {
         UUID runId = awaitingApprovalRun();
 
-        mvc.perform(post("/v1/runs/{runId}/approve", runId).contentType(MediaType.APPLICATION_JSON).content("{}"))
+        mvc.perform(post("/v1/runs/{runId}/decisions", runId).contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("api.request_incomplete"));
 
-        mvc.perform(post("/v1/runs/{runId}/approve", "not-a-uuid")
+        mvc.perform(post("/v1/runs/{runId}/decisions", "not-a-uuid")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"memberId\":\"" + ALICE + "\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("api.request_incomplete"));
     }
 
-    private ResultActions approve(UUID runId, UUID memberId) throws Exception {
-        return mvc.perform(post("/v1/runs/{runId}/approve", runId)
+    private ResultActions answer(UUID runId, UUID memberId) throws Exception {
+        return mvc.perform(post("/v1/runs/{runId}/decisions", runId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"memberId\":\"" + memberId + "\"}"));
+    }
+
+    /**
+     * An answer that says which one it is.
+     *
+     * <p>Separate from {@link #answer} rather than a parameter on it, because the request that omits the field is a
+     * case worth testing on its own: absent means approve, which is what the operation meant before refusals were
+     * expressible.
+     */
+    private ResultActions answerWith(UUID runId, UUID memberId, String decision) throws Exception {
+        return mvc.perform(post("/v1/runs/{runId}/decisions", runId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"memberId\":\"" + memberId + "\",\"decision\":\"" + decision + "\"}"));
     }
 
     private int countAnswersFor(UUID runId) {

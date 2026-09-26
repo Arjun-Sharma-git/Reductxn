@@ -25,11 +25,12 @@ import java.util.UUID;
  * @param memberId   the member the client says is answering
  * @param recordedAt the instant the answer was recorded, read from the clock at the boundary
  */
-public record NewApproval(UUID runId, UUID memberId, Instant recordedAt) {
+public record NewDecision(UUID runId, UUID memberId, String decision, Instant recordedAt) {
 
-    public NewApproval {
+    public NewDecision {
         Objects.requireNonNull(runId, "runId");
         Objects.requireNonNull(memberId, "memberId");
+        Objects.requireNonNull(decision, "decision");
         Objects.requireNonNull(recordedAt, "recordedAt");
     }
 }

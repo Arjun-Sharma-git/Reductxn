@@ -22,7 +22,7 @@ import io.reductxn.kernel.api.Result;
  * <p>A {@link Result} rather than an exception, for the module's usual reason: these are failures a client can
  * act on, and the kernel keeps expected failures as values.
  */
-public interface ApproveRun {
+public interface RecordDecision {
 
     /**
      * Records the answer.
@@ -34,5 +34,5 @@ public interface ApproveRun {
      *
      * @return the answer as recorded, or the reason it was not
      */
-    Result<RecordedApproval> approve(NewApproval request);
+    Result<RecordedDecision> record(NewDecision decision);
 }

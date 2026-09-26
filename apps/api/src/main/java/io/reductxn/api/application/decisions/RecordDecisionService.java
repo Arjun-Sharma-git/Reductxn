@@ -1,11 +1,11 @@
-package io.reductxn.api.application.approvals;
+package io.reductxn.api.application.decisions;
 
-import io.reductxn.api.port.in.ApprovalRefusals;
+import io.reductxn.api.port.in.DecisionRefusals;
 import io.reductxn.api.port.in.RunRefusals;
-import io.reductxn.api.port.in.ApproveRun;
-import io.reductxn.api.port.in.NewApproval;
-import io.reductxn.api.port.in.RecordedApproval;
-import io.reductxn.api.port.out.Approvals;
+import io.reductxn.api.port.in.RecordDecision;
+import io.reductxn.api.port.in.NewDecision;
+import io.reductxn.api.port.in.RecordedDecision;
+import io.reductxn.api.port.out.Decisions;
 import io.reductxn.kernel.api.Result;
 
 import org.springframework.stereotype.Service;
@@ -36,32 +36,33 @@ import java.util.UUID;
  * its own callers.
  */
 @Service
-public class ApproveRunService implements ApproveRun {
+public class RecordDecisionService implements RecordDecision {
 
-    private final Approvals approvals;
+    private final Decisions decisions;
 
-    public ApproveRunService(Approvals approvals) {
-        this.approvals = Objects.requireNonNull(approvals, "approvals");
+    public RecordDecisionService(Decisions decisions) {
+        this.decisions = Objects.requireNonNull(decisions, "decisions");
     }
 
     @Override
     @Transactional
-    public Result<RecordedApproval> approve(NewApproval request) {
-        Objects.requireNonNull(request, "request");
+    public Result<RecordedDecision> record(NewDecision decision) {
+        Objects.requireNonNull(decision, "decision");
 
-        UUID runId = request.runId();
-        UUID memberId = request.memberId();
+        UUID runId = decision.runId();
+        UUID memberId = decision.memberId();
 
-        if (!approvals.hasRun(runId)) {
+        if (!decisions.hasRun(runId)) {
             return Result.fail(new RunRefusals.NoSuchRun(runId));
         }
 
-        Approvals.Written written = approvals.record(request);
+        Decisions.Written written = decisions.record(decision);
 
         return switch (written) {
-            case RECORDED -> Result.ok(new RecordedApproval(runId, memberId, request.recordedAt()));
-            case ALREADY_ANSWERED -> Result.fail(new ApprovalRefusals.AlreadyAnswered(runId, memberId));
-            case REFUSED_BY_THE_RUN -> Result.fail(new ApprovalRefusals.NotAcceptable(runId, memberId,
+            case RECORDED -> Result.ok(new RecordedDecision(runId, memberId, decision.decision(),
+                    decision.recordedAt()));
+            case ALREADY_ANSWERED -> Result.fail(new DecisionRefusals.AlreadyAnswered(runId, memberId));
+            case REFUSED_BY_THE_RUN -> Result.fail(new DecisionRefusals.NotAcceptable(runId, memberId,
                     "the run's own rows refused it"));
         };
     }

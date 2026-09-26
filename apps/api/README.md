@@ -54,14 +54,14 @@ belong to `libs/ledger` (`V301`), `currencies`, `fx_rates` and `fx_quotes` to `l
 and owns none.
 
 **The boundary crosses both ways now.** The preview reads `workers/settlement`'s tables as a projection, and
-`POST /v1/runs/{runId}/approve` *writes* into one of them: a member's answer goes into `settlement_decisions`,
+`POST /v1/runs/{runId}/decisions` *writes* into one of them: a member's answer goes into `settlement_decisions`,
 because the member's surface is here and the run there, the two deployables never depend on each other (RULE B6)
 and there is no broker in this build. What makes that safe is not care but design - quorum is a pure function over
 the run's own rows (ADR 0016), so an answer from a member the run does not concern counts for nothing whichever
 deployable wrote it. ADR 0020 records the decision, the alternatives and what it defers.
 
 The crossing is pinned by two tests rather than by a shared type, since no type can be shared across RULE B6:
-`ApproveRunApiTest` here, and `RecordedApprovalsTest` in the worker, which writes the same row with the same SQL
+`DecisionApiTest` here, and `RecordedDecisionsTest` in the worker, which writes the same row with the same SQL
 and proves the run's arithmetic judges it. Those migrations are not on this module's classpath, so this module's
 *tests* take them by filesystem path; a deployment needs no such arrangement, because whichever deployable starts
 first applies every migration to the one schema.
@@ -85,10 +85,12 @@ Identity, groups, and the rest of the settlement surface. An obligation's `group
 `groups` does not exist yet, and a cross-currency obligation cannot be stored because the `obligations` table has no
 quote columns - both are stated in the migrations rather than left to be noticed.
 
-`POST /v1/runs/{runId}/approve` records a member's approval and nothing here can reject one: a rejection ends the
-run, that transition belongs to `workers/settlement`, and it needs a consumer over there (ADR 0020 says which one and
-why). Nothing here computes a run either - `POST /cycles/{cycleId}/runs` and `/runs/{runId}/execute` are the
-operator's triggers, and the worker's driver performs both.
+`POST /v1/runs/{runId}/decisions` records a member's answer, approval or refusal. A refusal ends the run, and the
+end is the worker's to write: this records the row, and `workers/settlement` writes `rejected` on its next look at
+the run (ADR 0022 says why the outcome lands there rather than here or in the driver). A test asserts that no status
+is written here, so the boundary is a failing test rather than a comment. Nothing here computes a run either -
+`POST /cycles/{cycleId}/runs` and `/runs/{runId}/execute` are the operator's triggers, and the worker's driver
+performs both.
 
 The write path exists: `POST /v1/obligations` records a commitment and books the entry it produces, in one
 transaction - one entry for an ordinary commitment, a linked pair through `fx_clearing` for one whose creditor

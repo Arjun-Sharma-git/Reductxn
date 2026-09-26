@@ -8,7 +8,7 @@ import java.util.UUID;
 /**
  * The run's expected failures, as values: the two a caller can hit before any use case has an opinion.
  *
- * <p><strong>Why these two live here rather than in {@link ApprovalRefusals}.</strong> They were written for the
+ * <p><strong>Why these two live here rather than in {@link DecisionRefusals}.</strong> They were written for the
  * approval endpoint, and the second caller showed that neither is about approving: a run that does not exist is a
  * run that cannot be read either, and a request missing a field is malformed whatever it was asking for. A code is
  * contract surface and its identity is the *condition* (RULE B20), so two codes for "no such run" - one per endpoint

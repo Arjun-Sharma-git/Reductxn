@@ -1,7 +1,7 @@
 package io.reductxn.api.adapter.persistence;
 
-import io.reductxn.api.port.in.NewApproval;
-import io.reductxn.api.port.out.Approvals;
+import io.reductxn.api.port.in.NewDecision;
+import io.reductxn.api.port.out.Decisions;
 
 import org.jooq.DSLContext;
 import org.jooq.Field;
@@ -24,13 +24,13 @@ import java.util.UUID;
  * <p><strong>Another module's table, and the two things this class owes it: the shape, and the truth about
  * refusals.</strong> The columns are {@code workers/settlement}'s ({@code V502}). No jOOQ type leaves this package
  * (RULE B16), so the row is built and read as {@code Record}, and the SQL here is the contract - which is why
- * {@code RecordedApprovalsTest} in the worker writes the same statement to pin the other side of it.
+ * {@code RecordedDecisionsTest} in the worker writes the same statement to pin the other side of it.
  *
- * <p><strong>The word {@code 'approve'} is written here and nowhere else in this module.</strong> That is
- * deliberate: it is the run's vocabulary, fixed by the migration's check constraint and read by the run's quorum,
- * and this deployable is a writer of rows rather than an owner of words. The endpoint that reaches this class is
- * {@code /approve}, so no caller of the API needs the string; when members can say no as well, the word arrives
- * from a request field and this is still the only place it becomes SQL.
+ * <p><strong>The word written here is the run's, and now there are two of them.</strong> {@code V502}'s check
+ * constraint fixes the vocabulary and the run's quorum reads it, so this class writes words it does not own: the
+ * answer arrives from the request and this is still the only place one becomes SQL. A word that is not in the
+ * vocabulary is refused by the column, which is why the refusal below is a {@code 400} carrying the store's own
+ * reason rather than a {@code 500} from a list this module would have had to copy.
  *
  * <p><strong>A refusal from the database is a value, not an exception.</strong> Two constraints can legitimately
  * refuse an insert - the primary key on {@code (run_id, member_id)}, which is how "one answer per member" survives
@@ -40,7 +40,7 @@ import java.util.UUID;
  * of is re-thrown, because it means something is wrong that this class has no honest answer for.
  */
 @Repository
-public class JooqApprovals implements Approvals {
+public class JooqDecisions implements Decisions {
 
     /** The run whose answers these are. Read here, written by the worker. */
     private static final Table<Record> RUNS = DSL.table("settlement_runs");
@@ -55,12 +55,10 @@ public class JooqApprovals implements Approvals {
     private static final Field<String> DECISION_WORD = DSL.field("decision", String.class);
     private static final Field<OffsetDateTime> DECISION_AT = DSL.field("decided_at", OffsetDateTime.class);
 
-    /** The answer this endpoint records: the run's vocabulary, stated once. */
-    private static final String APPROVE = "approve";
-
+    /** The answer this module records: whichever word the request carried, written as SQL. */
     private final DSLContext dsl;
 
-    public JooqApprovals(DSLContext dsl) {
+    public JooqDecisions(DSLContext dsl) {
         this.dsl = Objects.requireNonNull(dsl, "dsl");
     }
 
@@ -72,14 +70,14 @@ public class JooqApprovals implements Approvals {
     }
 
     @Override
-    public Written record(NewApproval approval) {
-        Objects.requireNonNull(approval, "approval");
+    public Written record(NewDecision decision) {
+        Objects.requireNonNull(decision, "decision");
 
         try {
             dsl.insertInto(DECISIONS)
                     .columns(DECISION_RUN, DECISION_MEMBER, DECISION_WORD, DECISION_AT)
-                    .values(approval.runId(), approval.memberId(), APPROVE,
-                            toOffset(approval.recordedAt()))
+                    .values(decision.runId(), decision.memberId(), decision.decision(),
+                            toOffset(decision.recordedAt()))
                     .execute();
 
             return Written.RECORDED;

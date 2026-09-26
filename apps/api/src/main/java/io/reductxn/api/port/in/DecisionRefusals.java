@@ -23,15 +23,15 @@ import java.util.UUID;
  * {@code ObligationRefusals} documents at length: these classes live in {@code io.reductxn.api..}, and the guard
  * derives the namespace from the package rather than from the domain.
  */
-public final class ApprovalRefusals {
+public final class DecisionRefusals {
 
-    private ApprovalRefusals() {
+    private DecisionRefusals() {
     }
 
     /** This member has already answered this run, and an answer is final. */
     public record AlreadyAnswered(UUID runId, UUID memberId) implements DomainError {
 
-        public static final String CODE = "api.approval_already_answered";
+        public static final String CODE = "api.decision_already_answered";
 
         public AlreadyAnswered {
             DomainCodes.requireWellFormed(CODE);
@@ -60,7 +60,7 @@ public final class ApprovalRefusals {
      */
     public record NotAcceptable(UUID runId, UUID memberId, String reason) implements DomainError {
 
-        public static final String CODE = "api.approval_not_acceptable";
+        public static final String CODE = "api.decision_not_acceptable";
 
         public NotAcceptable {
             DomainCodes.requireWellFormed(CODE);

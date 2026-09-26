@@ -20,11 +20,12 @@ import java.util.UUID;
  * @param recordedAt the instant stored on the row, echoed rather than re-read: it is what this answer was recorded
  *                   as, and a later read could show a different clock than the one that wrote it
  */
-public record RecordedApproval(UUID runId, UUID memberId, Instant recordedAt) {
+public record RecordedDecision(UUID runId, UUID memberId, String decision, Instant recordedAt) {
 
-    public RecordedApproval {
+    public RecordedDecision {
         Objects.requireNonNull(runId, "runId");
         Objects.requireNonNull(memberId, "memberId");
+        Objects.requireNonNull(decision, "decision");
         Objects.requireNonNull(recordedAt, "recordedAt");
     }
 }

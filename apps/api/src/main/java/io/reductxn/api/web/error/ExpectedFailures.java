@@ -1,6 +1,6 @@
 package io.reductxn.api.web.error;
 
-import io.reductxn.api.port.in.ApprovalRefusals;
+import io.reductxn.api.port.in.DecisionRefusals;
 import io.reductxn.api.port.in.RunRefusals;
 import io.reductxn.api.port.in.ObligationRefusals;
 import io.reductxn.fx.api.AmountTooSmallToConvertException;
@@ -57,7 +57,7 @@ public final class ExpectedFailures {
             // The run's own rows refused the answer. 422 rather than 409: the request conflicts with nothing that
             // exists, it asks for something the run cannot hold - and a client that retried it would get the same
             // answer, which is what separates it from the conflict below.
-            Map.entry(ApprovalRefusals.NotAcceptable.CODE, HttpStatus.UNPROCESSABLE_CONTENT),
+            Map.entry(DecisionRefusals.NotAcceptable.CODE, HttpStatus.UNPROCESSABLE_CONTENT),
 
             // There is nothing to answer, which is not the same as answering nothing: a client that got this for a
             // malformed body would go looking for an id that was correct all along.
@@ -66,7 +66,7 @@ public final class ExpectedFailures {
             // A conflict with what is already on the record: this member has answered this run, and an answer is
             // final. 409 rather than 422, because the request is well-formed and could have succeeded earlier - the
             // state of the world is what refuses it.
-            Map.entry(ApprovalRefusals.AlreadyAnswered.CODE, HttpStatus.CONFLICT),
+            Map.entry(DecisionRefusals.AlreadyAnswered.CODE, HttpStatus.CONFLICT),
 
             // The server cannot answer yet. A retry may succeed, which is the opposite of the 422 above and
             // the reason they are not one status: a client that conflated them would give up on a request
