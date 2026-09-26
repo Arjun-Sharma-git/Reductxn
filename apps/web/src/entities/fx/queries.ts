@@ -12,10 +12,13 @@ import { request, type paths } from '@/shared/api/client';
  * a member choosing to settle in another currency is choosing an FX conversion, and the screen should show what
  * that looks like before they do it rather than after.
  *
- * **Why a 503 is not retried here.** `GET /fx/rates` answers `503 fx.rate_unavailable` when the pair has no rate
- * at all, and the contract is explicit that this is an answer rather than a hiccup: "no rate means no
- * cross-currency". Retrying it would delay the only useful message the screen can give - that this pair cannot be
- * settled in yet - so this query opts out of the client's retry policy.
+ * **Why neither failure is retried here.** `GET /fx/rates` answers `503 fx.rate_unavailable` when the pair has no
+ * rate at all, and the contract is explicit that this is an answer rather than a hiccup: "no rate means no
+ * cross-currency". It answers `422 fx.rate_stale` when the pair's newest rate has expired, which is deliberately the
+ * same refusal the form's submit gets from the recording path (ADR 0037) - so the screen can say "this pair cannot be
+ * settled in yet" before anybody fills the form in, instead of after. Retrying either would delay the only useful
+ * message this screen can give, and retrying the stale one would never succeed until the feed catches up, so this
+ * query opts out of the client's retry policy.
  */
 export type FxRate = paths['/fx/rates']['get']['responses']['200']['content']['application/json'];
 
