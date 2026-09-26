@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The currency catalogue, read from {@code currencies}.
@@ -47,5 +48,12 @@ public class JooqCurrencyCatalog implements CurrencyCatalog {
                 .from(CURRENCIES)
                 .where(CODE.eq(code))
                 .fetchOptional(row -> Currency.of(row.get(CODE), row.get(MINOR_UNIT_EXPONENT)));
+    }
+
+    @Override
+    public Set<Currency> all() {
+        return dsl.select(CODE, MINOR_UNIT_EXPONENT)
+                .from(CURRENCIES)
+                .fetchSet(row -> Currency.of(row.get(CODE), row.get(MINOR_UNIT_EXPONENT)));
     }
 }

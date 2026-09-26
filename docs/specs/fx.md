@@ -38,9 +38,12 @@ conversion was implemented and a spec that disagrees with the code is worse than
   stored rate whose meaning depended on today's `currencies` row could change meaning without anyone
   editing it - the same reason `obligations` and `journal_entries` store the exponent beside the amount.
 
-`fx_rates` and `fx_quotes` are `V402`, beside this module. Nothing ingests rates yet: a deployment with
-no rate loader answers every cross-currency request with `fx.rate_unavailable`, which is the fail-closed
-behaviour rather than a gap in it.
+`fx_rates` and `fx_quotes` are `V402`, beside this module. Nothing ingested rates until ADR 0027: the tables
+existed and every cross-currency request was answered `fx.rate_unavailable`, which was the fail-closed behaviour
+rather than a gap in it. A deployment now reads a provider's published document on a schedule
+(`reductxn.rates.feed`, `ScheduledRateIngestion`) and stores the rates it can transact, with `V403` making a
+publication unique on `(pair, source, instant)` so a repeated refresh writes nothing. A deployment with no feed
+configured still answers every cross-currency request with `503`, deliberately.
 
 ## 2. Rate representation
 
@@ -276,9 +279,12 @@ used recorded for reconciliation. When it does not, the group must fund the requ
 
 ## 10. Implementation status
 
-**Implemented in `libs/fx`** (34 tests green): the scaled-integer rate with validating construction,
-the exact conversion with both cancellation points, the fractional residual, and `FxQuote.lock` with
-its fail-closed freshness check. Properties X1-X6 hold over generated inputs.
+**Implemented in `libs/fx`** (49 tests green): the scaled-integer rate with validating construction,
+the exact conversion with both cancellation points, the fractional residual, `FxQuote.lock` with
+its fail-closed freshness check, and since ADR 0027 the shape of a provider's publication
+(`PublishedRates`) with the cross rates derived from it (`CrossRates`). Properties X1-X6 hold over
+generated inputs, plus four for the derivation: the exact ratio rounded to the nearest last place,
+monotonicity, and that the scale a publication is normalised to cannot change a derived rate.
 
 **Not implemented, and each for a stated reason:**
 
@@ -287,7 +293,8 @@ its fail-closed freshness check. Properties X1-X6 hold over generated inputs.
 | X7, per-currency zero-sum | Tested in `libs/planning`, which composes the partitions. It needs a module that can see both the engine and `fx_clearing` |
 | X2's second half, "the cycle sum of residuals equals the `fx_clearing` delta" | Postings now exist and a cross-currency obligation's pair is verified from the rows, but the claim is about a *cycle*: it needs a completed run to sum over, so it lands with `workers/settlement` |
 | `awaiting_fx_funding` and the funding state | Needs the settlement run lifecycle in `workers/settlement` |
-| Rate ingestion | The provider adapter reads `fx_rates`, and nothing writes to `fx_rates`. A rate loader is an operational path - a provider feed, or an operator's insert - and it is not part of this module, which is why the table exists and is empty |
+| Rate ingestion | **Implemented (ADR 0027).** The provider adapter reads `fx_rates`; the *other* half is `apps/api`'s `adapter/feed` - a parser for the bank's own document, a feed that reads it from a URL or a file, and a scheduled ingestion that derives the pairs this deployment can transact and stores them idempotently (`V403`). The derivation is `CrossRates` here, because a ratio of two observations is rate arithmetic and RULE B19 keeps it here |
+| The bound on `rateScaled` in section 2 | **Stated, and only half-enforced.** `CrossRates` refuses a derived rate outside 1..10^12; neither `FxRate`'s constructor nor a CHECK constraint refuses one that arrives any other way, and a deployment could insert a rate the type would have refused. Deriving rates is what made it matter - the value now arrives from outside the process |
 
 **Measured against the compiled engine.** Every one of these reproduces the hand-computed value in the
 sections above, which is the check that the spec and the code agree rather than merely coexisting:
@@ -303,10 +310,19 @@ INR       1  ->  refused: fx.amount_too_small_to_convert
 
 ## 11. Open questions
 
-- Rate provider selection, and the failover provider when the primary is stale.
+- **Rate provider selection: answered for the first provider (ADR 0027).** The ECB's daily reference rates are
+  ingested on a schedule; a deployment points `reductxn.rates.feed` at the document or at a copy of it. Still open:
+  **the failover provider when the primary is stale** - that is a second trusting relationship and a policy for
+  choosing between two sources, not a second URL. `V403`'s unique key includes `source`, so storage is already
+  shaped for it.
 - Whether the residual should ever be allocated pro rata to members, rather than accumulating.
-- Staleness bound: 60 seconds is the working default for locking a quote; the correct value depends on
-  provider latency and the abuse surface.
+- Staleness bound: 60 seconds is the working default for locking a quote from a *streaming* provider. A daily
+  reference feed needs days, and ADR 0027 makes it `reductxn.rates.max-age` - four days by default, because a
+  weekend has no publication in it. The right value depends on the provider's cadence.
 - Whether to support a rate locked at settlement time as an alternative strategy (ADR 0012, open
   question).
+- **Whether the bound in section 2 should be enforced by the type and the database.** `FxRate` validates positivity
+  and the scale, and nothing validates `rateScaled <= 10^12`; `CrossRates` enforces it where it invents a rate. A
+  CHECK constraint would make the spec and the schema agree, and it needs the type to enforce it too, or a row the
+  database refuses is still readable as an object that should not exist.
 

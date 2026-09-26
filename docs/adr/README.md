@@ -32,3 +32,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0024 | A silence is not evidence, so escalation is a report | accepted |
 | 0025 | A person's word is evidence, so a resolution is attributed | accepted |
 | 0026 | An answer of "still pending" is not progress, so a stale submission is reported too | accepted |
+| 0027 | A rate arrives on a schedule, from a provider the deployment names | accepted |

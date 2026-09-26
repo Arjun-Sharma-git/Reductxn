@@ -15,8 +15,15 @@ import java.time.Instant;
  * {@code apps/api/adapter/rate}, and RULE B16 - which keeps every jOOQ type inside one package so no row type
  * escapes - makes that impossible for an adapter that reads a table. The rule is mechanical and enforced; the
  * sentence was prose written before the rule's scope was known, so the sentence was corrected. A provider that
- * fetched rates over the network instead of from the database could live anywhere in the module, and the day
- * one exists this sentence should say so.
+ * fetched rates over the network instead of from the database could live anywhere in the module, and the day one
+ * exists this sentence should say so.
+ *
+ * <p><strong>That day arrived (ADR 0027), and there are now two things behind this question.</strong> This port is
+ * answered from the database by {@code JooqFxRateProvider} in {@code apps/api/adapter/persistence} - a table read,
+ * which RULE B16 pins there. The fetching is a *second* port, {@link FxRateFeed}, answered by
+ * {@code EcbReferenceRateFeed} in {@code apps/api/adapter/feed}: it reads no table, so it is not in the persistence
+ * package, and it is a job's question ("what has the provider published") rather than a request's. A rate that
+ * arrives from outside the process has to be written somewhere before it is read, and that is the split.
  *
  * <p>Keep this deliberate and small. An adapter for a market data provider does not belong in the
  * module that also decides how many minor units a creditor is owed.

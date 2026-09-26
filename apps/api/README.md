@@ -17,7 +17,7 @@ only credible because the domain logic lives in `libs/*` and cannot be reached a
 
 | Package | Holds | Rule |
 |---|---|---|
-| `web/v1` | Inbound adapters. Two controllers: the contract's netting preview, and record-an-obligation | B12: never an adapter, and never `port/out` |
+| `web/v1` | Inbound adapters. Three controllers: the contract's netting preview, record-an-obligation, and the run a member reads and answers (ADR 0021, 0022) | B12: never an adapter, and never `port/out` |
 | `web/dto` | The wire shapes, and the one mapper between them and a plan | |
 | `web/error` | RFC 9457 problem+json, and the resolver that gives a domain failure its code | B20 |
 | `application` | Use cases. The only place `@Transactional` may appear | B13, B15 |
@@ -92,8 +92,14 @@ participants are the worker's positions and are not published here.
 ## What is not here yet
 
 Identity, groups, and the rest of the settlement surface. An obligation's `group_id` has no foreign key because
-`groups` does not exist yet, and a cross-currency obligation cannot be stored because the `obligations` table has no
-quote columns - both are stated in the migrations rather than left to be noticed.
+`groups` does not exist yet, which is stated in the migration rather than left to be noticed. A cross-currency
+obligation *can* be stored since `V103` and `libs/fx`'s quote tables - and it is why rate ingestion exists (ADR
+0027), because a conversion with no rate is refused rather than guessed.
+
+The sentence this paragraph used to carry - that a cross-currency obligation could not be stored because
+`obligations` had no quote columns - outlived the columns by several slices. Recorded here rather than quietly
+deleted: a README that says what is missing is only useful while somebody compares it against the schema, and this
+one was not compared for a while.
 
 `POST /v1/runs/{runId}/decisions` records a member's answer, approval or refusal. A refusal ends the run, and the
 end is the worker's to write: this records the row, and `workers/settlement` writes `rejected` on its next look at
@@ -109,9 +115,29 @@ is paid in another currency. It has no route for anything else: no void, no list
 `settleInCurrency` works, and it has two failure modes the contract distinguishes because a client does
 different things about them: `fx.rate_stale` (`422`, the pair was quoted and the rate had expired) and
 `fx.rate_unavailable` (`503`, nothing was quoted for the pair at or before the obligation's instant). Nothing
-is written on either path. Rates come from `libs/fx`'s `fx_rates` table, which nothing ingests into yet - so in
-a deployment with no rate loader, every cross-currency request is a `503`, and that is the designed fail-closed
-behaviour rather than a stub.
+is written on either path. Rates come from `libs/fx`'s `fx_rates` table, and since ADR 0027 something writes them:
+`ScheduledRateIngestion` reads a provider's published document on a cadence and stores the rates this deployment
+can transact. A deployment with no `reductxn.rates.feed` configured ingests nothing, so every cross-currency
+request is a `503` - the designed fail-closed behaviour rather than a stub.
+
+## Rate ingestion (ADR 0027)
+
+`fx_rates` is what every conversion reads, and `adapter/feed` is what fills it. The two are deliberately separate
+from the request path: a conversion that waited for a network call to a market-data provider would make every
+obligation's latency and availability the vendor's.
+
+| Piece | What it is |
+|---|---|
+| `adapter/feed/EcbReferenceRates` | The ECB's daily document as `PublishedRates` - a pure parser, no I/O. Digits are parsed by hand (P1 forbids a binary floating-point type for a rate), the whole table is normalised to its own widest rate because a ratio is only exact at one scale, and the publication instant is the day the document names at 16:00 Brussels time, not midnight: a rate is not usable before it existed |
+| `adapter/feed/EcbReferenceRateFeed` | `FxRateFeed` over a location that may be an `https` URL or a file path. Timeouts, because it runs in a scheduled slot; a blank document is empty, and a missing file, an unreachable host or a non-2xx answer are faults |
+| `port/in/IngestRates` + `application/rates` | One pass: ask the feed, intersect with the catalogue, derive in `libs/fx`, store, report. The feed is an *argument* rather than a dependency, so a deployment with no provider starts normally |
+| `port/out/RateStore` + `JooqRateStore` | The writer. `ON CONFLICT DO NOTHING` against `V403`'s unique key, returning how many rows were new |
+| `adapter/schedule/ScheduledRateIngestion` | The cadence, `@ConditionalOnProperty(name = "reductxn.rates.feed")` - it does not exist without a provider. Faults are logged and swallowed: `@Scheduled` surfaces a fault by ending the schedule |
+
+Which pairs are stored is the catalogue's answer: the currencies in `currencies`, intersected with what the feed
+quotes, both directions each. Adding a currency is an insert, and the next refresh prices its pairs. `libs/fx`'s
+`CrossRates` does the derivation - the ECB quotes everything against the euro, so a rupee-per-yen rate is a ratio
+of two observations, derived for every pair that is kept.
 
 ## Three things about the write path worth knowing before changing it
 
