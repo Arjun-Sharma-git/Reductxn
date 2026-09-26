@@ -1,0 +1,77 @@
+/* The tax screen: two tables and one small form. The tokens and the table shape are the members screen's, so a
+   reference table and a report table do not look like two applications. */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-5);
+}
+
+.lede {
+  color: var(--rn-text-muted);
+  max-inline-size: 60ch;
+}
+
+.status {
+  color: var(--rn-text-muted);
+}
+
+.table {
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+
+.caption {
+  text-align: start;
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-xs);
+  padding-block-end: var(--rn-space-2);
+}
+
+.table th,
+.table td {
+  text-align: start;
+  padding: var(--rn-space-2) var(--rn-space-3);
+  border-block-end: 1px solid var(--rn-border);
+  vertical-align: top;
+}
+
+/* Amounts align on the right, which is only meaningful because the amount face has tabular figures. */
+.numeric {
+  text-align: end !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.parameters {
+  font-family: var(--rn-font-amount);
+  font-size: var(--rn-text-xs);
+  color: var(--rn-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-1);
+}
+
+.parameterKey {
+  font-weight: var(--rn-weight-medium);
+}
+
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rn-space-3);
+  align-items: end;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-1);
+  font-size: var(--rn-text-sm);
+}
+
+.footnote {
+  margin-block: var(--rn-space-3) 0;
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-xs);
+  max-inline-size: 70ch;
+}

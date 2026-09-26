@@ -1274,12 +1274,45 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Tax report for a period, including savings versus pairwise settlement */
+        /**
+         * Tax report for a period, including savings versus pairwise settlement
+         * @description The tax this group's settlement plans have **assessed**, per currency, over a period.
+         *
+         *     **What is being reported, and what is not.** These figures are the plan's own - the per-currency columns a
+         *     run stores when it is computed - because a plan's tax is `libs/netting`'s answer about the partition and
+         *     re-deriving it here would mean running the engine again to read a run. So this is the tax the group's plans
+         *     say it owes, not tax that has been collected: `docs/specs/tax-rules.md` section 7 leaves "are we a
+         *     withholding agent" as an open legal question whose default posture is **compute and report**, and this
+         *     endpoint is the reporting half of that posture. A figure here is never evidence that tax was remitted, and
+         *     the schema has no field that could be read as one.
+         *
+         *     **Which runs count.** Every run whose plan was computed, except the two that mean the plan did not happen:
+         *     `rejected` (the group refused it) and `failed` (it was attempted and did not complete). That is the same
+         *     reading the obligations list uses for a run that ended without settling - it *releases* what it held - so a
+         *     refused plan's tax is released here too rather than counted as a cost. A run still `pending` or `computing`
+         *     has no plan yet and contributes nothing, which is a fact rather than a filter.
+         *
+         *     **What the period means.** `periodStart` and `periodEnd` are inclusive **days**, matched against the
+         *     cycle's `as_of` rather than the run's creation: `as_of` is the instant the books were closed and the instant
+         *     every rate and tax rule was resolved at (`docs/specs/tax-rules.md` section 4), so it is the date a tax
+         *     belongs to. Both are optional, and omitting them reports everything the group has ever planned. The days are
+         *     UTC, which is a stand-in of the same kind the obligations list records - the cycle end date should be
+         *     evaluated in the group's settlement timezone and no group exists as a table in this build.
+         *
+         *     **There is no headline figure, and the parameter list is why.** A single "tax owed" would have to be
+         *     expressed in some currency, and adding rupees to yen is not addition (ADR 0012). The contract gives this
+         *     operation no reporting currency, so it cannot be asked for one - and `docs/specs/tax-rules.md` section 6
+         *     says the same thing from the other end: a reporting-currency figure is an estimate that must not be used to
+         *     compute anything, and an endpoint with no way to ask for one cannot be misused as one. Every line carries
+         *     its own currency, and `runCount` is there so a reader can see how many plans the line is made of.
+         */
         get: {
             parameters: {
                 query: {
                     groupId: string;
+                    /** @description The first day whose cycle instant is counted, inclusive. */
                     periodStart?: string;
+                    /** @description The last day whose cycle instant is counted, inclusive of the whole of that day. */
                     periodEnd?: string;
                 };
                 header?: never;
@@ -1293,8 +1326,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["TaxReportLine"][];
+                    };
                 };
+                400: components["responses"]["Problem"];
             };
         };
         put?: never;
@@ -1312,7 +1348,37 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Active tax rules (reference data, no PII) */
+        /**
+         * Active tax rules (reference data, no PII)
+         * @description Which tax rules are in force **right now**, for the jurisdiction this deployment is configured with.
+         *
+         *     **Why "now" and not an instant.** This is a reference read - what a group will be charged if it settles
+         *     today - and it is the same call the reference rate read makes (ADR 0037). A past rule set is not askable
+         *     through this endpoint and does not need to be: a run stores the figures its own assessment produced, so what
+         *     a cycle was taxed under is a fact about the run rather than something a reader reconstructs from the rules
+         *     table. That is also why this read and the settlement path cannot disagree about history - only one of them
+         *     claims to know it.
+         *
+         *     **The effective window is in force at this instant**, which is the same condition the recording and preview
+         *     paths resolve a rule by, taken from the same expression rather than written a second time: a rule is in
+         *     force when `effective_from <= now < effective_to`, with a null `effective_to` meaning unbounded. A read with
+         *     its own copy of that condition is how a group comes to be shown a rule that its settlement did not use.
+         *
+         *     **What a rule carries, and why.** The `params` object is the rule's own shape - `perTransferMinor` for
+         *     `flat`, `rateBps` with optional `minMinor`/`maxMinor` for `advalorem`, `tiers` for `threshold`
+         *     (`docs/specs/tax-rules.md` section 2) - and it is passed through rather than reinterpreted, because the
+         *     shapes belong to the module that assesses them and a second model of them here would be a second thing to
+         *     keep in step. `sourceRef` is the statute the rule encodes: the table requires it so that a rule can be
+         *     defended to an auditor rather than only executed, and a read that omitted it would be a list of rates
+         *     nobody could justify.
+         *
+         *     **A `threshold` rule is listed even though nothing can assess it yet.** `libs/netting` implements flat, ad
+         *     valorem and a no-tax rule, so a partition governed by a threshold rule cannot be netted at all - the
+         *     settlement path refuses it rather than assessing zero, because no tax and low tax are indistinguishable in a
+         *     report. Listing the row is the honest answer to "which rules are in force": the data exists, and hiding it
+         *     would leave a reader staring at a settlement that refuses for a reason they cannot see. The schema carries no
+         *     field saying which kinds are executable, which is recorded as a gap rather than guessed at here.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -1331,6 +1397,7 @@ export interface paths {
                         "application/json": components["schemas"]["TaxRule"][];
                     };
                 };
+                400: components["responses"]["Problem"];
             };
         };
         put?: never;
@@ -2096,6 +2163,20 @@ export interface components {
                 }[];
             };
         };
+        /**
+         * @description One tax rule as configured: a rate for a (jurisdiction, currency) over an effective window. Data rather
+         *     than code - adding a jurisdiction is an insert, never a release (ADR 0006).
+         *
+         *     `params` is the rule's own shape and its keys depend on `kind`; the rules read documents the three shapes.
+         *     It is passed through rather than flattened into named fields because the shapes belong to the module that
+         *     assesses them. `sourceRef` names the statute the rule encodes, which is what makes a rate defensible to an
+         *     auditor rather than merely executed.
+         *
+         *     `effectiveFrom` and `effectiveTo` are **instants**, not days, because that is what a rule takes effect at
+         *     and what the settlement path compares - reporting a window as a date would lose the boundary a group's tax
+         *     turns on. `effectiveTo` is present and null when the rule is unbounded, which is why this property is
+         *     declared `nullable` rather than left for a client to infer from an absent key.
+         */
         TaxRule: {
             /** Format: uuid */
             id: string;
@@ -2103,11 +2184,35 @@ export interface components {
             currency: components["schemas"]["Currency"];
             /** @enum {string} */
             kind: "flat" | "advalorem" | "threshold";
-            description?: string;
-            /** Format: date */
+            /** @description The rule's parameters; the keys depend on `kind`. */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
             effectiveFrom: string;
-            /** Format: date */
+            /** Format: date-time */
             effectiveTo?: string | null;
+            sourceRef: string;
+        };
+        /**
+         * @description One currency's assessed tax for a period: the plan figures of every run the group computed in it, summed
+         *     per currency and never across currencies (ADR 0012).
+         *
+         *     `netTax` is the tax the plans assess and `taxSaved` is what netting avoided against settling every
+         *     commitment pairwise; `grossTax` is the two added back together, which is the cost pairwise settlement would
+         *     have incurred. Those three are the same three figures a run reports per partition, so a line over one run is
+         *     that run's row.
+         *
+         *     `runCount` is how many plans the line is made of - the field that lets a reader tell one run's report from a
+         *     quarter's, and the reason this is a report about plans rather than about money that moved: nothing here has
+         *     been remitted (`docs/specs/tax-rules.md` section 7).
+         */
+        TaxReportLine: {
+            currency: components["schemas"]["Currency"];
+            grossTax: components["schemas"]["Money"];
+            netTax: components["schemas"]["Money"];
+            taxSaved: components["schemas"]["Money"];
+            runCount: number;
         };
     };
     responses: {

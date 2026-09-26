@@ -1,0 +1,41 @@
+{
+  "title": "Tax",
+  "lede": "What this group is charged under, and what its settlement plans have assessed. Nothing here has been paid or remitted, and nothing on this screen changes anything.",
+  "loading": "Reading the tax figures…",
+  "kind": {
+    "flat": "Flat charge per transfer",
+    "advalorem": "A percentage of the amount",
+    "threshold": "Tiered or progressive"
+  },
+  "rules": {
+    "cardTitle": "Rules in force",
+    "cardDescription": "The tax rules in force right now, for the jurisdiction this deployment is configured with. Each row is a rate and the statute it encodes, so a figure on the report below can be traced back to the rule that produced it.",
+    "caption": "Rules in force, with the parameters they carry",
+    "jurisdiction": "Jurisdiction",
+    "currency": "Currency",
+    "kind": "Shape",
+    "params": "Parameters",
+    "effectiveFrom": "In force from",
+    "effectiveTo": "In force to",
+    "noEnd": "No end",
+    "sourceRef": "Source",
+    "empty": "No tax rule is in force for any currency this deployment holds, so a settlement cannot be assessed yet."
+  },
+  "report": {
+    "cardTitle": "What the plans assess",
+    "cardDescription": "The tax the group's settlement plans have assessed, per currency, over the plans it has computed. These are the plan's own figures - the tax a cycle would be charged and what netting saved against settling every commitment pair by pair. They are not tax that has been collected or remitted: nothing in this build withholds tax, and the plans are waiting on the group.",
+    "from": "From",
+    "to": "To",
+    "apply": "Apply",
+    "clear": "Everything",
+    "backwards": "That range ends before it starts, so nothing can be in it. Swap the two dates to ask about a period.",
+    "empty": "No plan has been computed in that period, so there is no tax to report. A period nobody has settled in is an empty report rather than an error.",
+    "caption": "Assessed tax by currency, over the plans the period contains",
+    "currency": "Currency",
+    "assessed": "Tax assessed",
+    "saved": "Saved by netting",
+    "gross": "Without netting",
+    "plans": "Plans",
+    "perCurrencyNote": "Nothing on this screen is added up across currencies, and nothing should be: rupees and yen have no common total without a reporting currency and a rate nobody agreed, which is why the report has no headline figure and the request offers no way to ask for one."
+  }
+}

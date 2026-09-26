@@ -19,8 +19,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -53,11 +51,6 @@ public class JooqTaxRuleCatalog implements TaxRuleCatalog {
     private static final Field<String> CURRENCY_CODE = DSL.field("currency_code", String.class);
     private static final Field<String> KIND = DSL.field("kind", String.class);
     private static final Field<JSONB> PARAMS = DSL.field("params_json", JSONB.class);
-    private static final Field<OffsetDateTime> EFFECTIVE_FROM =
-            DSL.field("effective_from", OffsetDateTime.class);
-    private static final Field<OffsetDateTime> EFFECTIVE_TO =
-            DSL.field("effective_to", OffsetDateTime.class);
-
     private final DSLContext dsl;
     private final ObjectMapper json;
     private final String jurisdiction;
@@ -76,14 +69,13 @@ public class JooqTaxRuleCatalog implements TaxRuleCatalog {
         Objects.requireNonNull(currency, "currency");
         Objects.requireNonNull(asOf, "asOf");
 
-        OffsetDateTime asOfUtc = asOf.atOffset(ZoneOffset.UTC);
-
         List<ActiveRule> active = dsl.select(ID, KIND, PARAMS)
                 .from(TAX_RULES)
                 .where(JURISDICTION.eq(jurisdiction))
                 .and(CURRENCY_CODE.eq(currency.code()))
-                .and(EFFECTIVE_FROM.le(asOfUtc))
-                .and(EFFECTIVE_TO.isNull().or(EFFECTIVE_TO.gt(asOfUtc)))
+                // The window is TaxRuleWindow's condition rather than a copy: the rules read shows the same rules
+                // this resolves, and the two can only promise that while they ask the same question.
+                .and(TaxRuleWindow.inForceAt(asOf))
                 .fetch(row -> new ActiveRule(row.get(ID), row.get(KIND), row.get(PARAMS).data()));
 
         if (active.isEmpty()) {
