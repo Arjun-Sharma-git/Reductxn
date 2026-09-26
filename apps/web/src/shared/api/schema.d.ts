@@ -728,7 +728,31 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Open or close a settlement cycle */
+        /**
+         * Open a settlement cycle as of an instant
+         * @description Closes a group's books at an instant: everything recorded at or before `asOf` - and not already
+         *     settled by an earlier run - is what this cycle will settle. The instant **is** the cycle: it
+         *     keys it, it is what the worker resolves every rate and tax rule at, and it is the one thing a
+         *     settlement policy decides (ADR 0032).
+         *
+         *     The instant is required, and that is deliberate. Defaulting it to "now" would make two requests
+         *     a microsecond apart two different cycles - a double click would settle a group twice, and a retry
+         *     after a timeout would open a second cycle rather than finding the first. With the instant
+         *     supplied, opening is idempotent on `(group, asOf)`: a second request for the same pair answers
+         *     `200` with the cycle that already exists, which is what makes the operation safe to repeat.
+         *
+         *     **Nothing is computed here, and nothing is refused here.** A plan over the cycle is
+         *     `workers/settlement`'s work, and its cadence computes an opened cycle within a minute - so a
+         *     cycle may legitimately be opened for an instant with nothing recorded at or before it yet,
+         *     because a commitment recorded today can carry an instant inside it (a backdated bill). A
+         *     `422` for "nothing to settle" would therefore refuse a request the worker would compute a minute
+         *     later, which is why there is not one: the refusal belongs to the worker, when it computes.
+         *
+         *     What a client sees after this is a cycle to wait on, and the group's runs
+         *     (`GET /groups/{groupId}/runs`) once it is computed. There is no `404` for a group nobody has
+         *     heard of: groups are not tables in this build, so "no such group" cannot be told apart from a
+         *     group whose books are empty, and opening a cycle for either is the same act.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -741,23 +765,40 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        action: "open" | "close";
-                        /** Format: date */
-                        periodStart?: string;
-                        /** Format: date */
-                        periodEnd?: string;
+                        /**
+                         * Format: date-time
+                         * @description The instant the cycle is cut off at, and the instant every rate and tax rule is
+                         *     resolved at. ISO-8601 with an offset or `Z`.
+                         * @example 2026-09-30T23:59:59Z
+                         */
+                        asOf: string;
                     };
                 };
             };
             responses: {
-                /** @description Cycle state changed */
+                /**
+                 * @description The cycle was already open for this group and instant, and this is it. Not an error, and not
+                 *     a second cycle: opening is idempotent so that a retry after a timeout finds what the first
+                 *     request made.
+                 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SettlementCycle"];
+                    };
+                };
+                /** @description Cycle opened */
                 201: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["SettlementCycle"];
+                    };
                 };
+                400: components["responses"]["Problem"];
             };
         };
         delete?: never;
@@ -827,44 +868,6 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cycles/{cycleId}/runs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Compute a settlement run for a closed cycle (asynchronous) */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    cycleId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Accepted - poll the run for status */
-                202: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SettlementRun"];
-                    };
-                };
-            };
-        };
         delete?: never;
         options?: never;
         head?: never;
@@ -1696,6 +1699,30 @@ export interface components {
             decision: "approve" | "reject";
             /** Format: date-time */
             recordedAt: string;
+        };
+        /**
+         * @description A closed period of a group's books, as `settlement_cycles` stores it (ADR 0032). It is four
+         *     facts and no status: a cycle is a claim about an instant rather than a state machine, and
+         *     whether it has been computed is a question about a *run*, which is
+         *     `GET /groups/{groupId}/runs`' to answer.
+         *
+         *     `asOf` is the cycle's identity along with the group - one cycle per group per instant - and it
+         *     is the instant every rate, tax rule and commitment in it is resolved at. `createdAt` is when
+         *     somebody asked for it, which is what a client shows as "waiting since" when the plan has not
+         *     been computed yet.
+         */
+        SettlementCycle: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            groupId: string;
+            /**
+             * Format: date-time
+             * @description The instant the books were closed at, and the instant the cycle settles as of.
+             */
+            asOf: string;
+            /** Format: date-time */
+            createdAt: string;
         };
         /**
          * @description One run per (group, cycle), containing one partition per currency present. Per-currency

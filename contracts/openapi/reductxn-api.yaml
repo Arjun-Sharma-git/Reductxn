@@ -364,20 +364,60 @@ paths:
       - $ref: '#/components/parameters/GroupId'
     post:
       tags: [settlement]
-      summary: Open or close a settlement cycle
+      summary: Open a settlement cycle as of an instant
+      description: |
+        Closes a group's books at an instant: everything recorded at or before `asOf` - and not already
+        settled by an earlier run - is what this cycle will settle. The instant **is** the cycle: it
+        keys it, it is what the worker resolves every rate and tax rule at, and it is the one thing a
+        settlement policy decides (ADR 0032).
+
+        The instant is required, and that is deliberate. Defaulting it to "now" would make two requests
+        a microsecond apart two different cycles - a double click would settle a group twice, and a retry
+        after a timeout would open a second cycle rather than finding the first. With the instant
+        supplied, opening is idempotent on `(group, asOf)`: a second request for the same pair answers
+        `200` with the cycle that already exists, which is what makes the operation safe to repeat.
+
+        **Nothing is computed here, and nothing is refused here.** A plan over the cycle is
+        `workers/settlement`'s work, and its cadence computes an opened cycle within a minute - so a
+        cycle may legitimately be opened for an instant with nothing recorded at or before it yet,
+        because a commitment recorded today can carry an instant inside it (a backdated bill). A
+        `422` for "nothing to settle" would therefore refuse a request the worker would compute a minute
+        later, which is why there is not one: the refusal belongs to the worker, when it computes.
+
+        What a client sees after this is a cycle to wait on, and the group's runs
+        (`GET /groups/{groupId}/runs`) once it is computed. There is no `404` for a group nobody has
+        heard of: groups are not tables in this build, so "no such group" cannot be told apart from a
+        group whose books are empty, and opening a cycle for either is the same act.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [action]
+              required: [asOf]
               properties:
-                action: { type: string, enum: [open, close] }
-                periodStart: { type: string, format: date }
-                periodEnd: { type: string, format: date }
+                asOf:
+                  type: string
+                  format: date-time
+                  description: |
+                    The instant the cycle is cut off at, and the instant every rate and tax rule is
+                    resolved at. ISO-8601 with an offset or `Z`.
+                  example: '2026-09-30T23:59:59Z'
       responses:
-        '201': { description: Cycle state changed }
+        '201':
+          description: Cycle opened
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettlementCycle' }
+        '200':
+          description: |
+            The cycle was already open for this group and instant, and this is it. Not an error, and not
+            a second cycle: opening is idempotent so that a retry after a timeout finds what the first
+            request made.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettlementCycle' }
+        '400': { $ref: '#/components/responses/Problem' }
 
   /groups/{groupId}/runs:
     parameters:
@@ -420,22 +460,6 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/SettlementRun' }
         '400': { $ref: '#/components/responses/Problem' }
-
-  /cycles/{cycleId}/runs:
-    post:
-      tags: [settlement]
-      summary: Compute a settlement run for a closed cycle (asynchronous)
-      parameters:
-        - name: cycleId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      responses:
-        '202':
-          description: Accepted - poll the run for status
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/SettlementRun' }
 
   /runs/{runId}:
     get:
@@ -1063,6 +1087,31 @@ components:
         memberId: { type: string, format: uuid }
         decision: { type: string, enum: [approve, reject] }
         recordedAt: { type: string, format: date-time }
+
+    SettlementCycle:
+      type: object
+      description: |
+        A closed period of a group's books, as `settlement_cycles` stores it (ADR 0032). It is four
+        facts and no status: a cycle is a claim about an instant rather than a state machine, and
+        whether it has been computed is a question about a *run*, which is
+        `GET /groups/{groupId}/runs`' to answer.
+
+        `asOf` is the cycle's identity along with the group - one cycle per group per instant - and it
+        is the instant every rate, tax rule and commitment in it is resolved at. `createdAt` is when
+        somebody asked for it, which is what a client shows as "waiting since" when the plan has not
+        been computed yet.
+      required: [id, groupId, asOf, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        asOf:
+          type: string
+          format: date-time
+          description: The instant the books were closed at, and the instant the cycle settles as of.
+        createdAt:
+          type: string
+          format: date-time
+
 
     SettlementRun:
       type: object

@@ -76,7 +76,7 @@ run** - answering is a member's act, and the member's surface is `apps/api` rath
 cycle and nothing else: a cycle says *which commitments are being settled* - everything recorded at or before the
 instant - and that is a decision a group makes before any plan exists, so a period can be closed today and settled
 tomorrow. `compute-opened` is the reply: it computes every cycle that has no run, and it is what the cadence runs, so
-a cycle opened by a group's schedule (or, next, by a member through `apps/api`) is computed without a person. What
+a cycle opened by a group's schedule (or, next, by a member through `apps/api` since ADR 0033) is computed without a person. What
 neither command does is decide that a cycle has come due - that is the group's, and it is why `open` is the one
 command with no cadence.
 
