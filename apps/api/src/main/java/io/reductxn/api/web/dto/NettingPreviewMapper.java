@@ -1,7 +1,6 @@
 package io.reductxn.api.web.dto;
 
 import io.reductxn.api.web.dto.NettingPreviewResponse.BestCase;
-import io.reductxn.api.web.dto.NettingPreviewResponse.MoneyDto;
 import io.reductxn.api.web.dto.NettingPreviewResponse.Partition;
 import io.reductxn.api.web.dto.NettingPreviewResponse.Position;
 import io.reductxn.api.web.dto.NettingPreviewResponse.Transfer;

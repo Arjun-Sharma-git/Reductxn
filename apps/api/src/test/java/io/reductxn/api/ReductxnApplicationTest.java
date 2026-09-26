@@ -35,13 +35,14 @@ class ReductxnApplicationTest extends DatabaseTest {
 
         Integer tables = jdbc.queryForObject("""
                 SELECT count(*) FROM information_schema.tables
-                WHERE table_name IN ('obligations', 'tax_rules')
+                WHERE table_name IN ('obligations', 'tax_rules', 'currencies', 'journal_entries', 'postings')
                 """, Integer.class);
 
         assertThat(tables)
-                .as("both owning modules' migrations ran: obligations from apps/api, tax_rules from "
-                        + "libs/netting. Flyway reads them from the classpath of whoever owns them, which "
-                        + "is the arrangement RULE B17 asks for and the one most likely to break silently")
-                .isEqualTo(2);
+                .as("every owning module's migration ran: obligations and currencies and journal_entries "
+                        + "and postings and tax_rules. Flyway reads them from the classpath of whoever owns "
+                        + "them, which is the arrangement RULE B17 asks for and the one most likely to break "
+                        + "silently - a migration that never ran leaves a schema that looks migrated")
+                .isEqualTo(5);
     }
 }

@@ -467,11 +467,18 @@ is what conversion needs first, and because a currency is reference data, not a 
 **Migrations live beside the owner, and versions are namespaced by owner.** Flyway keeps one version
 sequence per schema however many locations it reads, so a `V1` in `apps/api` and a `V1` in `libs/netting`
 are "more than one migration with version 1" and the application refuses to start. Each owner therefore
-holds a version range - `apps/api` owns `1xx`, `libs/netting` owns `2xx` - and `SchemaOwnershipTest` checks
+holds a version range - `apps/api` owns `1xx`, `libs/netting` owns `2xx`, `libs/ledger` owns `3xx`,
+`libs/fx` owns `4xx` - and `SchemaOwnershipTest` checks
 both halves of the rule: no table created by two modules, and no version outside its owner's range. The
 range is also what makes cross-module ordering explicit instead of accidental. Enforced now, and the
 enforcement arrived before the second module's migration did, which is why the collision was a test failure
 rather than an environment.
+
+**NOTE:** two of those ranges arrived with the first write path. `libs/ledger`'s `V301` creates
+`journal_entries` and `postings`, and `libs/fx`'s `V401` creates `currencies` - the latter because the
+contract's `Money` carries a currency code and no exponent, so nothing can be recorded until the exponent can
+be resolved. The version range map in `SchemaOwnershipTest` gained two entries, which is the point of it being
+a map rather than a convention: a module that starts owning tables has to say so.
 
 **NOTE:** settlement tables are owned by the worker because that is where they are written. The
 API reads them through a read model. This is deliberate: it keeps the API write path fast and lets
@@ -940,7 +947,7 @@ lives in a document is no longer the situation for either.
 
 ## Appendix B - Verified state
 
-**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 169 tests, none failing:
+**The Gradle build runs green.** `./gradlew clean build` succeeds, executing 182 tests, none failing:
 
 | Suite | Tests | What it proves |
 |---|---|---|
@@ -958,14 +965,15 @@ lives in a document is no longer the situation for either.
 | `FxConverterPropertyTest` | 9 | X1-X6 over generated inputs. X2 checked against an independent `BigInteger` oracle |
 | `SettlementPlannerTest` | 14 | ADR 0012's worked example, the clearing split, per-currency tax, order independence, refused input |
 | `SettlementPlannerPropertyTest` | 6 | **X7** and the composition properties: zero-sum including `fx_clearing`, partition completeness, the two legs netting to the clearing position, reproducibility |
-| `ReductxnApplicationTest` | 1 | That the API's context starts against a container with both modules' migrations applied |
+| `ReductxnApplicationTest` | 1 | That the API's context starts against a container with all three owning modules' migrations applied - `apps/api`, `libs/netting`, `libs/ledger` and `libs/fx` - which is the arrangement most likely to break silently, since a migration that never ran leaves a schema that looks migrated |
 | `MigrationsConfigurationTest` | 2 | That the migration guard refuses to start when Flyway finds nothing, and delegates to migrate when it finds the fixture - against a real Postgres, in a schema of its own |
 | `NettingPreviewApiTest` | 5 | The contract's preview through every layer, over rows written with SQL and read back through jOOQ: the single-currency shape, a multicurrency group reported as partitions rather than collapsed into one, an empty plan, framework errors as problem+json, and `asOf` meaning "open at that instant" rather than "created before it" |
 | `ProblemTranslatorTest` | 2 | B20: the response carries the domain's code and nothing a client should render, and an un-namespaced code cannot reach a client |
+| `RecordObligationApiTest` | 10 | The first write path in the product, end to end. The entry is not inspected but *verified*: the rows are rebuilt as `JournalEntry` objects - which itself enforces L1 and L6 - and handed to `EntryChain` and `Balances`, the same verifiers an offline job runs. Covers the chain joining rather than restarting, one chain per currency, a replayed key answering with the same obligation and booking nothing, the same key in another group being another obligation, the four refusals, the cross-currency fail-closed path writing nothing, and the preview then seeing what was recorded |
 | `DomainErrorResolverTest` | 2 | That the resolver claims domain failures and declines everything else, so a bad request keeps its own status |
 | `ModuleBoundaryTest` | 24 | RULEs B1-B5, B8, B10-B16, B18-B22 |
 | `SchemaOwnershipTest` | 2 | RULE B17: no table is created by two modules, and no migration version falls outside its owner's range |
-| `BookingsTest` | 5 | Both booking shapes, the direction convention asserted through `Balances`, the two derived-id guarantees, and the two refusals |
+| `BookingsTest` | 6 | Both booking shapes, the direction convention asserted through `Balances`, the two derived-id guarantees, the two refusals, and that an instant with nanoseconds books the same entry as its stored microsecond precision |
 | `BookingsPropertyTest` | 1 | 300 generated rates and amounts: every booking pairs its link (asserted with `FxLinkage`) and leaves the clearing account holding exactly the two amounts |
 | `ArchUnitVisibilityTest` | 1 | That the architecture rules above are not vacuous |
 | `DomainErrorCodeTest` | 1 | That every error code is well formed, namespaced by its own module, unique, and declared as a constant |
@@ -983,9 +991,10 @@ five rules had no decision at all. It reads the specs now.
 Properties are held to the same standard by `PropertyCoverageTest`, which detects coverage rather than
 declaring it: a property counts as covered when a test labels an assertion with its id
 (`.as("X7: ...")`), a convention the property tests already followed. Nothing has to be maintained for a
-covered property, so only the exceptions need an entry - and `N5`, ledger's `L3`, `L5`, `L7` and `L8`,
-and all of i18n's `I1-I7` have one, with reasons. That is 12 decisions that were previously invisible,
-down from 17 when the journal entry types landed and five of ledger's nine invariants gained tests. The
+covered property, so only the exceptions need an entry - and `N5`, ledger's `L3`, `L5` and `L8`,
+and all of i18n's `I1-I7` have one, with reasons. That is 11 decisions that were previously invisible,
+down from 17 when the journal entry types landed and five of ledger's nine invariants gained tests, and
+down one more when `libs/booking` asserted L7's accounting half. The
 map is checked in the other direction too: a deferral whose property a test now labels fails the build as
 stale, which is how the five were found rather than remembered.
 
@@ -1006,30 +1015,44 @@ change, so it is stated explicitly:
 | Area | Decision | Code | Notes |
 |---|---|---|---|
 | Netting, tax, money | ADR 0005, 0006, 0011 | **Implemented, tested** | 21 tests green |
-| Journal entries and the hash chain | ADR 0004, 0012 | **Model implemented and tested; no write path** | 41 tests green, plus the 7 for `Money` counted above. `JournalEntry` and `Posting` enforce L1, L2 and L6 on construction; the hash is derived rather than stored, so an entry whose hash disagrees with its content cannot be constructed at all; `EntryChain` and `FxLinkage` verify a chain and its FX pairing as pure functions an offline job can run. Five of the nine ledger invariants are asserted, and the four that are not name the mechanism they wait on |
+| Journal entries and the hash chain | ADR 0004, 0012 | **Implemented, tested, and now written to** | 48 tests green. `JournalEntry` and `Posting` enforce L1, L2 and L6 on construction; the hash is derived rather than stored, so an entry whose hash disagrees with its content cannot be constructed at all; `EntryChain` and `FxLinkage` verify a chain and its FX pairing as pure functions an offline job can run. The tables exist (`libs/ledger`'s `V301`) and `POST /obligations` appends to them, so a chain that came out of a database is verified by `EntryChain` in `RecordObligationApiTest` - which is the first time that verifier has run against stored rows rather than against rows a test built |
 | FX rates and the residual | ADR 0013 | **Implemented, tested** | 35 tests green. `libs/fx` owns the rate type, the exact conversion and `FxQuote` |
 | Per-currency composition | ADR 0012 | **Implemented, tested** | 20 tests green. `libs/planning` partitions a cycle, composes the per-currency plans, and derives the external FX requirement |
 | RULEs B3, B4, B5, B10-B17, B18-B22 | ADR 0012, 0013 | **Enforced** | 24 ArchUnit rules plus `SchemaOwnershipTest`, all verified non-vacuous. B3 and B4 had been stated in section 5.1 and never enforced; B11 was described as enforced and did not exist; B12-B15 had no subject until `apps/api` had sources; B16 needed a persistence adapter and B17 a schema; B22 needed the module it constrains |
 | `apps/api` preview over real persistence | ADR 0009, 0004 | **Implemented and tested** | 10 tests green against a container: the hexagonal layers, the RFC 9457 error path, the contract's preview reading `obligations` through jOOQ, and the `asOf` semantics that make a past preview reproducible |
+| `POST /obligations` - recording and booking | ADR 0004, 0012; RULE B17, B15 | **Implemented and tested; single-currency only** | 10 tests green against a container, 22 in the module. The first write path in the product: it records the obligation and books the entry a commitment produces, in one transaction, then verifies the stored chain with `EntryChain` and the stored positions with `Balances`. Idempotent on the contract's required header - a replay answers with what was recorded and books nothing. Cross-currency answers `503` and writes nothing, because no rate provider is configured; see the caveat below |
+| The append path and the chain-head adapter | ADR 0004, 0012 | **Implemented and tested** | `JooqChainHeads` takes a Postgres advisory lock per `(group, currency)` before reading the chain's head, and refuses to be asked outside a transaction, because a lock whose lifetime is the transaction cannot protect a read that is not in one. The head is the chain's *leaf* rather than its newest entry by time: `occurred_at` is when a commitment was made, so recording one with a past instant would otherwise be mistaken for the head. `journal_entries_one_successor_per_hash` is the second line of defence, making a forked chain unrepresentable |
+| `currencies`, `fx_rates`, `fx_quotes` | ADR 0013; RULE B17 | **`currencies` implemented; rates and quotes not** | `libs/fx`'s `V401` creates `currencies` and seeds three rows, because the contract's `Money` carries a currency code and no exponent: the write path cannot build an amount without the catalogue, which makes it a prerequisite rather than a convenience. `fx_rates` and `fx_quotes` do not exist yet, and that is why cross-currency recording fails closed rather than half-working |
 | `platform/persistence` | - | **Implemented and tested** | 2 tests green. jOOQ and Flyway wiring, PgBouncer-compatible JDBC settings, and a guard that refuses to start when Flyway finds no migrations |
-| `libs/booking` | ADR 0012, 0013; L7, L9; RULE B6, B22 | **Implemented and tested; nothing calls it yet** | 6 tests green, one of them a 300-case property. Both shapes book correctly, L9 is asserted with the verifier that will run against the stored entries, and L7's accounting half moved out of the deferral map. It has no consumer until `POST /obligations` is wired, which is the next slice |
-| `fx_clearing` postings | ADR 0012 | **Not implemented** | Nothing books the entry pair to the ledger. The plan computes the clearing position and the ledger can now express, balance and verify the entries, but no code writes one - that is `apps/api`'s record-obligation use case |
+| `libs/booking` | ADR 0012, 0013; L7, L9; RULE B6, B22 | **Implemented, tested, and called** | 7 tests green, one of them a 300-case property. Both shapes book correctly, L9 is asserted with the verifier that will run against the stored entries, and L7's accounting half moved out of the deferral map. It is no longer an abstraction without a caller: `POST /obligations` books through it, so the decision this module contains is the decision the ledger now records |
+| `fx_clearing` postings | ADR 0012 | **Half implemented** | Single-currency bookings write real entries, so the ledger is written to for the first time. The clearing account's linked pair is still not written by anything: `Bookings.crossCurrency` is implemented and tested, and `RecordObligationService` refuses the cross-currency case before it can reach it - because a cross-currency obligation's quote has nowhere to live yet, and storing the debt side alone would be read back as a single-currency obligation |
 | Funding state, per-currency runs | ADR 0012 | **Not implemented** | Needs `workers/settlement`, which has no sources |
 | Localization | ADR 0014 | **Not implemented** | No catalogs, no `shared/i18n`, no locale resolution |
 | RULEs F10-F12 | ADR 0014 | **Not enforced** | Listed in section 8 as gates, not yet written. B20 was in this row and is enforced now |
 
-So the honest position is narrower than "multicurrency is done": **the decision about what a commitment
-books now exists and is proven, and nothing calls it yet.** That gap is worth stating plainly rather than
-burying. `libs/booking` decides which entries a commitment produces, in both shapes, with L9 asserted against
-the verifier that will run on the stored entries - and no deployable invokes it, so no entry has ever been
-written by this codebase. The API reads real obligations from a real database; the tests write them with SQL.
+So the honest position has moved, and it moved once: **this codebase writes to its ledger now, for the first time,
+and it writes one shape.** `POST /obligations` records a commitment, books the entry that commitment produces,
+and stores both in one transaction - and the tests do not inspect the result, they verify it: the rows are
+rebuilt as ledger types and handed to `EntryChain` and `Balances`, the verifiers an offline job will run. That
+is the wire from the decision to the record, and the decision is now one `libs/booking` makes rather than one
+no code calls.
 
-What is still missing is the wire from the decision to the record. `POST /obligations` is fully specified in
-the contract, including the `settleInCurrency` case and the `fx.rate_stale` failure it fails closed with, and
-it is unimplemented - which is the same slice as the ledger's tables, the append path, and the chain-head
-adapter that has to serialise appends before reading. After that the run: the cycle's residual against
-`fx_clearing` per currency (L8), and a run gated on its funding. For localization it is the Phase 1
-scaffolding, before the first screen exists to retrofit.
+What is deliberately narrower than "recording works":
+
+- **Cross-currency fails closed, and that is the design rather than a gap.** No rate provider is configured
+  anywhere, so a request that names `settleInCurrency` is answered `503` with `fx.rate_unavailable` and writes
+  nothing. `libs/fx`'s port forbids a placeholder rate, and MASTER-PLAN section 4 already says "no rate means no
+  cross-currency". The landmine to read before wiring a provider is in `RecordObligationService`: the slice that
+  supplies rates has to bring the quote's storage with it (`fx_rates`, `fx_quotes`, the obligation's quote
+  columns and the read path), because a cross-currency obligation stored without its quote would be read back as
+  a single-currency one, in the currency the creditor is not being paid in.
+- **No run.** Nothing settles: `netted` and `settled` are in the status vocabulary and unreachable, there is no
+  `workers/settlement`, and the cycle's residual against `fx_clearing` per currency (L8) is what the run is for.
+- **No funding gate.** A run gated on its funding needs the run.
+- **Localization is still Phase 1 scaffolding**, before the first screen exists to retrofit.
+
+The order that follows from that: the rate source and the quote's storage together, then the run and its
+funding, then the client.
 
 
 Toolchain constraints discovered by actually running the build. All are now pinned with reasons:
@@ -1057,6 +1080,13 @@ Toolchain constraints discovered by actually running the build. All are now pinn
 | **A new module's rule fails as vacuous, and only `emptyShould` catches it before the visibility guard does** | RULE B22 names `io.reductxn.booking..`, and `platform/testing` did not depend on `libs/booking`, so ArchUnit imported none of its classes: the rule reported "failed to check any classes". `ArchUnitVisibilityTest` exists for exactly this and did not catch it, because its list of modules is hand-maintained too - the list had no entry for the new module either. What saved it was `failOnEmptyShould`, which is on. Two hand-maintained lists, and the guard that watches the first is not watched by anything; that is worth knowing rather than fixing with a third list. |
 | **jqwik's `Combinators.combine` returns a combinator, not an arbitrary** | So `filter` and `map` do not exist on it - only `as` and `flatAs` - and the compile error names an inference variable rather than the method that is missing. The generator has to materialise its terms before filtering. The same file also found that `Arbitraries.nothing()` carries a Void that must be disambiguated at every call site, which is why the filter version reads better. |
 | **Two coverage maps, and a rule can be decided by the wrong one** | A new MASTER-PLAN row named booking's coverage with the literal word RULE in front of "L7, L9", and RuleCoverageTest then demanded a decision for L7 in *its* map - which is for B/S/R/P/N rules. The L-properties are declared in `docs/specs/ledger.md` and decided in PropertyCoverageTest, which had just moved L7 out of its deferral because a test labels it. The two maps disagreed about who owned L7, and wording caused it: a prefix that reads as a rule declaration is one. Widening the reference format to cite a guard in another module was tried first and abandoned - a Gradle dependency exposes main classes, not another module's tests, so the cite could not resolve - and the abandoned mechanism was reverted rather than left in place unused. This paragraph was then rewritten to describe the offending text instead of quoting it, because quoting it produced a fresh declaration and the same failure: the checker cannot tell a mention from a claim, which is a limitation worth knowing before writing prose about it. |
+| **A digest can cover a value the database cannot keep** | `Commitment` took an `Instant` and `JournalEntry` hashed it; Postgres keeps microseconds in a `timestamptz` and Java's `Instant` has nanoseconds. So an entry built from `Instant.now()` stored a row that rehashed to a *different* value - meaning the chain an offline verifier recomputes from the rows would not match the hashes in them, and the ledger's central claim, that it can be verified from its own rows, would have been false. Nothing in the pure modules could have caught it: the model was internally consistent and only the round trip through storage disagreed. Found because `RecordObligationApiTest` walks the stored chain instead of inspecting it, and fixed where entries are built - `Commitment` truncates to microseconds, so the hash is a function of what can be stored. |
+| **A hash that covers an order has to store that order** | `EntryHash` deliberately covers postings *in the order they are held*, so that a reordering a reader would see is detectable rather than normalised away - which is right, and means an entry can only be verified from its rows if the order it was written in can be read back. The first draft of `postings` derived the primary key from a posting's position and stored no position, and a UUID does not sort in position order: `ORDER BY id` returned the two postings shuffled, so the rebuilt entry rehashed differently. The column is now `position`, unique per entry - a near-miss that only appeared once a chain was verified from storage. |
+| **A fail-closed path needs a status the contract may not have** | The contract promised `settleInCurrency` would "fail closed if no fresh rate is available (code `fx.rate_stale`)" and listed `422` as the only failure. `fx.rate_unavailable` is not a 422: the request is answerable, the server just cannot answer it yet, and a client that retried a 422 forever or gave up on a 503 would be wrong in opposite directions. So the contract was edited first (RULE C1) to add a `503` with the two codes distinguished, and the code enforces the distinction in one map. `HttpStatus.UNPROCESSABLE_ENTITY` also turned out to be deprecated in Spring 7 in favour of RFC 9110's `UNPROCESSABLE_CONTENT` - the same 422 on the wire. |
+| **Two written rules disagreed about what a code is namespaced by** | The contract says a code's first segment names "the owning domain module" and its examples are `ledger.*`, `fx.*`, `settlement.*`, which reads like `obligation.*` for an obligation. `DomainErrorCodeTest` derives the namespace from the package's module segment instead, and every class in `apps/api` sits in `io.reductxn.api..`. The rules agree for the libraries and diverge for the one deployable that owns several domains, so the codes are `api.obligation_*` - the mechanical rule won because it is the one that runs, and the divergence is recorded where the constants are. The same guard then reshaped the design: it requires one `public static final String CODE` per `DomainError`, so a single record holding four codes - the first shape - could not be enumerated for the parity gate, and became one type per code. |
+| **Bean-validation annotations would have been silently inert** | `spring-boot-starter-web` does not bring a validation provider, so `@NotNull` on a request-body record is ignored and a missing field arrives as `null` - which is worse than not annotating, because the annotation reads like a check. The controller validates the fields the use case cannot be handed at all, and the reason it is a check rather than a second failure vocabulary is that a malformed request is a `400` while a well-formed request the domain refuses is a `422` with a code. |
+
+
 
 The pure core also still compiles standalone with plain `javac` (no Gradle, no Spring), which is the
 property that lets an auditor reproduce a settlement in isolation (principle P4).

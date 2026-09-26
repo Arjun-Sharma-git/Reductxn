@@ -88,3 +88,17 @@ quote at all.
   rather than posted.
 - Whether a booking should be able to append to more than two chains. A commitment that spans three
   currencies is not a shape the product has.
+
+## 8. The instant is truncated to microseconds
+
+`Commitment` truncates `occurredAt` before it is used. That is not tidiness and it is not this module's
+preference: the instant becomes the entry's `occurred_at` (a Postgres `timestamptz`, microsecond precision) and
+it is part of the canonical encoding the hash covers, so an instant with nanoseconds would produce an entry
+whose *stored row rehashes to a different value*. The chain an offline verifier recomputes from the rows would
+then not match the hashes in them, and the ledger's claim to be verifiable from its own rows would be false.
+
+It was found by verifying a stored chain rather than a constructed one. Truncating rather than refusing,
+because the two are the same commitment: nothing ends a commitment in the nanosecond after the microsecond it
+was recorded in, and a client's timestamp with more digits than the ledger keeps should not be a failed
+request. The related constraint - that a posting's position has to be stored, because the hash covers the order
+it was written in - is in `docs/specs/ledger.md` section 7.

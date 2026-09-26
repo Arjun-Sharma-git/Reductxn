@@ -176,6 +176,34 @@ class BookingsTest {
                 .hasMessageContaining("cannot also be one of its parties");
     }
 
+    @Test
+    void anInstantWithNanosecondsBooksTheSameEntryAsItsStoredPrecision() {
+        // The ledger stores `occurred_at` as a Postgres timestamptz, which keeps microseconds, and the instant
+        // is part of the encoding the entry's hash covers (L4). So an instant with nanoseconds would produce
+        // an entry whose stored row rehashes to a different value - and the chain an offline verifier
+        // recomputes from the rows would not match the hashes in them. The commitment truncates, so both of
+        // these are the same entry, with the same hash.
+        Instant withNanos = MADE_AT.plusNanos(123_456_789L);
+        Instant withoutNanos = withNanos.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+
+        assertThat(withoutNanos).isNotEqualTo(withNanos);
+
+        JournalEntry stored = Bookings.singleCurrency(
+                HEADS,
+                new Commitment(OBLIGATION, GROUP, withNanos, "idem-1", null),
+                new SingleCurrencyObligation(ALICE, BORIS, Money.of(12_500L, INR)));
+
+        JournalEntry verifiable = Bookings.singleCurrency(
+                HEADS,
+                new Commitment(OBLIGATION, GROUP, withoutNanos, "idem-1", null),
+                new SingleCurrencyObligation(ALICE, BORIS, Money.of(12_500L, INR)));
+
+        assertThat(stored.occurredAt())
+                .as("what is stored is what the hash attests to")
+                .isEqualTo(withoutNanos);
+        assertThat(stored.hash()).isEqualTo(verifiable.hash());
+    }
+
     private static Commitment commitment() {
         return new Commitment(OBLIGATION, GROUP, MADE_AT, "idem-1", null);
     }
