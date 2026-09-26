@@ -92,6 +92,83 @@ class SettlementCommandTest extends WorkerDatabaseTest {
     }
 
     @Test
+    void openRecordsTheCycleAndComputesNothing() {
+        obligation(ALICE, BORIS, 10_000L, "INR", 2);
+
+        OptionalInt code = command.execute(
+                args("--reductxn.command=open", "--reductxn.group=" + GROUP, "--reductxn.as-of=" + AS_OF),
+                terminal());
+
+        assertThat(code).hasValue(SettlementCommand.OK);
+        assertThat(text())
+                .contains("open: group " + GROUP + ", cycle as of " + AS_OF)
+                .contains("the cycle is open");
+        assertThat(countIn("settlement_cycles")).isEqualTo(1);
+        assertThat(countIn("settlement_runs"))
+                .as("the separation this command exists for: a period can be closed today and settled tomorrow, "
+                        + "and a run only exists once somebody computes what is in it")
+                .isZero();
+    }
+
+    @Test
+    void openingTheSameCycleTwiceIsNotARefusal() {
+        command.execute(args("--reductxn.command=open", "--reductxn.group=" + GROUP, "--reductxn.as-of=" + AS_OF),
+                terminal());
+
+        OptionalInt code = command.execute(
+                args("--reductxn.command=open", "--reductxn.group=" + GROUP, "--reductxn.as-of=" + AS_OF),
+                terminal());
+
+        assertThat(code)
+                .as("ok rather than refused: the cycle exists, which is what the caller asked for, and a shell "
+                        + "script that opens a cycle before settling it must be safe to run twice")
+                .hasValue(SettlementCommand.OK);
+        assertThat(text()).contains("the cycle was already open");
+        assertThat(countIn("settlement_cycles")).isEqualTo(1);
+    }
+
+    @Test
+    void openWithoutAGroupIsAUsageError() {
+        assertThat(command.execute(args("--reductxn.command=open"), terminal()))
+                .hasValue(SettlementCommand.USAGE);
+        assertThat(command.execute(
+                args("--reductxn.command=open", "--reductxn.group=not-a-uuid"), terminal()))
+                .hasValue(SettlementCommand.USAGE);
+        assertThat(text()).contains("usage error:");
+    }
+
+    @Test
+    void computeOpenedPlansWhatSomebodyOpened() {
+        obligation(ALICE, BORIS, 10_000L, "INR", 2);
+
+        command.execute(args("--reductxn.command=open", "--reductxn.group=" + GROUP, "--reductxn.as-of=" + AS_OF),
+                terminal());
+
+        OptionalInt code = command.execute(args("--reductxn.command=compute-opened"), terminal());
+
+        assertThat(code).hasValue(SettlementCommand.OK);
+        assertThat(text())
+                .contains("compute-opened: 1 cycle(s) considered")
+                .contains("(awaiting_approval)")
+                .contains("is run");
+        assertThat(countIn("settlement_runs"))
+                .as("a cycle that nobody computed has a plan after this, which is what a group's settlement "
+                        + "schedule will rely on")
+                .isEqualTo(1);
+    }
+
+    @Test
+    void computeOpenedWithNothingToDoSaysSoWithoutFailing() {
+        OptionalInt code = command.execute(args("--reductxn.command=compute-opened"), terminal());
+
+        assertThat(code)
+                .as("a scheduled job that exits non-zero because nobody opened a cycle would page somebody for "
+                        + "nothing")
+                .hasValue(SettlementCommand.OK);
+        assertThat(text()).contains("no cycle has been opened and left uncomputed");
+    }
+
+    @Test
     void aWrongInvocationIsNotARefusal() {
         assertThat(command.execute(args("--reductxn.command=compute"), terminal()))
                 .as("a missing option is a usage error, not the domain saying no")

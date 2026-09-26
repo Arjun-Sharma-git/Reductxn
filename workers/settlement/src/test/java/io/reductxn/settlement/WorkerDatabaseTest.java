@@ -5,7 +5,9 @@ import io.reductxn.fx.api.FxRate;
 import io.reductxn.kernel.api.Result;
 import io.reductxn.ledger.api.Currency;
 import io.reductxn.ledger.api.Money;
+import io.reductxn.settlement.port.in.ComputeOpenedCycles;
 import io.reductxn.settlement.port.in.ComputeRun;
+import io.reductxn.settlement.port.in.OpenCycle;
 import io.reductxn.settlement.port.in.ComputedRun;
 import io.reductxn.settlement.port.in.DecideOnRun;
 import io.reductxn.settlement.port.in.ExecuteRun;
@@ -101,6 +103,11 @@ abstract class WorkerDatabaseTest {
         // `ScheduledRunDriverTest`.
         registry.add("reductxn.settlement.drive.enabled", () -> "false");
 
+        // The computer's cadence, off, for the same reason and with one more: a tick that computed a cycle
+        // mid-test would turn "an operator opened a cycle and nothing was computed" into a race. Its seam is
+        // covered without a database, in `ScheduledRunComputerTest`.
+        registry.add("reductxn.settlement.compute.enabled", () -> "false");
+
         // The worker's own migrations, plus the API's. The two deployables share one schema and each jar brings
         // only its own migrations (RULE B17), so `V101__obligations.sql` is not on this module's classpath - and
         // may not be, because the worker may not depend on apps/api (RULE B6). Pointing Flyway at the file
@@ -125,6 +132,12 @@ abstract class WorkerDatabaseTest {
      */
     @Autowired
     protected ComputeRun computeRun;
+
+    @Autowired
+    protected OpenCycle openCycle;
+
+    @Autowired
+    protected ComputeOpenedCycles computeOpenedCycles;
 
     @Autowired
     protected DecideOnRun decideOnRun;

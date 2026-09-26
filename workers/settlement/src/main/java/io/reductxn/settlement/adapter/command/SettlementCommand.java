@@ -3,12 +3,15 @@ package io.reductxn.settlement.adapter.command;
 import io.reductxn.kernel.api.Result;
 import io.reductxn.ledger.api.Currency;
 import io.reductxn.ledger.api.Money;
+import io.reductxn.settlement.port.in.ComputeOpenedCycles;
 import io.reductxn.settlement.port.in.ComputeRun;
+import io.reductxn.settlement.port.in.ComputedCycles;
 import io.reductxn.settlement.port.in.ComputedRun;
 import io.reductxn.settlement.port.in.DriveRuns;
 import io.reductxn.settlement.port.in.DrivenRuns;
 import io.reductxn.settlement.port.in.Escalation;
 import io.reductxn.settlement.port.in.FundingRequest;
+import io.reductxn.settlement.port.in.OpenCycle;
 import io.reductxn.settlement.port.in.PartitionOutcome;
 import io.reductxn.settlement.port.in.PlannedTransfer;
 import io.reductxn.settlement.port.in.ReadStuckTransfers;
@@ -41,6 +44,11 @@ import java.util.UUID;
  *   java -jar workers-settlement.jar --reductxn.command=compute \
  *        --reductxn.group=&lt;uuid&gt; [--reductxn.as-of=&lt;instant&gt;]
  *
+ *   java -jar workers-settlement.jar --reductxn.command=open \
+ *        --reductxn.group=&lt;uuid&gt; [--reductxn.as-of=&lt;instant&gt;]
+ *
+ *   java -jar workers-settlement.jar --reductxn.command=compute-opened [--reductxn.limit=&lt;n&gt;]
+ *
  *   java -jar workers-settlement.jar --reductxn.command=drive [--reductxn.run=&lt;uuid&gt;]
  *
  *   java -jar workers-settlement.jar --reductxn.command=fund --reductxn.run=&lt;uuid&gt; \
@@ -56,9 +64,15 @@ import java.util.UUID;
  * <p><strong>Why a command line rather than an endpoint.</strong> This module has no HTTP surface and must not
  * grow one: an endpoint here would be a second write path to the same rows, without the API's validation,
  * idempotency or error vocabulary. A command line is not a network surface - it is an operator with a shell -
- * and it is the shape that fits the two things that are not automatic: opening a cycle (when a cycle is due is a
- * group's schedule, and group schedules do not exist) and recording that currency arrived (a treasury fact
- * somebody observed).
+ * and it is the shape that fits the things that are not automatic: opening a cycle (when a cycle is due is a
+ * group's schedule, and group schedules do not exist), computing a cycle somebody opened, and recording that
+ * currency arrived (a treasury fact somebody observed).
+ *
+ * <p><strong>Two of those have a cadence as well, and one does not.</strong> {@code drive} is what the scheduled
+ * driver does every minute and {@code compute-opened} is what the scheduled computer does, and both exist here so
+ * that a deployment can run this worker as a scheduled job instead of a daemon. {@code open} has no cadence by
+ * design: nothing in this build decides that a cycle has come due, so the one thing it cannot be is automatic -
+ * what will replace it is a group's settlement schedule, not a scheduler.
  *
  * <p><strong>What is deliberately not here: approving a run.</strong> {@code DecideOnRun} is a member's act, and
  * a command that approved on a member's behalf would let an operator settle a group's money with a keystroke no
@@ -98,6 +112,8 @@ public class SettlementCommand {
     private static final int DEFAULT_ESCALATION_LIMIT = 50;
 
     private final ComputeRun computeRun;
+    private final OpenCycle openCycle;
+    private final ComputeOpenedCycles computeOpenedCycles;
     private final DriveRuns driveRuns;
     private final RecordFxFunding recordFxFunding;
     private final ReadStuckTransfers readStuckTransfers;
@@ -110,6 +126,8 @@ public class SettlementCommand {
 
     public SettlementCommand(
             ComputeRun computeRun,
+            OpenCycle openCycle,
+            ComputeOpenedCycles computeOpenedCycles,
             DriveRuns driveRuns,
             RecordFxFunding recordFxFunding,
             ReadStuckTransfers readStuckTransfers,
@@ -121,6 +139,8 @@ public class SettlementCommand {
             @Value("${reductxn.settlement.drive.batch-size:50}") int batchSize) {
 
         this.computeRun = computeRun;
+        this.openCycle = openCycle;
+        this.computeOpenedCycles = computeOpenedCycles;
         this.driveRuns = driveRuns;
         this.recordFxFunding = recordFxFunding;
         this.readStuckTransfers = readStuckTransfers;
@@ -147,13 +167,110 @@ public class SettlementCommand {
 
         return OptionalInt.of(switch (command.get(0)) {
             case "compute" -> compute(args, out);
+            case "open" -> open(args, out);
+            case "compute-opened" -> computeOpened(args, out);
             case "drive" -> drive(args, out);
             case "fund" -> fund(args, out);
             case "escalations" -> escalations(args, out);
             case "resolve" -> resolve(args, out);
             default -> usage(out, "unknown command '" + command.get(0)
-                    + "'. This worker knows: compute, drive, fund, escalations, resolve");
+                    + "'. This worker knows: compute, open, compute-opened, drive, fund, escalations, resolve");
         });
+    }
+
+    /**
+     * Opens a cycle, and computes nothing.
+     *
+     * <p><strong>The one thing a settlement policy decides.</strong> Which instant the books are closed at is a
+     * group's decision - everything else about a settlement is a consequence of it, including which commitments
+     * are in the cycle and which rates apply - and an operator has to supply it here because group schedules do
+     * not exist. What this command deliberately does not do is plan: a plan is the cadence's work within a minute,
+     * or {@code --reductxn.command=compute-opened} does it now, and separating them is what lets a period be
+     * closed today and settled tomorrow.
+     */
+    private int open(ApplicationArguments args, PrintStream out) {
+        OptionalInt missing = require(args, out, "group");
+        if (missing.isPresent()) {
+            return missing.getAsInt();
+        }
+
+        UUID groupId;
+        Instant asOf;
+
+        try {
+            groupId = UUID.fromString(option(args, "group").orElseThrow());
+            asOf = option(args, "as-of").map(Instant::parse).orElseGet(clock::instant);
+        } catch (IllegalArgumentException malformed) {
+            return usage(out, "group must be a uuid and as-of an ISO-8601 instant: " + malformed.getMessage());
+        }
+
+        boolean opened = openCycle.open(new RunRequest(groupId, asOf));
+
+        out.printf("open: group %s, cycle as of %s%n", groupId, asOf);
+
+        if (opened) {
+            out.println("  the cycle is open. Nothing is computed yet: a cycle is keyed by the group and the "
+                    + "instant, and the plan over it is the cadence's work - within a minute, or now with "
+                    + "--reductxn.command=compute-opened.");
+        } else {
+            out.println("  the cycle was already open, which is not a failure: a cycle is keyed by the group and "
+                    + "the instant, so this was a request for one that exists. Opening is idempotent on purpose - "
+                    + "the alternative is a second plan for a cycle the group has already been asked about.");
+        }
+
+        return OK;
+    }
+
+    /**
+     * Computes every cycle that was opened and has no run - the scheduled computer's pass, from a shell.
+     *
+     * <p>Here for the reason {@code drive} is: a deployment may run this worker as a scheduled job rather than as a
+     * daemon, in which case the cadence is a cron entry and the pass is this command. A refusal is not a failure
+     * and does not change the exit code - a cycle a group has not filled yet is looked at every pass, and exiting
+     * non-zero for it would turn an ordinary state into an alert. A fault does change it: a plan that could not be
+     * computed is something somebody has to look at, and a job that exited zero would not tell anybody.
+     */
+    private int computeOpened(ApplicationArguments args, PrintStream out) {
+        int limit = batchSize;
+
+        if (option(args, "limit").isPresent()) {
+            try {
+                limit = Integer.parseInt(option(args, "limit").orElseThrow());
+            } catch (IllegalArgumentException malformed) {
+                return usage(out, "limit must be a whole number of cycles: " + malformed.getMessage());
+            }
+        }
+
+        ComputedCycles report;
+
+        try {
+            report = computeOpenedCycles.computeOpened(limit);
+        } catch (IllegalArgumentException refusedTheBatch) {
+            return usage(out, refusedTheBatch.getMessage());
+        }
+
+        if (report.outcomes().isEmpty()) {
+            out.printf("compute-opened: no cycle has been opened and left uncomputed (batch %d)%n", limit);
+            return OK;
+        }
+
+        out.printf("compute-opened: %d cycle(s) considered, batch %d: %d computed, %d refused, %d failed%n",
+                report.outcomes().size(), limit, report.computed(), report.refused(), report.faulted());
+
+        for (ComputedCycles.CycleOutcome outcome : report.outcomes()) {
+            if (outcome.computed()) {
+                out.printf("  cycle %s of group %s is run %s (%s)%n",
+                        outcome.cycleId(), outcome.groupId(), outcome.runId(), outcome.status().wireName());
+            } else if (outcome.refused()) {
+                out.printf("  cycle %s of group %s was refused: %s%n",
+                        outcome.cycleId(), outcome.groupId(), outcome.refusal());
+            } else {
+                out.printf("  cycle %s of group %s could not be computed: %s%n",
+                        outcome.cycleId(), outcome.groupId(), outcome.fault());
+            }
+        }
+
+        return report.faulted() == 0 ? OK : REFUSED;
     }
 
     /**
@@ -163,6 +280,10 @@ public class SettlementCommand {
      * settlement schedule does not exist yet (groups do not), so the alternative to this argument would be a
      * policy invented here - "settle whatever is open, every time the job runs" - which is a decision about a
      * group's money that this slice is in no position to make.
+     *
+     * <p>It opens and computes in one act, which {@code --reductxn.command=open} splits in two. This is the
+     * command to reach for when the answer is wanted now; that one is what a policy uses, and the cadence turns
+     * its cycles into plans.
      */
     private int compute(ApplicationArguments args, PrintStream out) {
         OptionalInt missing = require(args, out, "group");

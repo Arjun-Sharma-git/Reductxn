@@ -99,6 +99,8 @@ public class JooqRuns implements Runs {
     private static final Field<UUID> DUE_CYCLE_GROUP = DSL.field(DSL.name("due_cycle", "group_id"), UUID.class);
     private static final Field<OffsetDateTime> DUE_CYCLE_AS_OF =
             DSL.field(DSL.name("due_cycle", "as_of"), OffsetDateTime.class);
+    private static final Field<OffsetDateTime> DUE_CYCLE_CREATED =
+            DSL.field(DSL.name("due_cycle", "created_at"), OffsetDateTime.class);
 
     /** The states a driver can act on, as {@code RunStatus.wireName()} spells them. */
     private static final List<String> DRIVEABLE = List.of(
@@ -221,7 +223,7 @@ public class JooqRuns implements Runs {
                 .and(CYCLE_AS_OF.eq(asOf.atOffset(ZoneOffset.UTC)))
                 .fetchOne();
 
-        return cycle == null ? Optional.empty() : Optional.of(describe(cycle));
+        return cycle == null ? Optional.empty() : describe(cycle);
     }
 
     @Override
@@ -307,7 +309,49 @@ public class JooqRuns implements Runs {
                             + "deleted rather than that a run was opened without one");
         }
 
-        return Optional.of(describe(cycle));
+        return Optional.of(describe(cycle)
+                .orElseThrow(() -> new IllegalStateException(
+                        "run " + runId + " was found by its id and its cycle " + runRow.get(RUN_CYCLE)
+                                + " describes no run. The run's own row was read in this transaction, so this "
+                                + "means the rows went somewhere else between the two queries")));
+    }
+
+    @Override
+    public List<Runs.OpenedCycle> cyclesWithoutRuns(int batchSize) {
+        return dsl.select(DUE_CYCLE_ID, DUE_CYCLE_GROUP, DUE_CYCLE_AS_OF, DUE_CYCLE_CREATED)
+                .from(DUE_CYCLE)
+                // A left join rather than `not exists`, because the answer is a cycle and every column of it
+                // comes from the cycle: this is the shape that says "these cycles and, for each, is there a
+                // run" without a second query per row.
+                .leftJoin(DUE_RUN).on(DUE_RUN_CYCLE.eq(DUE_CYCLE_ID))
+                .where(DUE_RUN_ID.isNull())
+                // Oldest first: these are requests, and a queue is served in the order it arrived. See the port's
+                // javadoc for why the anti-starvation mark `dueForDriving` uses is not available here.
+                .orderBy(DUE_CYCLE_CREATED.asc(), DUE_CYCLE_ID.asc())
+                .limit(batchSize)
+                .fetch(row -> new Runs.OpenedCycle(
+                        row.get(DUE_CYCLE_ID),
+                        row.get(DUE_CYCLE_GROUP),
+                        row.get(DUE_CYCLE_AS_OF).toInstant(),
+                        row.get(DUE_CYCLE_CREATED).toInstant()));
+    }
+
+    @Override
+    public boolean openCycle(UUID cycleId, UUID groupId, Instant asOf, Instant at) {
+        Objects.requireNonNull(cycleId, "cycleId");
+        Objects.requireNonNull(groupId, "groupId");
+        Objects.requireNonNull(asOf, "asOf");
+        Objects.requireNonNull(at, "at");
+
+        // `do nothing` on conflict, and the count of what it did is the answer: the same insert `open` makes
+        // when it computes, so the two paths are one statement about one row. Zero rows means the cycle was
+        // already open, which is not an error - it is what the caller asked for.
+        return dsl.insertInto(CYCLES)
+                .columns(CYCLE_ID, CYCLE_GROUP, CYCLE_AS_OF, CYCLE_CREATED)
+                .values(cycleId, groupId, asOf.atOffset(ZoneOffset.UTC), at.atOffset(ZoneOffset.UTC))
+                .onConflict(CYCLE_GROUP, CYCLE_AS_OF)
+                .doNothing()
+                .execute() > 0;
     }
 
     @Override
@@ -692,7 +736,7 @@ public class JooqRuns implements Runs {
      * keeps the statement simple and the grouping visible. The alternative is a query per currency, which is
      * fine for a group with two currencies and not for one with twenty.
      */
-    private ComputedRun describe(Record cycle) {
+    private Optional<ComputedRun> describe(Record cycle) {
         UUID cycleId = cycle.get(CYCLE_ID);
 
         Record runRow = dsl.select(RUN_ID, RUN_STATUS, RUN_COMPUTED, RUN_CREATED)
@@ -701,12 +745,15 @@ public class JooqRuns implements Runs {
                 .fetchOne();
 
         if (runRow == null) {
-            // Both rows are written in one transaction, so this is not a state the code can reach - and it is
-            // still an error rather than an empty answer, because a cycle with no run would be reported as
-            // "nothing to settle" when the truth is that a plan was lost.
-            throw new IllegalStateException(
-                    "cycle " + cycleId + " exists with no run over it. The two are written together, so this "
-                            + "means a run row was deleted rather than that a cycle was opened without one");
+            // A cycle can be opened before anything computes it - that is what `openCycle` is for, and a
+            // settlement policy needs it: the instant the books are closed at is decided first, and the plan is a
+            // consequence of it. So an empty answer here is the ordinary state of a cycle somebody has just
+            // opened, and it is what `findRun` must report: `ComputeRun` reads it as "no plan yet" and plans; a
+            // throw would make every opened cycle an error in the cadence that exists to compute it.
+            //
+            // The pair of rows being written together is still true of `open`, which writes both, and of the
+            // retry path, which finds both. What is no longer true is that the two acts are the same act.
+            return Optional.empty();
         }
 
         UUID runId = runRow.get(RUN_ID);
@@ -826,8 +873,8 @@ public class JooqRuns implements Runs {
                 .map(PartitionOutcome::externalRequirement)
                 .toList();
 
-        return new ComputedRun(run, partitions, transfers, Quorum.of(positions, approvers, rejecters),
-                Funding.of(requirements, fundings));
+        return Optional.of(new ComputedRun(run, partitions, transfers, Quorum.of(positions, approvers, rejecters),
+                Funding.of(requirements, fundings)));
     }
 
     /** One partition's summary, with its transfers counted and split, and its clearing position from the rows. */
