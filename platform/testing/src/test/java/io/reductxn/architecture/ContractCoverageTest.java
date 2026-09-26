@@ -98,10 +98,10 @@ class ContractCoverageTest {
     /**
      * The operations the contract promises, the controllers do not serve, and somebody owns.
      *
-     * <p>These are the twelve left when ADR 0041 served the invite flow - which closes the route tree's screens. Each
-     * entry names the screen, slice or decision that would close it: members, cycles, runs, decisions, transfers,
-     * netting, obligations, currencies, rates, balances, tax and now the invites have all left this list, and the three
-     * reads the last-but-one audit found left it within two slices of being found.
+     * <p>These are the eight left when ADR 0042 served identity - the largest gap the contract had, and the one three
+     * other slices had already worked around. Each entry names the screen, slice or decision that would close it:
+     * members, cycles, runs, decisions, transfers, netting, obligations, currencies, rates, balances, tax, invites and
+     * now sign-in have all left this list.
      *
      * <p>The {@code POST /fx/quotes} entry is not a screen. It is recorded as a candidate for removal, and it is in
      * this map for the same reason the others are: an operation with no handler and no owner is the state that
@@ -118,17 +118,6 @@ class ContractCoverageTest {
             Map.entry("GET /groups/{groupId}/activity",
                     "activity - who did what. The member and invite screens link to it, and the rows it would read "
                             + "(decisions, invitations, membership changes) already exist"),
-            Map.entry("GET /me",
-                    "identity - the signed-in person. Without it the client falls back to a uuid, which is what made "
-                            + "the missing-members read look deliberate for seven slices"),
-            Map.entry("POST /auth/otp/request",
-                    "auth - sign-in, first step. A deployment with no identity provider has this as its whole "
-                            + "authentication story"),
-            Map.entry("POST /auth/otp/verify",
-                    "auth - sign-in, second step, and the one that would issue the token every boundary currently "
-                            + "takes on trust"),
-            Map.entry("POST /auth/refresh",
-                    "auth - renewing a session, which has no meaning until the two operations above it exist"),
             Map.entry("POST /fx/quotes",
                     "removal candidate rather than a screen: the recording path locks its own quote and the "
                             + "obligation response carries it, so nothing calls this. ADR 0033 removed three "
