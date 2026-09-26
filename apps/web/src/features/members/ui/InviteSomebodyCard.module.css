@@ -1,0 +1,16 @@
+/* The invitation card: a button, and then the one thing a member has to transcribe exactly. */
+
+.code {
+  margin-block: var(--rn-space-4) var(--rn-space-2);
+  font-family: var(--rn-font-amount);
+  font-size: var(--rn-text-2xl);
+  letter-spacing: 0.2em;
+  /* Selectable in one gesture: the code is meant to be copied, and picking it out of running text by hand is the kind
+     of small friction that ends with somebody typing it wrong. */
+  user-select: all;
+}
+
+.caption {
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-xs);
+}

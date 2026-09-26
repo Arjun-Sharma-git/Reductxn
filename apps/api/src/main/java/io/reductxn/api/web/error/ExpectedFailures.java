@@ -1,6 +1,7 @@
 package io.reductxn.api.web.error;
 
 import io.reductxn.api.port.in.DecisionRefusals;
+import io.reductxn.api.port.in.InviteRefusals;
 import io.reductxn.api.port.in.MemberRefusals;
 import io.reductxn.api.port.in.RunRefusals;
 import io.reductxn.api.port.in.ObligationRefusals;
@@ -64,6 +65,16 @@ public final class ExpectedFailures {
             // There is nothing to answer, which is not the same as answering nothing: a client that got this for a
             // malformed body would go looking for an id that was correct all along.
             Map.entry(RunRefusals.NoSuchRun.CODE, HttpStatus.NOT_FOUND),
+
+            // A code nobody holds. 404 rather than the 410 below, and the difference is what a client does next: a
+            // mistyped code is a code for nothing, while an invitation that ran out is one that existed and is spent.
+            Map.entry(InviteRefusals.NoSuchInvite.CODE, HttpStatus.NOT_FOUND),
+
+            // Gone, which is what the contract has said for "invite expired or exhausted" since the path was added.
+            // Two codes under one status because the conditions differ and the remedy does not - ask the group for a
+            // current code - so a client can say which one ran out without a second status to branch on.
+            Map.entry(InviteRefusals.InviteExpired.CODE, HttpStatus.GONE),
+            Map.entry(InviteRefusals.InviteExhausted.CODE, HttpStatus.GONE),
 
             // A conflict with what is already on the record: this member has answered this run, and an answer is
             // final. 409 rather than 422, because the request is well-formed and could have succeeded earlier - the

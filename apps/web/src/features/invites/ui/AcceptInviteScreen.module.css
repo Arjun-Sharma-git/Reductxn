@@ -1,0 +1,48 @@
+/* The accept screen: one question, and then the id this build has instead of a sign-in. */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-5);
+  max-inline-size: 60ch;
+  margin-inline: auto;
+  padding-block: var(--rn-space-8);
+}
+
+.lede {
+  color: var(--rn-text-muted);
+}
+
+.code {
+  margin: 0;
+  font-family: var(--rn-font-amount);
+  font-size: var(--rn-text-2xl);
+  letter-spacing: 0.2em;
+  user-select: all;
+}
+
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rn-space-3);
+  align-items: end;
+  margin-block-start: var(--rn-space-4);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-1);
+  font-size: var(--rn-text-sm);
+}
+
+.joined {
+  font-size: var(--rn-text-lg);
+}
+
+.identifier {
+  font-family: var(--rn-font-amount);
+  font-size: var(--rn-text-xs);
+  color: var(--rn-text-muted);
+  user-select: all;
+}

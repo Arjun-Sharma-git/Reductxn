@@ -162,6 +162,21 @@ than shown a number nobody could reproduce. One consequence is recorded rather t
 a position whose holder is the `fx_clearing` account, and the `NetPosition` schema carries no way to say so yet, so a
 client shows the identifier and the screen's footnote names both cases.
 
+`POST /v1/groups/{groupId}/invites` and `POST /v1/invites/{code}/accept` are the last two operations of section 6's
+route tree, and serving them closes the route tree's screens (ADR 0041). The slice also created the table, and the shape
+of the data followed from the wire: acceptance is addressed by the code alone, so **the code is the primary key** and is
+unique across the deployment rather than within a group - an `id` column would be a second identifier that nothing
+addresses. Creation has no request body in the contract, so the window (seven days) and the limit (none) are this
+deployment's decision, stated in the operation's description so a reader knows what they are getting.
+
+The rule the slice is about is what accepting a code does to somebody the group already has: **becoming a member is
+idempotent, so it is a success that changed nothing, and nothing is spent** - an invitation is spent by joining somebody,
+and nobody joined. That is why the acceptance asks about the membership *before* spending a use, and the two tests that
+pin it down are the slice's sharpest: an already-a-member acceptance leaves the row's `uses` at one, and a one-use code
+is still available for the person the group actually invited. Expired and exhausted are two codes under the one `410` the
+contract has declared since the path was added, and a code nobody holds is `404`: a mistyped code is a code for nothing,
+not a code that ran out.
+
 `GET /v1/tax/rules` and `GET /v1/tax/reports` are the last two operations of MASTER-PLAN section 6's route tree besides
 the group's invites, and they are the only ones in the contract that had a path, a summary, parameters and **no response
 schema at all** (ADR 0040). The report is therefore a shape this slice chose: one line per currency, `grossTax` recovered

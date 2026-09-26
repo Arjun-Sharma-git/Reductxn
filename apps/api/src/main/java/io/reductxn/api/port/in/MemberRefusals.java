@@ -46,4 +46,14 @@ public final class MemberRefusals {
 
     /** The roles this API stores, as the contract's schema and the table's CHECK agree on them. */
     public static final List<String> ROLES = List.of("admin", "member");
+
+    /**
+     * The longest name this API stores, which is the contract's `displayName` maxLength.
+     *
+     * <p>Here rather than in a controller because two operations record a member's name: the members write, and accepting
+     * an invitation - which is a way of becoming a member and refuses a name by the same rule. A limit declared in each
+     * controller is a limit that drifts, and the drift would show as an invitee accepted with a name the members write
+     * would have refused.
+     */
+    public static final int MAX_NAME_LENGTH = 120;
 }

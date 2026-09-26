@@ -52,8 +52,8 @@ import java.util.UUID;
 @RequestMapping("/v1/groups/{groupId}/members")
 public class GroupMembersController {
 
-    /** The contract's {@code displayName} maxLength. Refused rather than truncated. */
-    private static final int NAME_MAX_LENGTH = 120;
+    /** The contract's {@code displayName} maxLength, which lives in the port with the refusal that carries it. */
+    private static final int NAME_MAX_LENGTH = MemberRefusals.MAX_NAME_LENGTH;
 
     /** What a caller who does not say gets: the ordinary member, which is the common case. */
     private static final String DEFAULT_ROLE = "member";

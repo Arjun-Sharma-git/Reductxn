@@ -5,6 +5,7 @@ import { useTranslations } from '@/shared/i18n';
 import { Card, Notice, ProblemNotice } from '@/shared/ui';
 
 import { AddMemberForm } from './AddMemberForm';
+import { InviteSomebodyCard } from './InviteSomebodyCard';
 import styles from './MembersScreen.module.css';
 
 /**
@@ -72,6 +73,8 @@ export function MembersScreen({ groupId }: { readonly groupId: string }) {
           </table>
         ) : null}
       </Card>
+
+      <InviteSomebodyCard groupId={groupId} />
     </div>
   );
 }

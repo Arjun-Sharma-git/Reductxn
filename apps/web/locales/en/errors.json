@@ -1,6 +1,9 @@
 {
   "api.decision_already_answered": "This member has already answered this run. Change of mind is a new decision, not an overwritten one.",
   "api.decision_not_acceptable": "That answer is not one this run accepts.",
+  "api.invite_expired": "That invitation has expired, so it does not join anybody any more. Ask the group for a current code.",
+  "api.invite_exhausted": "That invitation has been used as many times as it allows. Ask the group for a current code.",
+  "api.no_such_invite": "That invite code does not exist. Check it against the one you were sent - a code is eight characters, with no 0, 1, I or O in it.",
   "api.no_such_run": "That settlement run does not exist.",
   "api.obligation_amount_not_positive": "An amount has to be more than zero.",
   "api.obligation_memo_too_long": "That note is too long. Keep it under 280 characters.",
