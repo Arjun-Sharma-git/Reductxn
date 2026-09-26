@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         // waiting two hours for a policy. Zero is a legitimate deployment setting (`Escalation`: "tell me about
         // every call that goes unanswered"), the worker's own writer is tested with the real policy in
         // `EscalationTest`, and this class is about the operator's surface over it.
-        properties = "reductxn.settlement.escalation.after=PT0S")
+        properties = {"reductxn.settlement.escalation.after=PT0S", "reductxn.settlement.reconcile.after=PT0S"})
 class SettlementCommandTest extends WorkerDatabaseTest {
 
     @Autowired
@@ -200,12 +200,15 @@ class SettlementCommandTest extends WorkerDatabaseTest {
 
         assertThat(code).hasValue(SettlementCommand.OK);
         assertThat(text())
-                .as("the operator gets what they need to act on: which instruction, which state the rail left it in, "
-                        + "how many calls went unanswered, and the rail's own last words")
+                .as("the operator gets what they need to act on: which instruction, which of the two reasons it is "
+                        + "stuck for, how old the trouble is, and the rail's own last words")
                 .contains(run.transfers().get(0).railRef())
-                .contains("authorized")
-                .contains("unanswered call(s) for")
+                .contains("no_answer")
+                .contains("call(s) in a row unanswered")
                 .contains("the rail last said")
+                .as("the report also says which two lines the policies drew, so a reader can interpret the listing")
+                .contains("silent before")
+                .contains("unconfirmed before")
                 .as("and the way back from the report, named with the options that make it a claim somebody owns")
                 .contains("Whether the money moved is the rail's answer to give")
                 .contains("--reductxn.command=resolve")
@@ -217,6 +220,32 @@ class SettlementCommandTest extends WorkerDatabaseTest {
         assertThat(text())
                 .as("a truncated listing says so, so the limit never hides the size of the problem")
                 .contains("oldest 1 listed");
+    }
+
+    @Test
+    void escalationsNamesATransferTheRailHasAndWillNotConfirm() {
+        // The other half of the report: the rail took the instruction and keeps answering "still pending", so no call
+        // goes unanswered and only the reconciliation threshold can see it (ADR 0026). The policy is zero here, so
+        // the assertion is about what the command says rather than about waiting an hour at the rail.
+        obligation(ALICE, BORIS, 10_000L, "INR", 2);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+        approveEveryone(run);
+        fundEveryRequirement(run);
+
+        PlannedTransfer transfer = run.transfers().get(0);
+        rail.scripting(transfer.railRef(), StubRail.Behaviour.ACCEPT_WITHOUT_CONFIRMING);
+
+        assertThat(command.execute(args("--reductxn.command=drive", "--reductxn.run=" + run.run().id()), terminal()))
+                .hasValue(SettlementCommand.OK);
+
+        assertThat(command.execute(args("--reductxn.command=escalations"), terminal()))
+                .hasValue(SettlementCommand.OK);
+        assertThat(text())
+                .as("a transfer the rail has is the one to ask the rail about, and the line says which problem it is")
+                .contains(transfer.railRef())
+                .contains("no_confirmation")
+                .contains("the rail is answering")
+                .contains("submitted, run");
     }
 
     @Test

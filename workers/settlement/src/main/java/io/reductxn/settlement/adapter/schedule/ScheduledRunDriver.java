@@ -5,9 +5,10 @@ package io.reductxn.settlement.adapter.schedule;
 import io.reductxn.settlement.port.in.DriveRuns;
 import io.reductxn.settlement.port.in.DrivenRuns;
 import io.reductxn.settlement.port.in.Escalation;
-import io.reductxn.settlement.port.in.Escalations;
-import io.reductxn.settlement.port.in.ReadEscalations;
-import io.reductxn.settlement.port.in.SilentTransfer;
+import io.reductxn.settlement.port.in.ReadStuckTransfers;
+import io.reductxn.settlement.port.in.Reconciliation;
+import io.reductxn.settlement.port.in.StuckTransfer;
+import io.reductxn.settlement.port.in.StuckTransfers;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,23 +65,26 @@ public class ScheduledRunDriver {
     private static final int ESCALATIONS_LOGGED = 20;
 
     private final DriveRuns driveRuns;
-    private final ReadEscalations readEscalations;
+    private final ReadStuckTransfers readStuckTransfers;
     private final Escalation escalation;
+    private final Reconciliation reconciliation;
     private final Clock clock;
     private final Duration window;
     private final int batchSize;
 
     public ScheduledRunDriver(
             DriveRuns driveRuns,
-            ReadEscalations readEscalations,
+            ReadStuckTransfers readStuckTransfers,
             Escalation escalation,
+            Reconciliation reconciliation,
             Clock clock,
             @Value("${reductxn.settlement.drive.window:PT2M}") Duration window,
             @Value("${reductxn.settlement.drive.batch-size:50}") int batchSize) {
 
         this.driveRuns = driveRuns;
-        this.readEscalations = readEscalations;
+        this.readStuckTransfers = readStuckTransfers;
         this.escalation = escalation;
+        this.reconciliation = reconciliation;
         this.clock = clock;
         this.window = window;
         this.batchSize = batchSize;
@@ -128,13 +132,22 @@ public class ScheduledRunDriver {
     }
 
     /**
-     * Says which transfers no rail has decided, and how long that has been true.
+     * Says which transfers no rail has decided, why, and how long that has been true.
      *
      * <p><strong>This is section 4.4's "or escalate", and it is a log line rather than a state change.</strong> The
-     * worker cannot decide a silent transfer's fate: the absence of an answer is not evidence of anything except
-     * silence, so marking it failed would assert money did not move and marking it confirmed would assert it did.
-     * What the worker can do is stop treating it as business as usual, and a deployment's log is where a human is -
-     * the command line reports the same thing on demand ({@code --reductxn.command=escalations}).
+     * worker cannot decide a stuck transfer's fate: an unanswered call is not evidence of anything except silence,
+     * and an acceptance it has not confirmed says only that the rail took the instruction. So marking one failed
+     * would assert money did not move and marking it confirmed would assert it did. What the worker can do is stop
+     * treating it as business as usual, and a deployment's log is where a human is - the command line reports the
+     * same thing on demand ({@code --reductxn.command=escalations}).
+     *
+     * <p><strong>Two policies feed one listing, because the on-call person has one question.</strong> A silence past
+     * {@code escalation.after} and a submission past {@code reconcile.after} both mean "nobody is waiting for this
+     * any more" - the first because no call is being answered, the second because the rail answers and will not
+     * confirm - and nobody should have to remember to run two reports to see both (ADR 0026). Each line says which
+     * it is ({@code StuckTransfer.Reason}) and how long it has been true, measured from where the trouble began
+     * rather than from the most recent poll, because a measure that restarts whenever the rail speaks is what hid
+     * the unconfirmed ones.
      *
      * <p><strong>The line repeats every pass, deliberately.</strong> A silence that has not ended is still
      * happening: a worker that announced it once would let the second hour, and the twentieth, pass unnoticed. That
@@ -146,26 +159,31 @@ public class ScheduledRunDriver {
      */
     private void escalate() {
         try {
-            Escalations escalations =
-                    readEscalations.silentLongerThan(escalation.cutOff(clock.instant()), ESCALATIONS_LOGGED);
+            Instant now = clock.instant();
+            StuckTransfers stuck = readStuckTransfers.stuckLongerThan(
+                    escalation.cutOff(now), reconciliation.cutOff(now), ESCALATIONS_LOGGED);
 
-            if (escalations.total() == 0) {
+            if (stuck.total() == 0) {
                 return;
             }
 
-            log.warn("{} transfer(s) have gone unanswered for longer than {} (silent at or before {}{}). The rail "
-                    + "may hold a movement it never confirmed, so these need a person:",
-                    escalations.total(), escalation.after(), escalations.cutOff(),
-                    escalations.truncated() ? ", oldest " + escalations.transfers().size() + " listed" : "");
+            log.warn("{} transfer(s) no rail has decided: silent since {}, unconfirmed since {}{}. The rail may hold "
+                    + "a movement it never confirmed, so these need a person:",
+                    stuck.total(), stuck.unansweredCutOff(), stuck.unconfirmedCutOff(),
+                    stuck.truncated() ? ", oldest " + stuck.transfers().size() + " listed" : "");
 
-            for (SilentTransfer silent : escalations.transfers()) {
-                log.warn("  transfer {} of run {}: {} {} {}, {} unanswered call(s) since {} - the rail last said: {}",
-                        silent.railRef(), silent.runId(), silent.status().wireName(),
-                        silent.amount().amountMinor(), silent.currency().code(), silent.unansweredAttempts(),
-                        silent.unansweredSince(), silent.railDetail());
+            for (StuckTransfer transfer : stuck.transfers()) {
+                log.warn("  {}: {} {} in run {}, {} - stuck for {} - the rail last said: {}",
+                        transfer.reason().wireName(), transfer.amount().amountMinor(),
+                        transfer.currency().code(), transfer.runId(), transfer.status().wireName(),
+                        transfer.stuckFor(now), transfer.railDetail());
+                log.warn("    rail reference {} (transfer {}), {}",
+                        transfer.railRef(), transfer.transferId(), transfer.unansweredAttempts() == 0
+                                ? "the rail is answering, so only a confirmation is missing"
+                                : transfer.unansweredAttempts() + " call(s) in a row unanswered");
             }
         } catch (RuntimeException fault) {
-            log.warn("the settlement driver could not read the escalation report. The rail traffic in this pass "
+            log.warn("the settlement driver could not read the stuck-transfer report. The rail traffic in this pass "
                     + "was unaffected", fault);
         }
     }

@@ -36,6 +36,10 @@ import java.util.UUID;
  *                   attempts that follow it and cleared by any answer. Null when the rail has answered or has not
  *                   been asked. This is what an escalation policy measures patience against, because a count of
  *                   tries means a different duration whenever the backoff is retuned (see {@code V508})
+ * @param submittedAt when a rail first accepted this transfer, or null when no rail ever took it - see {@code V510}.
+ *                   Kept after the transfer is resolved, because it is when the wait began rather than a claim that
+ *                   anything is still waiting; this is what a reconciliation threshold measures against, because a
+ *                   silent rail can hold a movement while every call it is asked answers "still pending"
  * @param resolvedAt when a person asserted this transfer's fate, or null when a rail answered it - see
  *                   {@code TransferResolution}
  * @param resolvedBy who asserted it, when it was not a rail. Null when a rail answered
@@ -53,6 +57,7 @@ public record PlannedTransfer(
         int unansweredAttempts,
         Instant nextAttemptAt,
         Instant unansweredSince,
+        Instant submittedAt,
         Instant resolvedAt,
         String resolvedBy,
         String resolvedBasis) {
@@ -100,6 +105,14 @@ public record PlannedTransfer(
                     "transfer " + id + " is " + status.wireName() + " and names " + resolvedBy + " as having "
                             + "decided it. A person may only answer what a rail was asked, and their answer is a "
                             + "resolved state - anything else is a decision the rows do not hold");
+        }
+
+        if (submittedAt != null && !(status.isAtTheRail() || status.isResolved())) {
+            throw new IllegalArgumentException(
+                    "transfer " + id + " says a rail accepted it at " + submittedAt + " and is " + status.wireName()
+                            + ". Only a transfer a rail has taken can carry a submission instant, and pending (never "
+                            + "offered) and authorized (offered, never taken) are the two states where no rail has: "
+                            + "either the instant is another transfer's or the status was overwritten");
         }
 
         if (fromUserId.equals(toUserId)) {

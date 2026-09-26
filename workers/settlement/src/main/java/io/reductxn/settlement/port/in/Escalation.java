@@ -24,6 +24,12 @@ import java.util.Objects;
  * <p>A pure function of an instant, with no clock of its own: the caller passes "now", which is what makes the
  * policy testable without waiting two hours and makes the same instant always produce the same cut-off.
  *
+ * <p><strong>Its companion is {@link Reconciliation}, and they are deliberately two records rather than one.</strong>
+ * That policy answers the other way a transfer gets stuck at a rail - accepted and never confirmed, with no silence
+ * to measure because the rail keeps answering "still pending". A deployment's tolerance for the two is two numbers
+ * and wants two names; folding them into one record with two durations would tie two unrelated decisions together,
+ * and sharing one type would put two beans of the same class in the context (ADR 0026).
+ *
  * @param after how long a transfer may go unanswered before it is somebody's problem. Zero is allowed and means
  *              "every unanswered call", which is a defensible deployment choice for a rail nobody can afford to
  *              have silent for even a minute
@@ -45,7 +51,7 @@ public record Escalation(Duration after) {
      *
      * <p>Returns a cut-off rather than answering "is this transfer stuck", because the question is asked of rows in
      * a query: the same shape as the driver's window, where how stale an attempt must be is configuration and the
-     * comparison happens where the rows are (RULE B17 - the adapter reads them, and {@link io.reductxn.settlement.port.in.Escalations} is built
+     * comparison happens where the rows are (RULE B17 - the adapter reads them, and {@link StuckTransfers} is built
      * from what it found).
      */
     public Instant cutOff(Instant now) {

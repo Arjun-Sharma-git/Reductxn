@@ -6,7 +6,7 @@ import io.reductxn.settlement.port.in.FundingRequest;
 import io.reductxn.settlement.port.in.GateConclusion;
 import io.reductxn.settlement.port.in.RunDecision;
 import io.reductxn.settlement.port.in.SettlementRun;
-import io.reductxn.settlement.port.in.SilentTransfer;
+import io.reductxn.settlement.port.in.StuckTransfer;
 import io.reductxn.settlement.port.in.TransferStatus;
 
 import java.time.Instant;
@@ -225,29 +225,39 @@ public interface Runs {
             int consecutiveUnanswered, Instant nextAttemptAt, Instant unansweredSince);
 
     /**
-     * The transfers whose rail has been silent since at or before {@code cutOff}: what an escalation policy is
-     * about, oldest silence first.
+     * The transfers no rail has decided, oldest trouble first: what section 4.4's "or escalate" is about.
      *
-     * <p><strong>The cut-off is the caller's, and the policy is not.</strong> How long a rail may go unanswered
-     * before somebody has to look is a judgement about a deployment ({@code Escalation}), so the policy computes
-     * the instant and this query compares against it - the same arrangement as {@code driveDue}'s window, where
-     * the staleness that matters is configuration and the query is a comparison.
+     * <p><strong>Two ways of being stuck are one query, because they are one question.</strong> A transfer is in the
+     * report when its silence began at or before {@code unansweredCutOff} ({@code NO_ANSWER}: the rail never took it
+     * and is not answering) or when the rail accepted it at or before {@code unconfirmedCutOff} and has still not
+     * confirmed it ({@code NO_CONFIRMATION}: the rail is holding a movement). The second is the case a silence-based
+     * report could not see at all - the rail answers "still pending" every time it is polled, which resets the retry
+     * counter - and it is why {@code V510} stores the acceptance instant (ADR 0026).
      *
-     * <p>Transfers with an answer are not in it, because an answer clears {@code unanswered_since}: the result is
-     * exactly the transfers somebody has to decide about, and nothing else.
+     * <p><strong>The cut-offs are the caller's, and the policies are not.</strong> How long a rail may go unanswered,
+     * and how long a submission may wait for a confirmation, are judgements about a deployment ({@code Escalation},
+     * {@code Reconciliation}), so each policy computes its instant and this query compares against them - the same
+     * arrangement as {@code driveDue}'s window.
      *
-     * @param cutOff a transfer is included when its silence began at or before this instant
-     * @param limit  the most to return, so a report cannot become a novel. The oldest are taken first, which is
-     *               the order a broken rail should be looked at in
+     * <p>Resolved and unsubmitted transfers are not in it: a transfer with an answer has been decided, and one
+     * nothing was ever offered has nothing to be stuck about. The result is exactly the movements somebody has to
+     * chase, and nothing else.
+     *
+     * <p>Ordered by the instant the report measures ({@code StuckTransfer.stuckSince}), so the oldest trouble is the
+     * first thing a person sees.
+     *
+     * @param unansweredCutOff  a transfer whose silence began at or before this is included
+     * @param unconfirmedCutOff a transfer the rail accepted at or before this, still unconfirmed, is included
+     * @param limit             the most to return, so a report cannot become a novel. The oldest are taken first
      */
-    List<SilentTransfer> findSilentTransfers(Instant cutOff, int limit);
+    List<StuckTransfer> findStuckTransfers(Instant unansweredCutOff, Instant unconfirmedCutOff, int limit);
 
     /**
-     * How many transfers are silent at or before {@code cutOff}, however many that is.
+     * How many transfers are stuck at or before those cut-offs, however many that is.
      *
-     * <p>Separate from {@link #findSilentTransfers} because a report says both "how bad is this" and "which ones":
+     * <p>Separate from {@link #findStuckTransfers} because a report says both "how bad is this" and "which ones":
      * a list truncated by its limit would understate the first, and an operator deciding whether to open the rail's
      * status page needs the number rather than the first twenty.
      */
-    int countSilentTransfers(Instant cutOff);
+    int countStuckTransfers(Instant unansweredCutOff, Instant unconfirmedCutOff);
 }

@@ -4,14 +4,16 @@ import io.reductxn.kernel.api.Result;
 import io.reductxn.settlement.port.in.ComputedRun;
 import io.reductxn.settlement.port.in.DriveRuns;
 import io.reductxn.settlement.port.in.Escalation;
-import io.reductxn.settlement.port.in.Escalations;
 import io.reductxn.settlement.port.in.PlannedTransfer;
-import io.reductxn.settlement.port.in.ReadEscalations;
+import io.reductxn.settlement.port.in.ReadStuckTransfers;
+import io.reductxn.settlement.port.in.Reconciliation;
 import io.reductxn.settlement.port.in.ResolveTransfer;
 import io.reductxn.settlement.port.in.RunDecision;
 import io.reductxn.settlement.port.in.RunRefusals;
 import io.reductxn.settlement.port.in.RunRequest;
 import io.reductxn.settlement.port.in.RunStatus;
+import io.reductxn.settlement.port.in.StuckTransfer;
+import io.reductxn.settlement.port.in.StuckTransfers;
 import io.reductxn.settlement.port.in.TransferResolution;
 import io.reductxn.settlement.port.in.TransferStatus;
 import io.reductxn.settlement.port.out.Runs;
@@ -68,10 +70,13 @@ class ResolveTransferTest extends WorkerDatabaseTest {
     private ResolveTransfer resolveTransfer;
 
     @Autowired
-    private ReadEscalations readEscalations;
+    private ReadStuckTransfers readStuckTransfers;
 
     @Autowired
     private Escalation escalation;
+
+    @Autowired
+    private Reconciliation reconciliation;
 
     @Autowired
     private Runs runs;
@@ -84,9 +89,11 @@ class ResolveTransferTest extends WorkerDatabaseTest {
         rail.reset();
     }
 
-    /** The escalation report as of now, using the policy's own cut-off: what an operator would be looking at. */
-    private Escalations escalations() {
-        return readEscalations.silentLongerThan(escalation.cutOff(clock.instant()), 20);
+    /** The stuck-transfer report as of now, using both policies' cut-offs: what an operator would be looking at. */
+    private StuckTransfers stuck() {
+        Instant now = clock.instant();
+
+        return readStuckTransfers.stuckLongerThan(escalation.cutOff(now), reconciliation.cutOff(now), 20);
     }
 
     /** A run with one transfer, approved and funded, whose rail never answers anything. */
@@ -209,8 +216,9 @@ class ResolveTransferTest extends WorkerDatabaseTest {
     @Test
     void aTransferTheRailAcceptedAndWentQuietOnCanBeResolved() {
         // The rail took the instruction and never confirmed it, so the transfer is `submitted` and no call went
-        // unanswered - it is not in the escalation report at all, and the driver polls it for ever (the sweep that
-        // would give up on it does not exist yet). A person who has asked the rail may still resolve it.
+        // unanswered: it is not past the reconciliation threshold yet (a default hour at the rail), the driver polls
+        // it for ever, and until ADR 0026 nothing would ever have reported it. A person who has asked the rail may
+        // resolve it anyway, without waiting for a report to say so.
         ComputedRun run = aRunWithOneTransfer(StubRail.Behaviour.ACCEPT_WITHOUT_CONFIRMING);
         PlannedTransfer transfer = run.transfers().get(0);
 
@@ -220,7 +228,7 @@ class ResolveTransferTest extends WorkerDatabaseTest {
         assertThat(transferOf(run, transfer.id()).unansweredSince())
                 .as("the rail answered this one, so there is no silence to have outlasted anything")
                 .isNull();
-        assertThat(escalations().total()).isZero();
+        assertThat(stuck().total()).isZero();
 
         ok(said(run, transfer.id(), TransferResolution.Outcome.CONFIRMED));
 
@@ -407,22 +415,22 @@ class ResolveTransferTest extends WorkerDatabaseTest {
     }
 
     @Test
-    void aResolvedTransferLeavesTheEscalationReport() {
+    void aResolvedTransferLeavesTheStuckTransferReport() {
         ComputedRun run = aRunWithOneSilentTransfer();
         PlannedTransfer transfer = run.transfers().get(0);
 
         ok(driveRuns.driveOne(run.run().id()));
         clock.advance(Duration.ofHours(3));
 
-        assertThat(escalations().transfers())
+        assertThat(stuck().transfers())
                 .as("the report is what tells somebody which movement to ask the rail about")
-                .anyMatch(silent -> silent.transferId().equals(transfer.id()));
+                .anyMatch(stuckTransfer -> stuckTransfer.transferId().equals(transfer.id()));
 
         ok(said(run, transfer.id(), TransferResolution.Outcome.CONFIRMED));
 
-        assertThat(escalations().total())
-                .as("an answered transfer is not silent, so the loop closes: the report stops naming something "
-                        + "somebody has already decided")
+        assertThat(stuck().total())
+                .as("an answered transfer is not stuck any more, so the loop closes: the report stops naming "
+                        + "something somebody has already decided")
                 .isZero();
     }
 
