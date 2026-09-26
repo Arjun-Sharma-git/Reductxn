@@ -85,13 +85,16 @@ class PropertyCoverageTest {
             // leaves the booking attached to its quote instead of being rounded into a posting. The half
             // that remains is the cycle sum, which is L8's question rather than a separate one, so it moved
             // there rather than being restated.
-            // L8 left this map when the settlement worker arrived. It said the gate was missing; the gate is
-            // still missing, but the *measurement and the flag* are not - `ComputeRunTest` labels an assertion
-            // that a non-zero clearing position flags the run `awaiting_fx_funding` and reports the requirement
-            // per currency, and another that the ordinary case leaves it zero. What remains of L8 is the
-            // end-of-cycle claim ("zero at the end of every cycle"), which needs a run that has settled -
-            // execution, not computation. Named here rather than restated as an entry, because the map's keys
-            // are property ids and a property cannot be half-deferred.
+            // L8 left this map when the settlement worker arrived, and the half that remained shrank again when
+            // execution landed. It used to say the gate was missing; the gate is real now (RULE S4 is checked at
+            // execution and refused with the outstanding amount per currency), and `ComputeRunTest` labels the
+            // measurement that a non-zero clearing position flags the run and reports the requirement. What is
+            // still not assertable is the end-of-cycle claim itself - "fx_clearing returns to zero at the end of
+            // every cycle" - and the reason has moved rather than gone: a run now reaches `done` and the rail has
+            // moved the money, but *nothing is posted to the ledger*, so the clearing account has no end-of-cycle
+            // position for a test to read. That is the settlement posting, and it is the next slice. Named here
+            // rather than restated as an entry, because the map's keys are property ids and a property cannot be
+            // half-deferred.
             Map.entry("L3", "entries are immutable and corrections are compensating entries. The model "
                     + "half is done - an entry is an immutable record over an unmodifiable posting list, "
                     + "and a compensating entry returns an account to zero - but the spec names the "
