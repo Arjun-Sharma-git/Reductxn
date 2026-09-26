@@ -42,13 +42,16 @@ rule in the wrong module.
 
 ## What the persistence layer looks like from here
 
-`adapter/persistence` holds five jOOQ adapters and no generated row types: `Record` is mapped to a domain
+`adapter/persistence` holds seven jOOQ adapters and no generated row types: `Record` is mapped to a domain
 type inside the fetch, so nothing jOOQ-shaped leaves the package. RULE B16 enforces that, and it is
-repository-wide rather than module-wide, because `libs/*` may not use jOOQ at all. The `obligations` schema
+repository-wide rather than module-wide, because `libs/*` may not use jOOQ at all - which is why the rate
+provider is here rather than in a package of its own. The `obligations` schema
 is `apps/api`'s own - `V101`, in the `1xx` version range, with `V102` adding the `memo` and
-`idempotency_key` columns the contract's request and replay need - while `journal_entries` and `postings`
-belong to `libs/ledger` (`V301`), `currencies` to `libs/fx` (`V401`) and `tax_rules` to `libs/netting`
-(`V201`), read through read models. `platform/persistence` runs every migration and owns none.
+`idempotency_key` columns the contract's request and replay need and `V103` the `quote_id` that makes a
+cross-currency obligation storable at all - while `journal_entries` and `postings`
+belong to `libs/ledger` (`V301`), `currencies`, `fx_rates` and `fx_quotes` to `libs/fx` (`V401`, `V402`) and
+`tax_rules` to `libs/netting` (`V201`), read through read models. `platform/persistence` runs every migration
+and owns none.
 
 ## What is not here yet
 
@@ -57,11 +60,15 @@ key because `groups` does not exist yet, and a cross-currency obligation cannot 
 `obligations` table has no quote columns - both are stated in the migrations rather than left to be noticed.
 
 The write path exists now: `POST /v1/obligations` records a commitment and books the entry it produces, in one
-transaction. It has no route for anything else - no void, no list, no settlement - and one of its inputs does
-not work: `settleInCurrency` is answered `503` with `fx.rate_unavailable`, because `UnconfiguredRateProvider` is
-the only implementation of `libs/fx`'s port and it has no rate source. That is the fail-closed behaviour the
-contract describes rather than a stub, and the class comment says what the slice that adds a provider has to
-bring with it.
+transaction - one entry for an ordinary commitment, a linked pair through `fx_clearing` for one whose creditor
+is paid in another currency. It has no route for anything else: no void, no list, no settlement.
+
+`settleInCurrency` works, and it has two failure modes the contract distinguishes because a client does
+different things about them: `fx.rate_stale` (`422`, the pair was quoted and the rate had expired) and
+`fx.rate_unavailable` (`503`, nothing was quoted for the pair at or before the obligation's instant). Nothing
+is written on either path. Rates come from `libs/fx`'s `fx_rates` table, which nothing ingests into yet - so in
+a deployment with no rate loader, every cross-currency request is a `503`, and that is the designed fail-closed
+behaviour rather than a stub.
 
 ## Three things about the write path worth knowing before changing it
 

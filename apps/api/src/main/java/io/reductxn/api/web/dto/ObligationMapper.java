@@ -3,6 +3,9 @@ package io.reductxn.api.web.dto;
 import io.reductxn.api.port.in.NewObligation;
 import io.reductxn.api.port.in.ObligationStatus;
 import io.reductxn.api.port.in.RecordedObligation;
+import io.reductxn.fx.api.FxQuote;
+import io.reductxn.fx.api.FxRate;
+import io.reductxn.ledger.api.Money;
 
 import java.time.Instant;
 
@@ -48,9 +51,43 @@ public final class ObligationMapper {
                 obligation.creditorId(),
                 new MoneyDto(obligation.amount().amountMinor(), obligation.amount().currency().code()),
                 obligation.settleInCurrency().code(),
+                obligation.fxQuote() == null ? null : quote(obligation.fxQuote()),
                 obligation.memo(),
                 statusName(obligation.status()),
                 obligation.occurredAt());
+    }
+
+    /**
+     * The locked conversion, with the rate the client was charged at.
+     *
+     * <p>{@code railPerformedFx} is written only when true, as in the preview's optional fields: the contract
+     * says it is true when the rail performed the conversion, so false is the default a client already has.
+     */
+    private static FxQuoteDto quote(FxQuote quote) {
+        FxRate rate = quote.rate();
+
+        return new FxQuoteDto(
+                quote.id(),
+                new FxQuoteDto.RateDto(
+                        rate.base().code(),
+                        rate.quote().code(),
+                        rate.rateScaled(),
+                        rate.rateScale(),
+                        rate.midRateScaled(),
+                        rate.spreadBps(),
+                        rate.quotedAt(),
+                        rate.expiresAt(),
+                        rate.source()),
+                money(quote.baseAmount()),
+                money(quote.convertedAmount()),
+                quote.residualScaled(),
+                quote.residualScale(),
+                quote.lockedAt(),
+                quote.railPerformedFx() ? Boolean.TRUE : null);
+    }
+
+    private static MoneyDto money(Money money) {
+        return new MoneyDto(money.amountMinor(), money.currency().code());
     }
 
     /**

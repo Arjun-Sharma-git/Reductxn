@@ -26,6 +26,7 @@ public record ObligationResponse(
         UUID creditorId,
         MoneyDto amount,
         String settleInCurrency,
+        FxQuoteDto fxQuote,
         String memo,
         String status,
         Instant occurredAt) {

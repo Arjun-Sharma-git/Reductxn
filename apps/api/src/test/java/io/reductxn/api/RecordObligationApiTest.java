@@ -5,10 +5,12 @@ import io.reductxn.ledger.api.Currency;
 import io.reductxn.ledger.api.Direction;
 import io.reductxn.ledger.api.EntryChain;
 import io.reductxn.ledger.api.EntryKind;
+import io.reductxn.ledger.api.FxLinkage;
 import io.reductxn.ledger.api.FxRole;
 import io.reductxn.ledger.api.JournalEntry;
 import io.reductxn.ledger.api.Money;
 import io.reductxn.ledger.api.Posting;
+import io.reductxn.planning.api.FxClearing;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +24,7 @@ import org.springframework.web.context.WebApplicationContext;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -31,6 +34,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -60,6 +64,11 @@ class RecordObligationApiTest extends DatabaseTest {
     private static final UUID BORIS = new UUID(0L, 21L);
 
     private static final String KEY = "obligation-1";
+
+    /** A rate's window, and a commitment inside it. Fixed instants, so nothing here depends on the clock. */
+    private static final Instant QUOTED_AT = Instant.parse("2026-09-24T10:00:00Z");
+    private static final Instant EXPIRES_AT = Instant.parse("2026-09-24T10:01:00Z");
+    private static final Instant OCCURRED_AT = Instant.parse("2026-09-24T10:00:30Z");
 
     @Autowired
     private WebApplicationContext context;
@@ -206,20 +215,124 @@ class RecordObligationApiTest extends DatabaseTest {
     }
 
     @Test
-    void aCrossCurrencyRequestFailsClosedBecauseNoRateSourceIsConfigured() throws Exception {
-        // 503 rather than 422, and the difference matters: this request would succeed if a rate were
-        // available, so the client should retry rather than fix its request. It is also the whole of
-        // "no rate means no cross-currency" (MASTER-PLAN section 4).
-        recordSettlingIn(GROUP, ALICE, BORIS, 12_500L, "INR", "JPY", "key-cross")
+    void aCrossCurrencyObligationBooksALinkedPair() throws Exception {
+        // ADR 0013's rate, the other way round: 1 INR is 1.78878 JPY, so INR 125.00 is 223.5975 JPY and rounds
+        // to 224. The debtor's side stays exact because that is what they agreed to pay; the creditor's side is
+        // the converted amount because that is what they agreed to receive.
+        rate("INR", 2, "JPY", 0, 178_878L, 5, QUOTED_AT, EXPIRES_AT);
+
+        recordSettlingIn(GROUP, ALICE, BORIS, 12_500L, "INR", "JPY", OCCURRED_AT, "key-cross")
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.settleInCurrency").value("JPY"))
+                .andExpect(jsonPath("$.fxQuote.baseAmount.amountMinor").value(12_500L))
+                .andExpect(jsonPath("$.fxQuote.baseAmount.currency").value("INR"))
+                .andExpect(jsonPath("$.fxQuote.convertedAmount.amountMinor").value(224L))
+                .andExpect(jsonPath("$.fxQuote.convertedAmount.currency").value("JPY"))
+                .andExpect(jsonPath("$.fxQuote.rate.base").value("INR"))
+                .andExpect(jsonPath("$.fxQuote.rate.quote").value("JPY"))
+                .andExpect(jsonPath("$.fxQuote.rate.rateScaled").value(178_878L))
+                .andExpect(jsonPath("$.fxQuote.rate.rateScale").value(5))
+                .andExpect(jsonPath("$.fxQuote.rate.source").value("test fixture"))
+                // The residual is sent as the fraction it is. It is what the two sides differ by, and it is not
+                // a whole minor unit, which is exactly why it is not booked (see Bookings' residual note). The
+                // sign is FxConversion's convention: negative when rounding rounded up, which is what happened
+                // here - 223.5975 became 224 - so -4025/10^4 is -0.4025 of a yen.
+                .andExpect(jsonPath("$.fxQuote.residualScaled").value(-4_025L))
+                .andExpect(jsonPath("$.fxQuote.residualScale").value(4))
+                // Absent rather than false, per the contract: it is true only when the rail converted.
+                .andExpect(jsonPath("$.fxQuote.railPerformedFx").doesNotExist());
+
+        List<JournalEntry> inr = chainInOrder(GROUP, "INR");
+        List<JournalEntry> jpy = chainInOrder(GROUP, "JPY");
+
+        assertThat(inr).as("the debt book gets one entry").hasSize(1);
+        assertThat(jpy).as("the settlement book gets the other").hasSize(1);
+
+        // Each chain verifies on its own, which is the half EntryChain can prove (L1, L4, L6).
+        assertThat(EntryChain.problemsIn(inr)).isEmpty();
+        assertThat(EntryChain.problemsIn(jpy)).isEmpty();
+
+        // And the pairing is verified across them with the verifier an offline job would run (L9): a valid
+        // chain in one currency proves nothing about its partner existing.
+        List<JournalEntry> both = new ArrayList<>(inr);
+        both.addAll(jpy);
+        assertThat(FxLinkage.unpairedLinkIds(both))
+                .as("both halves of the conversion are stored and share one link")
+                .isEmpty();
+        assertThat(inr.get(0).fxRole()).isEqualTo(FxRole.BASE);
+        assertThat(jpy.get(0).fxRole()).isEqualTo(FxRole.QUOTE);
+
+        // L8's measurement, from the rows: the clearing account holds what the debtor owes in the debt
+        // currency, and owes the creditor the converted amount in the settlement currency.
+        Currency inrCurrency = Currency.of("INR", 2);
+        Currency jpyCurrency = Currency.of("JPY", 0);
+        assertThat(Balances.netDebitOf(FxClearing.ACCOUNT_ID, inrCurrency, inr.get(0).postings()))
+                .isEqualTo(Money.of(12_500L, inrCurrency));
+        assertThat(Balances.netDebitOf(FxClearing.ACCOUNT_ID, jpyCurrency, jpy.get(0).postings()))
+                .isEqualTo(Money.of(-224L, jpyCurrency));
+
+        // The read path, reconstructing the obligation from its quote: a preview has to see the conversion,
+        // not the debt side alone - which is what it would have seen before V103 and the quote's storage.
+        mvc.perform(get("/v1/groups/{groupId}/netting/preview", GROUP)
+                        .param("asOf", "2026-09-25T10:00:00Z"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.partitions", hasSize(2)))
+                .andExpect(jsonPath("$.partitions[0].currency").value("INR"))
+                .andExpect(jsonPath("$.partitions[1].currency").value("JPY"))
+                .andExpect(jsonPath("$.bestCase.transfers", hasSize(2)))
+                .andExpect(jsonPath("$.bestCase.transfers[0].amount.amountMinor").value(12_500L))
+                .andExpect(jsonPath("$.bestCase.transfers[1].amount.amountMinor").value(224L));
+    }
+
+    @Test
+    void aStaleRateIsRefusedAndNothingIsWritten() throws Exception {
+        // Quoted and expired hours before the commitment was made. A 422 rather than a 503: the request is
+        // answerable and the answer is no, because locking it would promise the creditor an amount computed
+        // from a price the market has moved away from (ADR 0013 point 6).
+        rate("INR", 2, "JPY", 0, 178_878L, 5,
+                Instant.parse("2026-09-24T06:00:00Z"), Instant.parse("2026-09-24T06:01:00Z"));
+
+        recordSettlingIn(GROUP, ALICE, BORIS, 12_500L, "INR", "JPY", OCCURRED_AT, "key-stale")
+                .andExpect(status().is(422))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("fx.rate_stale"));
+
+        assertNothingWasRecorded();
+    }
+
+    @Test
+    void aCrossCurrencyRequestReplayedAnswersWithTheSameQuoteAndBooksNothing() throws Exception {
+        rate("INR", 2, "JPY", 0, 178_878L, 5, QUOTED_AT, EXPIRES_AT);
+
+        String first = recordSettlingIn(
+                        GROUP, ALICE, BORIS, 12_500L, "INR", "JPY", OCCURRED_AT, "key-x-replay")
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        recordSettlingIn(GROUP, ALICE, BORIS, 12_500L, "INR", "JPY", OCCURRED_AT, "key-x-replay")
+                .andExpect(status().isCreated())
+                .andExpect(content().json(first));
+
+        assertThat(obligationCount()).isEqualTo(1);
+        assertThat(quoteCount())
+                .as("the retry locked nothing, so the creditor was promised one rate")
+                .isEqualTo(1);
+        assertThat(chainInOrder(GROUP, "INR")).hasSize(1);
+        assertThat(chainInOrder(GROUP, "JPY")).hasSize(1);
+    }
+
+    @Test
+    void aPairWithNoRateAtAllIsUnavailableRatherThanStale() throws Exception {
+        // 503 rather than 422, and the difference is what the client does next: nothing has ever been quoted
+        // for this pair, so a retry may succeed once something has. A client that conflated the two would
+        // retry forever or give up too early, which is why the contract distinguishes them and why the provider
+        // returns the newest rate and judges it rather than filtering to usable ones.
+        recordSettlingIn(GROUP, ALICE, BORIS, 12_500L, "INR", "JPY", OCCURRED_AT, "key-no-rate")
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.code").value("fx.rate_unavailable"));
 
-        assertThat(obligationCount())
-                .as("nothing is recorded, so no obligation exists in the debt currency only - which the "
-                        + "preview would read back as a single-currency obligation")
-                .isZero();
-        assertThat(chainInOrder(GROUP, "INR")).isEmpty();
+        assertNothingWasRecorded();
     }
 
     @Test
@@ -290,7 +403,7 @@ class RecordObligationApiTest extends DatabaseTest {
 
     private ResultActions recordSettlingIn(
             UUID group, UUID debtor, UUID creditor, long amountMinor, String currency,
-            String settleInCurrency, String key) throws Exception {
+            String settleInCurrency, Instant occurredAt, String key) throws Exception {
 
         return mvc.perform(post("/v1/obligations")
                 .header("Idempotency-Key", key)
@@ -302,9 +415,26 @@ class RecordObligationApiTest extends DatabaseTest {
                           "creditorId": "%s",
                           "amount": { "amountMinor": %d, "currency": "%s" },
                           "settleInCurrency": "%s",
-                          "memo": "lunch"
+                          "memo": "lunch",
+                          "occurredAt": "%s"
                         }
-                        """.formatted(group, debtor, creditor, amountMinor, currency, settleInCurrency)));
+                        """.formatted(group, debtor, creditor, amountMinor, currency, settleInCurrency,
+                        occurredAt)));
+    }
+
+    /**
+     * Nothing at all was written: no obligation, no quote, no entry.
+     *
+     * <p>Asserted as one thing because it is one promise. A refusal that recorded the obligation and failed to
+     * book it would leave a commitment the ledger does not know about, and a refusal that locked a quote and
+     * then failed would leave a conversion nobody made - which is why the three are checked together rather
+     * than relying on the status code.
+     */
+    private void assertNothingWasRecorded() {
+        assertThat(obligationCount()).isZero();
+        assertThat(quoteCount()).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM journal_entries", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM postings", Integer.class)).isZero();
     }
 
     private static String body(
@@ -323,6 +453,10 @@ class RecordObligationApiTest extends DatabaseTest {
 
     private int obligationCount() {
         return jdbc.queryForObject("SELECT count(*) FROM obligations", Integer.class);
+    }
+
+    private int quoteCount() {
+        return jdbc.queryForObject("SELECT count(*) FROM fx_quotes", Integer.class);
     }
 
     /**

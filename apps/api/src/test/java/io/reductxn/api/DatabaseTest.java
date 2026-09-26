@@ -7,6 +7,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 /**
@@ -61,6 +63,10 @@ abstract class DatabaseTest {
         jdbc.execute("DELETE FROM postings");
         jdbc.execute("DELETE FROM journal_entries");
         jdbc.execute("DELETE FROM obligations");
+        // No rate is seeded here, deliberately, so that a test which does not mention one is testing the
+        // absence of one - which is the pair that must fail closed rather than the pair that works.
+        jdbc.execute("DELETE FROM fx_quotes");
+        jdbc.execute("DELETE FROM fx_rates");
         jdbc.execute("DELETE FROM tax_rules");
 
         // A flat charge per transfer, in both currencies these tests use. Deliberately the same amount in
@@ -91,5 +97,28 @@ abstract class DatabaseTest {
     protected void voidObligationOf(UUID debtorId, String voidedAt) {
         jdbc.update("UPDATE obligations SET voided_at = TIMESTAMPTZ " + "'" + voidedAt + "'"
                 + " WHERE debtor_id = ?", debtorId);
+    }
+
+    /**
+     * A rate the provider could have published, as {@code fx_rates} holds it.
+     *
+     * <p>The cast on the instants is not decoration: {@code timestamptz} cannot take a bind parameter without
+     * one, and a test fixture that failed to insert would look like a provider outage rather than a broken
+     * fixture.
+     *
+     * <p>An all-in rate: the mid rate equals the applied rate and the spread is zero, so a test that asserts the
+     * client was told about a spread has to seed one deliberately.
+     */
+    protected void rate(
+            String base, int baseExponent, String quote, int quoteExponent,
+            long rateScaled, int rateScale, Instant quotedAt, Instant expiresAt) {
+
+        jdbc.update("""
+                INSERT INTO fx_rates (id, base_code, base_exponent, quote_code, quote_exponent,
+                                      rate_scaled, rate_scale, mid_rate_scaled, spread_bps, source,
+                                      quoted_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'test fixture', ?::timestamptz, ?::timestamptz)
+                """, UUID.randomUUID(), base, baseExponent, quote, quoteExponent, rateScaled, rateScale,
+                rateScaled, quotedAt.atOffset(ZoneOffset.UTC), expiresAt.atOffset(ZoneOffset.UTC));
     }
 }
