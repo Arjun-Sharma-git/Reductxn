@@ -28,6 +28,9 @@ import type { Money } from './money';
 const PROBE_INTEGER = '1234567890123456';
 const DIGITS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
 
+/** The key that marks a pattern as a plain decimal rather than a currency amount. No currency code contains `@`. */
+const PLAIN = '@decimal';
+
 type Pattern = {
   /** What comes before the whole units: the symbol in `en`, and any literal the locale puts with it. */
   readonly before: string;
@@ -107,6 +110,59 @@ function patternFor(locale: string, currency: string, exponent: number): Pattern
 }
 
 /**
+ * The same machinery for a *plain* decimal: no symbol, no placement rules, just the locale's separators.
+ *
+ * It exists because of P12. An FX rate is a scaled integer exactly as an amount is - `rateScaled / 10^rateScale`
+ * is the rate, and no floating-point representation of it exists anywhere in the system (ADR 0013), which the Java
+ * side enforces with `forbidFloatingPointMoney` and this side with a lint rule. So a rate shown to a member is
+ * formatted the same way an amount is, by substitution: the digits come from the integer and the punctuation from
+ * the locale. Writing `rateScaled / 10 ** rateScale` next to a formatter that refuses to divide a paisa would have
+ * been the same mistake in a different currency.
+ */
+function decimalPattern(locale: string, fractionDigits: number): Pattern {
+  const key = `${locale}|${PLAIN}|${fractionDigits}`;
+  const cached = patterns.get(key);
+
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const parts = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+    useGrouping: true,
+  }).formatToParts(0);
+
+  const shape = new Intl.NumberFormat(locale, {
+    useGrouping: true,
+    maximumFractionDigits: 0,
+  }).formatToParts(BigInt(PROBE_INTEGER));
+
+  const chunks = shape.filter((part) => part.type === 'integer').map((part) => part.value.length);
+  const primary = chunks.at(-1) ?? 3;
+
+  const digits = DIGITS.map(
+    (digit) =>
+      new Intl.NumberFormat(locale, { useGrouping: false })
+        .formatToParts(BigInt(digit))
+        .find((part) => part.type === 'integer')?.value ?? digit,
+  );
+
+  const pattern: Pattern = {
+    before: '',
+    after: '',
+    decimal: parts.find((part) => part.type === 'decimal')?.value ?? '.',
+    group: shape.find((part) => part.type === 'group')?.value ?? '',
+    sizes: [primary, chunks.at(-2) ?? primary],
+    digits,
+  };
+
+  patterns.set(key, pattern);
+
+  return pattern;
+}
+
+/**
  * Digits mapped to the locale's numbering system, so a locale that does not write Latin digits still works.
  *
  * Only *digits* are mapped, and the check is explicit rather than "look it up in the table": `Number(' ')` is
@@ -138,6 +194,28 @@ export function formatMoney(value: Money, locale: string, exponent: number): str
       : `${localize(units, pattern)}${pattern.decimal}${localize(digits.fraction, pattern)}`;
 
   return `${pattern.before}${number}${pattern.after}`;
+}
+
+/**
+ * A scaled rate, as this locale writes it.
+ *
+ * P12, in the client. The same caveat as {@link formatMoney} applies to the wire format and is answered the same
+ * way: `rateScaled` is an `int64`, a JSON number carries it exactly to 2^53, and the server's own bound
+ * (`1..10^12` in `libs/fx`) keeps it far below that - so a value that is not a safe integer is a broken contract,
+ * and this refuses rather than rounding it into something that looks plausible.
+ */
+export function formatRate(rateScaled: number, rateScale: number, locale: string): string {
+  const pattern = decimalPattern(locale, rateScale);
+  const digits: Digits = digitsOf(rateScaled, rateScale);
+
+  const units =
+    pattern.group !== '' ? group(digits.units, pattern.group, pattern.sizes) : digits.units;
+
+  const localized = localize(units, pattern);
+
+  return digits.fraction === ''
+    ? localized
+    : `${localized}${pattern.decimal}${localize(digits.fraction, pattern)}`;
 }
 
 /**

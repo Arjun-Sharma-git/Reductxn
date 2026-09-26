@@ -21,8 +21,8 @@ today (the netting preview, ADR 0028); the rest of the plan's route tree arrives
 |---|---|
 | `src/app` | The composition root: the router, the query client, the providers. No business logic and no screens |
 | `src/routes` | TanStack Router file-based routes, and **thin** (RULE F4): validate search parameters, wrap the screen in its locale, render one feature |
-| `src/features/<name>` | One vertical capability. Public surface is `index.ts`; everything else is private (RULE F8) |
-| `src/entities/<name>` | Domain-shaped client models and their `queryOptions` factories |
+| `src/features/<name>` | One vertical capability. Public surface is `index.ts`; everything else is private (RULE F8). `obligations` owns the list, the filters' UI and the recording form; `netting` owns the preview |
+| `src/entities/<name>` | Domain-shaped client models and their `queryOptions` factories: `currency`, `member`, `obligation`, `netting`, `fx` |
 | `src/shared/api` | The generated contract (`schema.d.ts`) and the only `fetch` in the app (RULE F5) |
 | `src/shared/money` | Integer minor units, formatted and parsed for a locale. The P1 boundary in the client |
 | `src/shared/i18n` | Locale resolution, ICU catalogs, the direction token, the review-state rule |
@@ -68,8 +68,17 @@ machine and would be two steps in a pipeline that does not exist yet.
 **Money never becomes a number with a fractional part.** `shared/money` takes its digits from the integer and its
 punctuation from `Intl`, and the property tests are what keep that true. If you reach for `toLocaleString` or a
 division by a hundred, the lint rules stop you - and they are right to: the version that looks correct is wrong for
-large amounts, and a ledger is where that gets noticed late.
+large amounts, and a ledger is where that gets noticed late. A *rate* is a scaled integer too (P12), so it is
+formatted by the same machinery (`formatRate`) and `rateScaled / 10 ** rateScale` appears nowhere.
 
 **Text is looked up, never written.** A component receives `t` from `useTranslations()`; a key that is missing from
 a locale falls back to English per key, and a *key used in a component but absent from `en`* is a build failure.
 The one string that is not in a catalog is the product's own name, in `shared/config`.
+
+**A refusal is a value, and a retry is the same attempt.** A refusal from the server is an `ApiProblemError` with a
+stable `code`, which the screen renders from `errors.json` and attaches to the field that can fix it
+(`features/obligations/model/input.ts`). What a member typed is turned into a request by pure functions, so
+over-precise input is refused *in the browser* rather than truncated by a server. And a money write carries an
+`Idempotency-Key` that belongs to the **attempt**, not to the click: the form creates it once and every retry -
+automatic after a `503`, or the "try again" button - reuses it, which is what makes retrying safe rather than a way
+to record something twice. A `422` is never retried, because the answer would be the same.

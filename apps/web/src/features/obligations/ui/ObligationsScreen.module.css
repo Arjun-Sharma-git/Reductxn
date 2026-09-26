@@ -1,0 +1,102 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-5);
+}
+
+.header {
+  margin-block-end: 0;
+}
+
+.lede {
+  margin: 0;
+  color: var(--rn-text-muted);
+  max-inline-size: 70ch;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rn-space-4);
+  align-items: end;
+  padding: var(--rn-space-4);
+  background: var(--rn-surface-muted);
+  border-radius: var(--rn-radius-md);
+}
+
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-1);
+}
+
+.filterLabel {
+  font-size: var(--rn-text-xs);
+  color: var(--rn-text-muted);
+}
+
+.filterControl {
+  min-block-size: 44px;
+  padding-inline: var(--rn-space-2);
+  background: var(--rn-surface);
+  color: var(--rn-text);
+  border: 1px solid var(--rn-border-strong);
+  border-radius: var(--rn-radius-md);
+  font: inherit;
+}
+
+.table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--rn-text-sm);
+}
+
+.caption {
+  caption-side: top;
+  text-align: start;
+  padding-block-end: var(--rn-space-2);
+  color: var(--rn-text-muted);
+}
+
+.table th,
+.table td {
+  text-align: start;
+  padding-block: var(--rn-space-2);
+  padding-inline-end: var(--rn-space-4);
+  border-block-end: 1px solid var(--rn-border);
+  vertical-align: top;
+}
+
+.table thead th {
+  font-size: var(--rn-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--rn-text-muted);
+}
+
+.rowHeader {
+  font-weight: var(--rn-weight-medium);
+}
+
+.numeric {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A memo is user content and is shown as written, so it may be in any language: this only keeps it readable. */
+.memo {
+  max-inline-size: 24rem;
+  white-space: pre-wrap;
+}
+
+/* A row that has not reached the server yet. Muted rather than hidden: the member should see that something is
+   happening, and should know it is not final. */
+.pending {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.status {
+  min-block-size: 3rem;
+  color: var(--rn-text-muted);
+}

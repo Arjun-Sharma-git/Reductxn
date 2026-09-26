@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { digitsOf } from './digits';
-import { formatMoney } from './format';
+import { formatMoney, formatRate } from './format';
 import { money } from './money';
 import { parseAmount } from './parse';
 
@@ -88,6 +88,18 @@ describe('money formatting', () => {
     // `en-IN` writes the yen as `JP¥` and groups a six-digit amount the way it groups lakhs - which is the
     // locale's business, not ours: the digits are the same integer either way.
     expect(formatMoney(yen, 'en-IN', 0)).toBe('JP¥1,23,457');
+  });
+
+  it('writes a scaled rate the same way, because a rate is a scaled integer too (P12)', () => {
+    // 55904 at scale 5 is 0.55904 - the ADR 0013 example, and the digits come from the integer here exactly as
+    // they do for an amount. A rate formatted with `rateScaled / 10 ** rateScale` would be the same mistake as
+    // dividing an amount by a hundred, one currency over.
+    expect(formatRate(55_904, 5, 'en-IN')).toBe('0.55904');
+    expect(formatRate(55_904, 5, 'ru')).toBe('0,55904');
+
+    // A rate above one, grouped: 123456789 at scale 5 is 1234.56789.
+    expect(formatRate(123_456_789, 5, 'en-IN')).toBe('1,234.56789');
+    expect(formatRate(123_456_789, 5, 'ru')).toBe('1\u00A0234,56789');
   });
 });
 

@@ -12,6 +12,11 @@
   "unknownCurrency": "{currency} amount unavailable",
   "unknownCurrencyTitle": "The currency catalogue does not have {currency} yet, so this amount cannot be rendered. Reload to fetch it again.",
   "unreviewedLocale": "This screen is shown in English: the {locale} translation has not been reviewed yet, and this screen reports what members will pay.",
+  "groupNav": {
+    "label": "This group",
+    "obligations": "Commitments",
+    "netting": "Netting preview"
+  },
   "openGroup": {
     "title": "Open a group",
     "description": "Reductxn has no sign-in yet and no group list, so a group is opened by its identifier - the one from the link somebody sent you.",
