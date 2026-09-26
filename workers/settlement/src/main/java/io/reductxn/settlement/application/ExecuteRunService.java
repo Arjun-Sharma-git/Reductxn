@@ -8,6 +8,7 @@ import io.reductxn.ledger.api.Currency;
 import io.reductxn.rails.api.PaymentRail;
 import io.reductxn.settlement.port.in.ComputedRun;
 import io.reductxn.settlement.port.in.ExecuteRun;
+import io.reductxn.settlement.port.in.GateConclusion;
 import io.reductxn.settlement.port.in.PlannedTransfer;
 import io.reductxn.settlement.port.in.Quorum;
 import io.reductxn.settlement.port.in.RunRefusals;
@@ -120,6 +121,13 @@ public class ExecuteRunService implements ExecuteRun {
         if (run.run().status() == RunStatus.DONE) {
             return Result.ok(run);
         }
+
+        // What the gates conclude, written before the branch below so that a run about to execute also says what
+        // the gates said on the way in - and so that the one place that reads the gates is the one place that
+        // records them. This is for readers elsewhere: everything in the verdict is derivable from the run's rows,
+        // and it is derived here, but `apps/api` may not derive it again without a second implementation of the
+        // run's arithmetic (ADR 0021), so it projects what the module that owns the rule wrote down (ADR 0023).
+        inTransaction(() -> runs.recordGates(GateConclusion.of(run, clock.instant())));
 
         Result<ComputedRun> refusal = gates(run);
 

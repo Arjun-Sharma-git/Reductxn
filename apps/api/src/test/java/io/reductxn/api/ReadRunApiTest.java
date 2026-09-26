@@ -26,10 +26,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * can carry.</strong> Every figure here is a row the worker wrote or a count of such rows; nothing is a judgement
  * over them. So the tests pin the figures, the order and the labels - and, just as deliberately, the *absences*:
  * {@code reportingTotals} (it needs a group's reporting currency and groups do not exist), {@code fxRequirements}
- * (the worker's derivation of what the group must obtain from outside) and {@code executedAt} (no instant is recorded
- * when a run reaches {@code done}) are fields this reader does not fill, and asserting they are absent is what stops
- * one being added by accident and looking authoritative. ADR 0021 is the decision that put them outside this
- * module's reach.
+ * (the *requirement*, which is a different fact from the outstanding amount the worker's gate conclusion carries -
+ * this reader projects the gap a group has to close, not the total the plan asked for) and {@code executedAt} (no
+ * instant is recorded when a run reaches {@code done}) are fields this reader does not fill, and asserting they are
+ * absent is what stops one being added by accident and looking authoritative. ADR 0021 is the decision that put them
+ * outside this module's reach.
+ *
+ * <p><strong>{@code gates} is the one judgement here, and it is here because the worker wrote it down.</strong>
+ * "One approval short" was the sentence this read model could not say while it reported answers and a status: whose
+ * arithmetic answers it is the run's, and this module may not derive it (ADR 0021). {@code settlement_run_gates}
+ * now holds the verdict, so the tests below assert the projection - including that a run nobody has looked at yet
+ * has *no* verdict rather than an invented one.
  *
  * <p>The rows arrive as SQL because this module cannot run a settlement and may not call the module that does (RULE
  * B6) - the arrangement the preview's read model and the approval fixture already use. What makes that honest is
@@ -91,6 +98,64 @@ class ReadRunApiTest extends DatabaseTest {
                 .andExpect(jsonPath("$.reportingTotals").doesNotExist())
                 .andExpect(jsonPath("$.fxRequirements").doesNotExist())
                 .andExpect(jsonPath("$.executedAt").doesNotExist());
+    }
+
+    @Test
+    void theGatesAreProjectedAsTheWorkerWroteThemAndNotRecomputed() throws Exception {
+        UUID runId = run("awaiting_approval");
+        answer(runId, ALICE, "approve", AS_OF);
+        answer(runId, BORIS, "reject", AS_OF);
+
+        // Two answers that contradict each other, so a reader that recomputed anything would disagree with every
+        // figure below: the verdict says the quorum is not met and one debtor still has to confirm, and this module
+        // reports exactly that. Written by SQL as the worker writes it, because this deployable cannot conclude
+        // anything (see the class comment) - and the worker's GateConclusionTest asserts its writer produces these
+        // columns.
+        gates(runId, "awaiting_approval", false, 1, 3, 2, true, AS_OF);
+
+        mvc.perform(get("/v1/runs/{runId}", runId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gates.quorum.met").value(false))
+                .andExpect(jsonPath("$.gates.quorum.counted").value(1))
+                .andExpect(jsonPath("$.gates.quorum.required").value(3))
+                .andExpect(jsonPath("$.gates.quorum.debtorsStillToConfirm").value(2))
+                .andExpect(jsonPath("$.gates.funding.satisfied").value(true))
+                .andExpect(jsonPath("$.gates.funding.outstanding", hasSize(0)))
+                .andExpect(jsonPath("$.gates.concludedAt").exists())
+                // `status` is the version of the run the verdict belongs to, so a client can tell a current
+                // conclusion from one that outlived its run.
+                .andExpect(jsonPath("$.gates.status").value("awaiting_approval"));
+    }
+
+    @Test
+    void whatIsStillMissingIsPerCurrencyAndOnlyTheGaps() throws Exception {
+        UUID runId = run("awaiting_fx_funding");
+        gates(runId, "awaiting_fx_funding", true, 2, 2, 0, false, AS_OF);
+        shortfall(runId, "INR", 2, 12_500L);
+        shortfall(runId, "JPY", 0, 224L);
+
+        mvc.perform(get("/v1/runs/{runId}", runId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gates.funding.satisfied").value(false))
+                .andExpect(jsonPath("$.gates.funding.outstanding", hasSize(2)))
+                .andExpect(jsonPath("$.gates.funding.outstanding[0].currency").value("INR"))
+                .andExpect(jsonPath("$.gates.funding.outstanding[0].amountMinor").value(12_500))
+                .andExpect(jsonPath("$.gates.funding.outstanding[1].currency").value("JPY"))
+                .andExpect(jsonPath("$.gates.funding.outstanding[1].amountMinor").value(224))
+                // Nothing adds rupees to yen (ADR 0012 point 4): the amounts arrive as rows with their own
+                // currency, and a covered currency is absent rather than a zero in the list.
+                .andExpect(jsonPath("$.gates.quorum.met").value(true));
+    }
+
+    @Test
+    void aRunTheWorkerHasNotLookedAtYetHasNoGatesRatherThanAnInventedVerdict() throws Exception {
+        UUID runId = run("awaiting_approval");
+
+        mvc.perform(get("/v1/runs/{runId}", runId))
+                .andExpect(status().isOk())
+                // Absent until the worker concludes something: "nobody has looked" and "the gates are satisfied"
+                // are different facts, and answering the first with the second would be inventing a verdict.
+                .andExpect(jsonPath("$.gates").doesNotExist());
     }
 
     @Test
@@ -215,5 +280,32 @@ class ReadRunApiTest extends DatabaseTest {
                 INSERT INTO settlement_decisions (run_id, member_id, decision, decided_at)
                 VALUES (?, ?, ?, ?::timestamptz)
                 """, runId, memberId, decision, at.atOffset(ZoneOffset.UTC));
+    }
+
+    /**
+     * The worker's gate conclusion, written exactly as {@code JooqRuns.recordGates} writes it.
+     *
+     * <p>By SQL, because this module cannot conclude anything: whether a run has quorum is the run's arithmetic, and
+     * a fixture that computed it here would be the duplicate implementation the read model refuses (ADR 0021). The
+     * other deployable's {@code GateConclusionTest} asserts that its writer produces these columns and that they
+     * agree with the verdicts it derives, so the two tests pin one row from both ends.
+     */
+    private void gates(UUID runId, String status, boolean quorumMet, int counted, int required,
+            int debtorsStillToConfirm, boolean fundingSatisfied, Instant concludedAt) {
+
+        jdbc.update("""
+                INSERT INTO settlement_run_gates (run_id, status, quorum_met, approvals_counted, approvals_required,
+                                                  debtors_still_to_confirm, funding_satisfied, concluded_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?::timestamptz)
+                """, runId, status, quorumMet, counted, required, debtorsStillToConfirm, fundingSatisfied,
+                concludedAt.atOffset(ZoneOffset.UTC));
+    }
+
+    /** One currency's gap, as the worker stores it: a row, with the exponent the amount means. */
+    private void shortfall(UUID runId, String currency, int exponent, long amountMinor) {
+        jdbc.update("""
+                INSERT INTO settlement_run_gate_shortfalls (run_id, currency_code, currency_exponent, amount_minor)
+                VALUES (?, ?, ?, ?)
+                """, runId, currency, exponent, amountMinor);
     }
 }

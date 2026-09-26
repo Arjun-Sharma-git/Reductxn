@@ -11,6 +11,7 @@ import io.reductxn.planning.api.SettlementPlan;
 import io.reductxn.settlement.port.in.ComputedRun;
 import io.reductxn.settlement.port.in.Funding;
 import io.reductxn.settlement.port.in.FundingRequest;
+import io.reductxn.settlement.port.in.GateConclusion;
 import io.reductxn.settlement.port.in.PartitionOutcome;
 import io.reductxn.settlement.port.in.PlannedTransfer;
 import io.reductxn.settlement.port.in.Quorum;
@@ -135,6 +136,23 @@ public class JooqRuns implements Runs {
     private static final Field<OffsetDateTime> TRANSFER_NEXT_ATTEMPT =
             DSL.field("next_attempt_at", OffsetDateTime.class);
     private static final Field<OffsetDateTime> TRANSFER_CREATED = DSL.field("created_at", OffsetDateTime.class);
+
+    private static final Table<Record> GATES = DSL.table("settlement_run_gates");
+    private static final Field<UUID> GATE_RUN = DSL.field("run_id", UUID.class);
+    private static final Field<String> GATE_STATUS = DSL.field("status", String.class);
+    private static final Field<Boolean> GATE_QUORUM_MET = DSL.field("quorum_met", Boolean.class);
+    private static final Field<Integer> GATE_APPROVALS_COUNTED = DSL.field("approvals_counted", Integer.class);
+    private static final Field<Integer> GATE_APPROVALS_REQUIRED = DSL.field("approvals_required", Integer.class);
+    private static final Field<Integer> GATE_DEBTORS_TO_CONFIRM =
+            DSL.field("debtors_still_to_confirm", Integer.class);
+    private static final Field<Boolean> GATE_FUNDING_SATISFIED = DSL.field("funding_satisfied", Boolean.class);
+    private static final Field<OffsetDateTime> GATE_CONCLUDED = DSL.field("concluded_at", OffsetDateTime.class);
+
+    private static final Table<Record> GATE_SHORTFALLS = DSL.table("settlement_run_gate_shortfalls");
+    private static final Field<UUID> SHORTFALL_RUN = DSL.field("run_id", UUID.class);
+    private static final Field<String> SHORTFALL_CURRENCY = DSL.field("currency_code", String.class);
+    private static final Field<Short> SHORTFALL_EXPONENT = DSL.field("currency_exponent", Short.class);
+    private static final Field<Long> SHORTFALL_AMOUNT = DSL.field("amount_minor", Long.class);
 
     private static final Table<Record> RUN_OBLIGATIONS = DSL.table("settlement_run_obligations");
     private static final Field<UUID> RUN_OBLIGATION_RUN = DSL.field("run_id", UUID.class);
@@ -352,6 +370,47 @@ public class JooqRuns implements Runs {
                 .onConflict(FUNDING_REF)
                 .doNothing()
                 .execute();
+    }
+
+    @Override
+    public void recordGates(GateConclusion conclusion) {
+        Objects.requireNonNull(conclusion, "conclusion");
+
+        GateConclusion.QuorumVerdict quorum = conclusion.quorum();
+
+        // Upsert on the run, because a conclusion is replaced in place rather than accumulated: one row per run,
+        // carrying the version of the run it was reached for - which is why the status and the instant are in the
+        // update set too, and why this write is unconditional rather than skipped when the verdict is unchanged.
+        dsl.insertInto(GATES)
+                .columns(GATE_RUN, GATE_STATUS, GATE_QUORUM_MET, GATE_APPROVALS_COUNTED, GATE_APPROVALS_REQUIRED,
+                        GATE_DEBTORS_TO_CONFIRM, GATE_FUNDING_SATISFIED, GATE_CONCLUDED)
+                .values(conclusion.runId(), conclusion.status().wireName(), quorum.met(), quorum.counted(),
+                        quorum.required(), quorum.debtorsStillToConfirm(), conclusion.funding().satisfied(),
+                        conclusion.concludedAt().atOffset(ZoneOffset.UTC))
+                .onConflict(GATE_RUN)
+                .doUpdate()
+                .set(GATE_STATUS, conclusion.status().wireName())
+                .set(GATE_QUORUM_MET, quorum.met())
+                .set(GATE_APPROVALS_COUNTED, quorum.counted())
+                .set(GATE_APPROVALS_REQUIRED, quorum.required())
+                .set(GATE_DEBTORS_TO_CONFIRM, quorum.debtorsStillToConfirm())
+                .set(GATE_FUNDING_SATISFIED, conclusion.funding().satisfied())
+                .set(GATE_CONCLUDED, conclusion.concludedAt().atOffset(ZoneOffset.UTC))
+                .execute();
+
+        // The gaps are replaced rather than merged: a currency that has since been covered must stop being
+        // reported as a gap, and an insert-only write would leave the run claiming a shortfall it no longer has.
+        dsl.deleteFrom(GATE_SHORTFALLS)
+                .where(SHORTFALL_RUN.eq(conclusion.runId()))
+                .execute();
+
+        for (Money outstanding : conclusion.funding().outstanding()) {
+            dsl.insertInto(GATE_SHORTFALLS)
+                    .columns(SHORTFALL_RUN, SHORTFALL_CURRENCY, SHORTFALL_EXPONENT, SHORTFALL_AMOUNT)
+                    .values(conclusion.runId(), outstanding.currency().code(),
+                            (short) outstanding.currency().minorUnitExponent(), outstanding.amountMinor())
+                    .execute();
+        }
     }
 
     @Override

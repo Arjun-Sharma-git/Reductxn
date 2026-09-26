@@ -145,6 +145,8 @@ abstract class WorkerDatabaseTest {
         jdbc.execute("DELETE FROM settlement_run_obligations");
         jdbc.execute("DELETE FROM settlement_decisions");
         jdbc.execute("DELETE FROM settlement_fx_fundings");
+        jdbc.execute("DELETE FROM settlement_run_gate_shortfalls");
+        jdbc.execute("DELETE FROM settlement_run_gates");
         jdbc.execute("DELETE FROM settlement_runs");
         jdbc.execute("DELETE FROM settlement_cycles");
 
