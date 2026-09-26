@@ -1090,7 +1090,7 @@ components:
             Every member's answer, as the run's decision rows hold it - including answers that cannot
             count, because the run's arithmetic intersects them with its own participants (ADR 0020). No
             entry is marked as counted: whether an answer counted is the run's judgement, and a boolean
-            here would be the API guessing (ADR 0021).
+            here would be the API guessing (ADR 0021). Whether it was enough is in `gates`.
           items:
             type: object
             required: [memberId, decision, decidedAt]
@@ -1098,6 +1098,70 @@ components:
               memberId: { type: string, format: uuid }
               decision: { type: string, enum: [approve, reject] }
               decidedAt: { type: string, format: date-time }
+        gates:
+          $ref: '#/components/schemas/RunGates'
+
+    RunGates:
+      type: object
+      description: |
+        What the run's gates concluded, the last time the settlement worker looked at it (ADR 0023).
+
+        Every field is the worker's arithmetic, stored where the API can project it: whether a quorum
+        exists, how many approvals it counted and how many it needs, and what each currency is still
+        short of. The API does not recompute any of it - the run's participants are not even published
+        here - so a client that says "one approval short" is reading the worker's own answer rather than
+        repeating its rule.
+
+        Absent until the worker has looked at the run: "nobody has concluded anything" and "the gates are
+        satisfied" are different facts, and a reader that answered the first with the second would be
+        inventing a verdict.
+      required: [concludedAt, status, quorum, funding]
+      properties:
+        concludedAt:
+          type: string
+          format: date-time
+          description: |
+            When the worker last read these gates - not when it first reached this verdict, because the
+            conclusion is refreshed on every look. Its age is how current the verdict is.
+        status:
+          type: string
+          description: |
+            The run's status when the gates were read. A conclusion outlives its run: a run that was
+            waiting when the worker looked and has since finished keeps the verdict it had, so a client
+            compares this with the run's own `status` to tell a current conclusion from a stale one.
+        quorum:
+          type: object
+          description: |
+            RULE S1's verdict, with the counts that explain it. `counted` against `required` is how far
+            off a quorum the group is, and `debtorsStillToConfirm` is why a run with enough approvals can
+            still be waiting: every member who owes a net amount must confirm personally.
+
+            Which member is not here - the run's members are its positions, and this read model does not
+            publish them yet.
+          required: [met, counted, required, debtorsStillToConfirm]
+          properties:
+            met: { type: boolean }
+            counted: { type: integer }
+            required: { type: integer }
+            debtorsStillToConfirm: { type: integer }
+        funding:
+          type: object
+          description: |
+            RULE S4's verdict: whether the group has brought in the currency the plan needs. `outstanding`
+            is per currency and never summed - nothing adds rupees to yen (ADR 0012) - and a currency that
+            is covered is absent from it rather than present as a zero, so the list is what the group still
+            has to do.
+          required: [satisfied, outstanding]
+          properties:
+            satisfied: { type: boolean }
+            outstanding:
+              type: array
+              items:
+                type: object
+                required: [currency, amountMinor]
+                properties:
+                  currency: { $ref: '#/components/schemas/Currency' }
+                  amountMinor: { type: integer, format: int64 }
 
     TaxRule:
       type: object

@@ -111,3 +111,22 @@ names it as a next slice rather than pretending the read model can infer it.
 the last transfer's confirmation; `tax` could be split evenly across a partition's transfers. Each would be an
 invented number in a field a client would treat as authoritative, which is worse than a missing field for exactly the
 reason a missing field is honest: it says "nobody has answered this yet" instead of answering it wrongly.
+
+## Amendment, 2026-09-26: the judgements now cross as a verdict
+
+This ADR's honest limit was that the read model could report the rows and not the judgements - whether a quorum
+exists, the group's external requirement, the reporting totals - and it named the eventual fix: the worker storing
+what its gates concluded, rather than the API deriving it a second time. The alternative it rejected on the way was
+the one that looked structural (share the rule as code), and the rejection is why the fix is a table.
+
+That fix is now implemented for the two judgements a group can act on. `GET /runs/{runId}` carries `gates`, projected
+from `settlement_run_gates`: whether quorum is met, with the approvals counted and required and how many debtors
+still have to confirm, and the funding gaps per currency - plus the status the verdict was reached for, because a
+conclusion outlives its run (ADR 0023). A member can now be told "one approval short" without the API implementing
+the majority rule, and a run nobody has looked at yet reports no verdict rather than an invented one.
+
+What remains unpopulated is unchanged and narrower: `reportingTotals` (the reporting currency is a group's property
+and groups do not exist as tables), `fxRequirements` (the plan's *total* requirement - `gates.funding.outstanding`
+is the gap, which is a different fact, and the difference is visible now rather than being one absence) and
+`executedAt` (nothing records the instant a run reached `done`). Nor are the run's participants published, which is
+why the verdict carries a *count* of the members still to confirm rather than their identities.
