@@ -2,6 +2,8 @@ package io.reductxn.api.adapter.persistence;
 
 import io.reductxn.api.port.in.RunReport;
 import io.reductxn.api.port.out.SettlementRuns;
+import io.reductxn.ledger.api.Currency;
+import io.reductxn.ledger.api.Money;
 import io.reductxn.planning.api.FxClearing;
 
 import org.jooq.DSLContext;
@@ -75,6 +77,31 @@ public class JooqSettlementRuns implements SettlementRuns {
     private static final Field<String> DECISION_WORD = DSL.field("decision", String.class);
     private static final Field<OffsetDateTime> DECISION_AT = DSL.field("decided_at", OffsetDateTime.class);
 
+    /**
+     * What the worker's gates concluded, written by the worker and read here (ADR 0023).
+     *
+     * <p>Two tables rather than one: the verdict is a row per run, and what is still missing for a currency is a
+     * row per currency - an amount carries a currency and an exponent, so it travels with them as every other amount
+     * in this schema does (ADR 0012 point 4). Nothing here is recomputed; the arithmetic is the worker's and this
+     * module only reads the answer.
+     */
+    private static final Table<Record> GATES = DSL.table("settlement_run_gates");
+    private static final Field<UUID> GATE_RUN = DSL.field("run_id", UUID.class);
+    private static final Field<String> GATE_STATUS = DSL.field("status", String.class);
+    private static final Field<Boolean> GATE_QUORUM_MET = DSL.field("quorum_met", Boolean.class);
+    private static final Field<Integer> GATE_APPROVALS_COUNTED = DSL.field("approvals_counted", Integer.class);
+    private static final Field<Integer> GATE_APPROVALS_REQUIRED = DSL.field("approvals_required", Integer.class);
+    private static final Field<Integer> GATE_DEBTORS_TO_CONFIRM =
+            DSL.field("debtors_still_to_confirm", Integer.class);
+    private static final Field<Boolean> GATE_FUNDING_SATISFIED = DSL.field("funding_satisfied", Boolean.class);
+    private static final Field<OffsetDateTime> GATE_CONCLUDED = DSL.field("concluded_at", OffsetDateTime.class);
+
+    private static final Table<Record> GATE_SHORTFALLS = DSL.table("settlement_run_gate_shortfalls");
+    private static final Field<UUID> SHORTFALL_RUN = DSL.field("run_id", UUID.class);
+    private static final Field<String> SHORTFALL_CURRENCY = DSL.field("currency_code", String.class);
+    private static final Field<Short> SHORTFALL_EXPONENT = DSL.field("currency_exponent", Short.class);
+    private static final Field<Long> SHORTFALL_AMOUNT = DSL.field("amount_minor", Long.class);
+
     private final DSLContext dsl;
 
     public JooqSettlementRuns(DSLContext dsl) {
@@ -102,7 +129,49 @@ public class JooqSettlementRuns implements SettlementRuns {
                 instantOf(run.get(RUN_COMPUTED_AT)),
                 partitions(runId),
                 transfers(runId),
-                answers(runId)));
+                answers(runId),
+                gates(runId)));
+    }
+
+    /**
+     * The gates' verdict, or null when the worker has not looked at this run yet.
+     *
+     * <p>Null rather than a default verdict, and the distinction is the point: a run that was just computed has no
+     * conclusion, and reporting "quorum not met" for it would be this module answering a question it did not ask -
+     * the same fabrication {@code RunReport}'s absent {@code executedAt} refuses. A client that sees no {@code gates}
+     * learns that no look has happened yet.
+     */
+    private RunReport.Gates gates(UUID runId) {
+        Record stored = dsl.select(GATE_STATUS, GATE_QUORUM_MET, GATE_APPROVALS_COUNTED, GATE_APPROVALS_REQUIRED,
+                        GATE_DEBTORS_TO_CONFIRM, GATE_FUNDING_SATISFIED, GATE_CONCLUDED)
+                .from(GATES)
+                .where(GATE_RUN.eq(runId))
+                .fetchOne();
+
+        if (stored == null) {
+            return null;
+        }
+
+        return new RunReport.Gates(
+                instantOf(stored.get(GATE_CONCLUDED)),
+                stored.get(GATE_STATUS),
+                new RunReport.Gates.Quorum(
+                        stored.get(GATE_QUORUM_MET),
+                        stored.get(GATE_APPROVALS_COUNTED),
+                        stored.get(GATE_APPROVALS_REQUIRED),
+                        stored.get(GATE_DEBTORS_TO_CONFIRM)),
+                new RunReport.Gates.Funding(stored.get(GATE_FUNDING_SATISFIED), shortfalls(runId)));
+    }
+
+    /** The currency amounts still missing, in the order the worker wrote them. */
+    private List<Money> shortfalls(UUID runId) {
+        return dsl.select(SHORTFALL_CURRENCY, SHORTFALL_EXPONENT, SHORTFALL_AMOUNT)
+                .from(GATE_SHORTFALLS)
+                .where(SHORTFALL_RUN.eq(runId))
+                .orderBy(SHORTFALL_CURRENCY)
+                .fetch(shortfall -> Money.of(
+                        shortfall.get(SHORTFALL_AMOUNT),
+                        Currency.of(shortfall.get(SHORTFALL_CURRENCY), shortfall.get(SHORTFALL_EXPONENT))));
     }
 
     private static Instant instantOf(OffsetDateTime stored) {

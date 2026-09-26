@@ -27,7 +27,30 @@ public final class RunMapper {
                 run.status(),
                 run.partitions().stream().map(RunMapper::toPartition).toList(),
                 run.answers().stream().map(RunMapper::toAnswer).toList(),
-                run.computedAt());
+                run.computedAt(),
+                toGates(run.gates()));
+    }
+
+    /** Null through, rather than an empty verdict: no conclusion and a satisfied one are different facts. */
+    private static SettlementRunResponse.Gates toGates(RunReport.Gates gates) {
+        if (gates == null) {
+            return null;
+        }
+
+        return new SettlementRunResponse.Gates(
+                gates.concludedAt(),
+                gates.status(),
+                new SettlementRunResponse.Gates.Quorum(
+                        gates.quorum().met(),
+                        gates.quorum().counted(),
+                        gates.quorum().required(),
+                        gates.quorum().debtorsStillToConfirm()),
+                new SettlementRunResponse.Gates.Funding(
+                        gates.funding().satisfied(),
+                        gates.funding().outstanding().stream()
+                                .map(outstanding -> new MoneyDto(outstanding.amountMinor(),
+                                        outstanding.currency().code()))
+                                .toList()));
     }
 
     public static List<TransferInstructionResponse> toInstructions(RunReport run) {

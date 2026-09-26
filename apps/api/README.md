@@ -71,13 +71,23 @@ first applies every migration to the one schema.
 figures per currency, who pays whom (with the FX legs labelled from `libs/planning`'s own model of the clearing
 account), each movement's state, and every answer on the record. What they do *not* do is recompute what those rows
 mean - quorum, the group's external requirement and the reporting-currency totals are the worker's judgements, and a
-second implementation here would be the copy a member reads while the first one moves money (ADR 0021). Two of the
-contract's fields are therefore unpopulated with a stated reason, one requirement (`TransferInstruction.tax`) was
-relaxed, and the tests assert the absences so that filling one is a decision rather than an accident.
+second implementation here would be the copy a member reads while the first one moves money (ADR 0021). Fields with
+no source are left unpopulated with a stated reason (`reportingTotals`, `fxRequirements`, `executedAt`), one
+requirement (`TransferInstruction.tax`) was relaxed, and the tests assert the absences so that filling one is a
+decision rather than an accident.
 
-Together the three endpoints are one story: read the plan, answer it, check the answers. A member cannot yet be told
-"you are one approval short" - the run's status and the answers as rows have to be read together - because that
-sentence is the run's arithmetic and nothing stores its conclusion yet.
+**The one judgement the run carries is the worker's own, projected.** `GET /v1/runs/{runId}` reports `gates`: whether
+quorum is met with the approvals counted and required and how many debtors still have to confirm, and what each
+currency is still short of - read from `settlement_run_gates`, which the worker writes when it reads its gates, and
+reported without checking it (ADR 0023). A currency that is covered has no row there, so `outstanding` is what the
+group has left to do; `gates.status` is the run's status when the verdict was reached, so a client can tell a current
+conclusion from one that outlived its run; and a run nobody has looked at yet has no `gates` at all, because
+"nobody has concluded anything" and "the gates are satisfied" are different facts.
+
+Together the three endpoints are one story: read the plan, answer it, check the answers. A member who has answered
+can now be told "you are one approval short, and it is one of the members who owes money" - the counts come from the
+worker, and this module only says what it was told. What it still cannot say is *which* member: the run's
+participants are the worker's positions and are not published here.
 
 ## What is not here yet
 

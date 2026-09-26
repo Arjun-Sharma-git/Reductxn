@@ -1,5 +1,7 @@
 package io.reductxn.api.port.in;
 
+import io.reductxn.ledger.api.Money;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -21,9 +23,16 @@ import java.util.UUID;
  * left out rather than approximated from {@code drivenAt} - which means something else entirely (when the driver
  * last looked at the run, not when the money moved).
  *
+ * <p><strong>{@link Gates} is the first judgement this read model carries, and it carries it because the worker
+ * wrote it down rather than because the API computed it.</strong> "Why is this waiting?" is answered by quorum's
+ * arithmetic and the funding requirement, neither of which this module may derive (ADR 0021) - so
+ * {@code settlement_run_gates} holds the verdict the worker reached, this projects it verbatim, and a client can
+ * say how far off a group is without re-implementing the rule (ADR 0023).
+ *
  * @param partitions one entry per currency in the plan, in currency order
  * @param transfers  the who-pays-whom instructions, in the deterministic order the table's own comment describes
  * @param answers    every member's answer, including any that cannot count (see {@link ReadRun})
+ * @param gates      what the run's gates concluded, or null when the worker has not looked at this run yet
  */
 public record RunReport(
         UUID id,
@@ -33,7 +42,8 @@ public record RunReport(
         Instant computedAt,
         List<Partition> partitions,
         List<Transfer> transfers,
-        List<Answer> answers) {
+        List<Answer> answers,
+        Gates gates) {
 
     public RunReport {
         Objects.requireNonNull(id, "id");
@@ -43,6 +53,9 @@ public record RunReport(
         partitions = List.copyOf(partitions);
         transfers = List.copyOf(transfers);
         answers = List.copyOf(answers);
+        // `gates` is deliberately not required: a run that has just been computed has not been looked at by the
+        // worker yet, and "nobody has concluded anything" is a fact this read model reports as an absence rather
+        // than as a verdict it invented.
     }
 
     /**
@@ -147,6 +160,62 @@ public record RunReport(
             Objects.requireNonNull(memberId, "memberId");
             Objects.requireNonNull(decision, "decision");
             Objects.requireNonNull(decidedAt, "decidedAt");
+        }
+    }
+
+    /**
+     * What the run's gates concluded, as the worker wrote it down.
+     *
+     * <p><strong>Projected verbatim, and that is the whole point of the table it comes from.</strong> Every field
+     * here is the worker's arithmetic - whether a quorum exists, how many approvals it counted, how many it needs,
+     * what is still missing per currency - and this module reports it without checking it. The alternative was for
+     * this module to count the answers and compare them with the run's participants, which is the duplicate
+     * implementation {@link ReadRun} refuses; the run's participants are not even published here.
+     *
+     * <p><strong>{@code status} is the run's status when the gates were read, and it is here so a reader can tell a
+     * current conclusion from a stale one.</strong> A conclusion outlives its subject: a run that was waiting when
+     * the worker looked and has since finished keeps the verdict it had, and a client comparing this field with the
+     * run's own {@code status} can see that the verdict is about a version of the run that no longer exists.
+     * {@code concludedAt} is how long ago that look was.
+     *
+     * @param concludedAt when the worker last read these gates - not when it first reached this verdict
+     * @param quorum      RULE S1's verdict, with the arithmetic behind it
+     * @param funding     RULE S4's verdict, with the amounts still missing
+     */
+    public record Gates(Instant concludedAt, String status, Quorum quorum, Funding funding) {
+
+        public Gates {
+            Objects.requireNonNull(concludedAt, "concludedAt");
+            Objects.requireNonNull(status, "status");
+            Objects.requireNonNull(quorum, "quorum");
+            Objects.requireNonNull(funding, "funding");
+        }
+
+        /**
+         * Whether the run has quorum, and the counts that explain the answer.
+         *
+         * <p>{@code counted} and {@code required} are how a client says "one approval short" without knowing the
+         * rule, and {@code debtorsStillToConfirm} is how it says "and it has to be one of the members who owes
+         * money" - "enough approvals, still waiting" is the combination a member finds hardest to understand, and
+         * this is the count that explains it. *Which* member is not here: the run's members are its positions, and
+         * this read model does not publish them.
+         */
+        public record Quorum(boolean met, int counted, int required, int debtorsStillToConfirm) {
+        }
+
+        /**
+         * Whether the group has brought in the currency the plan needs, and what is still missing.
+         *
+         * <p>Per currency and never summed (ADR 0012): nothing adds rupees to yen, so {@code outstanding} is a list
+         * of amounts with their own currencies. A currency that is covered is absent from it rather than present as
+         * a zero, which is what the worker stores - so "what does this group have to do?" is the list itself.
+         */
+        public record Funding(boolean satisfied, List<Money> outstanding) {
+
+            public Funding {
+                Objects.requireNonNull(outstanding, "outstanding");
+                outstanding = List.copyOf(outstanding);
+            }
         }
     }
 }

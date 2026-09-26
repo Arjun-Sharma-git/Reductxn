@@ -94,6 +94,8 @@ abstract class DatabaseTest {
         // And the plan's own rows, which the read models project: every one of them references the run.
         jdbc.execute("DELETE FROM settlement_transfers");
         jdbc.execute("DELETE FROM settlement_partitions");
+        jdbc.execute("DELETE FROM settlement_run_gate_shortfalls");
+        jdbc.execute("DELETE FROM settlement_run_gates");
         jdbc.execute("DELETE FROM settlement_runs");
         jdbc.execute("DELETE FROM settlement_cycles");
 
