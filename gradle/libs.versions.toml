@@ -40,6 +40,10 @@ junitPlatform = "6.0.3"
 [libraries]
 spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot" }
 spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web" }
+# The plain starter, for a deployable with no HTTP surface: workers/settlement has none (its README says
+# "public surface: none"), and pulling starter-web in to get a context would give it a server it must then
+# be trusted not to grow endpoints on.
+spring-boot-starter = { module = "org.springframework.boot:spring-boot-starter" }
 spring-boot-starter-validation = { module = "org.springframework.boot:spring-boot-starter-validation" }
 spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
 spring-boot-starter-security = { module = "org.springframework.boot:spring-boot-starter-security" }
@@ -50,6 +54,14 @@ spring-boot-starter-flyway = { module = "org.springframework.boot:spring-boot-st
 # The jOOQ library without the starter, for the architecture tests: B16 forbids jOOQ types outside the
 # persistence adapters, and a rule can only police a type it can see.
 jooq = { module = "org.jooq:jooq", version.ref = "jooq" }
+# Jackson's databind, for a deployable with no web starter that still has to read a `jsonb` column - the tax
+# rule's parameters. `tools.jackson` is Jackson 3, which is the line the Spring Boot BOM we target manages
+# (ADR 0002); the version is deliberately left to it, as with the starters.
+jackson-databind = { module = "tools.jackson.core:jackson-databind" }
+# Boot's Jackson autoconfiguration, which is its own module in Boot 4 rather than part of spring-boot-autoconfigure
+# - the same modularisation that puts Flyway's per-database support in a separate artifact. A deployable without a
+# web starter needs it named to get a configured ObjectMapper bean.
+spring-boot-jackson = { module = "org.springframework.boot:spring-boot-jackson" }
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
 # The Spring Framework libraries a module needs without a starter. `spring-tx` carries @Transactional -
 # the library, not the starter, because a starter would pull a DataSource in, and RULE B15 needs the
