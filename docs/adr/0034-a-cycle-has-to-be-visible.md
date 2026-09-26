@@ -82,11 +82,11 @@ The only local refusal is a missing or unreadable instant, and it uses the serve
   watch the row say "waiting since", and follow the plan when the worker has computed it - and the same screen shows
   the plans that already need an answer. The two acts ADR 0032 separated now have a member-facing path through both
   of them: ask, wait, read, answer.
-- **Seventeen new tests, split by what they can see.** Eight in `ReadGroupCyclesApiTest` (an empty list rather than an
-  error, a row with no plan, a row with its plan, `created_at` order where it disagrees with `as_of`, one group's
+- **Twenty-one new tests, split by what they can see.** Eight in `ReadGroupCyclesApiTest` (an empty list rather than
+  an error, a row with no plan, a row with its plan, `created_at` order where it disagrees with `as_of`, one group's
   cycles not being another's, the limit bounded by the contract, a coded `400` for a malformed id, and that a join
   never reports one cycle twice) and two more in `OpenCycleApiTest` (a fresh cycle leaves `runId` out; a cycle that
-  already had a plan is reported with it). On the client side: four unit tests for the wall-clock conversion, six for
+  already had a plan is reported with it). On the client side: four unit tests for the wall-clock conversion, five for
   the request and the row's meaning, and two browser tests - one that closes the books and sees the row come back,
   one that follows a plan from a cycle whose plan exists.
 - **The read is a projection of another module's rows, and that is the familiar cost.** `JooqCycles` reads
