@@ -5,12 +5,14 @@
 
 ## 1. Model
 
-```
-fx_rates(id, base_currency, quote_currency, rate_scaled, rate_scale,
+```sql
+fx_rates(id, base_code, base_exponent, quote_code, quote_exponent, rate_scaled, rate_scale,
          mid_rate_scaled, spread_bps, source, quoted_at, expires_at)
 
-fx_quotes(id, base_currency, quote_currency, rate_id, amount_minor, converted_minor,
-          residual_minor, quoted_at, expires_at, locked_at)
+fx_quotes(id, base_code, base_exponent, base_amount_minor, quote_code, quote_exponent,
+          converted_amount_minor, residual_scaled, residual_scale,
+          rate_scaled, rate_scale, mid_rate_scaled, spread_bps, rate_source,
+          rate_quoted_at, rate_expires_at, locked_at, rail_performed_fx)
 
 currencies(code, minor_unit_exponent, is_cbdc, jurisdiction)
 
@@ -20,6 +22,25 @@ journal_entries(..., fx_link_id, fx_role[base|quote], rail_performed_fx)
 A **rate** is market data and is superseded over time. A **quote** is the locked application of a
 rate to one amount, and is immutable once written. An obligation stores the quote id, never the rate
 itself, so re-deriving history is not required to read a past obligation.
+
+**Three corrections to the sketch this section used to carry**, because it was written before the
+conversion was implemented and a spec that disagrees with the code is worse than a short one:
+
+- **No `rate_id`.** The first sketch had the quote point at the rate row. It embeds the rate instead:
+  a pointer would make a settled conversion depend on market data that is *expected* to be superseded,
+  so superseding a rate would either break the foreign key or silently restate what a creditor was
+  promised (ADR 0013 point 5). The quote is self-contained so that reading a past obligation needs
+  nothing but the obligation.
+- **`residual_scaled` and `residual_scale`, not `residual_minor`.** The residual is genuinely
+  fractional - always inside half a minor unit of the target currency - and there is no whole minor
+  unit that represents it (section 4, ADR 0013 point 3).
+- **Both exponents, on every amount and on the rate.** `FxRate` carries a `Currency`, not a code, so a
+  stored rate whose meaning depended on today's `currencies` row could change meaning without anyone
+  editing it - the same reason `obligations` and `journal_entries` store the exponent beside the amount.
+
+`fx_rates` and `fx_quotes` are `V402`, beside this module. Nothing ingests rates yet: a deployment with
+no rate loader answers every cross-currency request with `fx.rate_unavailable`, which is the fail-closed
+behaviour rather than a gap in it.
 
 ## 2. Rate representation
 
@@ -264,10 +285,9 @@ its fail-closed freshness check. Properties X1-X6 hold over generated inputs.
 | Missing | Why it is not here |
 |---|---|
 | X7, per-currency zero-sum | Tested in `libs/planning`, which composes the partitions. It needs a module that can see both the engine and `fx_clearing` |
-| X2's second half, "the cycle sum of residuals equals the `fx_clearing` delta" | Needs postings to sum over, so it lands with the ledger write path |
-| The `fx_clearing` account and its postings | Needs the ledger write path in `apps/api` |
+| X2's second half, "the cycle sum of residuals equals the `fx_clearing` delta" | Postings now exist and a cross-currency obligation's pair is verified from the rows, but the claim is about a *cycle*: it needs a completed run to sum over, so it lands with `workers/settlement` |
 | `awaiting_fx_funding` and the funding state | Needs the settlement run lifecycle in `workers/settlement` |
-| A rate provider adapter | Needs `apps/api/adapter/rate`; the port (`FxRateProvider`) is ready |
+| Rate ingestion | The provider adapter reads `fx_rates`, and nothing writes to `fx_rates`. A rate loader is an operational path - a provider feed, or an operator's insert - and it is not part of this module, which is why the table exists and is empty |
 
 **Measured against the compiled engine.** Every one of these reproduces the hand-computed value in the
 sections above, which is the check that the spec and the code agree rather than merely coexisting:
