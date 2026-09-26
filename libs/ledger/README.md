@@ -26,6 +26,33 @@ Everything callers may touch lives in `io.reductxn.ledger.api` (RULE B10).
 
 `io.reductxn.ledger.internal` holds the canonical encoding and is not public surface.
 
+## The schema
+
+The module owns `journal_entries` and `postings`, and ships them as a migration beside this file
+(`src/main/resources/db/migration/V301__ledger.sql`, the `3xx` range - see the README's neighbours for the
+version scheme). Two things about it are worth knowing before reading it:
+
+**The schema is a guard, not a description.** L2, L4, L6 and L9 are enforced by constraints and indexes rather
+than by code that could forget them: a posting's amount is positive, a posting's currency must match its
+entry's (a composite foreign key, because a check cannot read another table), at most one entry per chain may
+claim a given predecessor, exactly one may start a chain, and a link id carries at most one base and one quote
+entry. L1 and L3 are *not* there, and the migration says why: L1 is a property of a set of rows rather than of
+one, and L3 needs a database role this project has not separated yet - a table's owner can always `UPDATE` and
+`DELETE` however the grants read, so revoking from the application's role would change nothing until migrations
+run as a different role.
+
+**No `ledger_accounts` yet.** Section 5.5 assigns it here, but an account needs an owner and a type, and
+neither exists: a member *is* its id today, and `fx_clearing` is a reserved constant in `libs/planning` that
+RULE B2 stops this module from reading. So postings carry an account id with deliberately no foreign key.
+
+## Where entries are written
+
+This module composes entries; it does not store them. `apps/api`'s record-obligation use case builds the chain
+head through a port this module defines and appends through a jOOQ adapter, in one transaction - the lock that
+makes the chain safe is an advisory lock whose lifetime is that transaction. The chain a booking produces is
+then verified from the rows by `EntryChain`, which is the arrangement that makes the ledger auditable without
+the application: the verification reads the same rows an auditor would.
+
 ## Allowed dependencies
 
 `libs/kernel` (RULE B2). Nothing else - not netting, not fx, not rails.

@@ -59,6 +59,17 @@ stored quote. Both passes are required.
 The application's database role is granted `INSERT` and `SELECT` only on `journal_entries` and
 `postings`. No code path can contradict the invariant, because the database refuses.
 
+**NOT YET IMPLEMENTED, and the reason is worth recording.** Migrations run as the application's own role, and
+a table's owner can always `UPDATE` and `DELETE` whatever the grants say - so revoking from `reductxn_app`
+would change nothing until migrations run as a separate role and the tables are owned by it. The grants are
+therefore not in `V301`, and saying so here is the whole point: an invariant that looks enforced and is not is
+worse than one that is visibly waiting. `MASTER-PLAN` section 5.5 has the same note.
+
+Two things the tables *do* enforce structurally, because they could: at most one entry per chain may claim a
+given predecessor, and exactly one may start a chain (L4); and a posting's currency must match its entry's (L6),
+by a composite foreign key. L2 is a check constraint. L1 is deliberately absent - it is a property of a set of
+rows rather than of one - and `EntryChain` verifies it from the rows instead.
+
 ## 5. Money representation
 
 `Money` is a record of `(long amountMinor, Currency currency)`. There is no `double` or `float`
@@ -77,3 +88,21 @@ amount by a rate (RULE B19).
 - Retention and archival policy for old partitions.
 - Whether the residual accumulated on `fx_clearing` may be allocated pro rata to members instead of
   accumulating (ADR 0013, open question).
+- **What kind an `fx_clearing` account is.** The model types accounts as asset, liability or income, and this
+  one is an asset in the currency it is owed by a debtor and a liability in the currency it owes a creditor -
+  so no single kind is right until the account row exists. It is not needed yet, because postings carry an
+  account id and `ledger_accounts` is not built, and it is stated here rather than guessed at in a migration.
+
+## 7. Two things storage imposes on the model
+
+Both were found by verifying a chain that came out of a database rather than one a test built.
+
+- **An instant the ledger keeps is a microsecond instant.** `occurred_at` is a Postgres `timestamptz` and the
+  instant is part of the encoding the hash covers, so a nanosecond instant would produce an entry whose stored
+  row rehashes to a different value. `libs/booking`'s `Commitment` truncates to microseconds for that reason -
+  the hash has to be a function of what can be stored.
+- **A posting's position is stored, not implied.** The encoding covers postings in the order they are held, on
+  purpose: a reordering a reader would see should be detectable rather than normalised away. That means `postings`
+  carries a `position`, unique per entry, and anything rebuilding an entry from rows must order by it. The
+  alternative - an ordering the hash covers but the rows cannot reproduce - makes the ledger unverifiable from
+  itself without failing loudly, which is the worst of both.
