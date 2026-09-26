@@ -11,6 +11,7 @@ import io.reductxn.settlement.port.in.TransferStatus;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -50,6 +51,48 @@ public interface Runs {
      * keyed by {@code (group, as-of)}, so a retry finds the run it already opened instead of planning again.
      */
     Optional<ComputedRun> findRun(UUID groupId, Instant asOf);
+
+    /**
+     * The cycles nothing has computed yet, oldest first: what a cadence computes.
+     *
+     * <p><strong>A cycle without a run is not a half-open run; it is a statement that a settlement is
+     * wanted.</strong> The schema has always allowed the two acts to be separate - {@code settlement_cycles} is
+     * keyed by {@code (group, as_of)} and {@code settlement_runs} references it with {@code one_run_per_cycle} -
+     * and until this method existed nothing could tell the difference, because computing a cycle wrote both rows
+     * in one transaction. Opening one is how somebody says "this cycle has come due"; computing it is this
+     * module's work, and this is the query that finds the work.
+     *
+     * <p><strong>Oldest first, because these are requests and a queue is served in the order it arrived.</strong>
+     * The alternative was tried on paper and rejected: taking the newest first serves whoever just asked and
+     * leaves the oldest request for last, which is the member who has been waiting longest. {@link #dueForDriving}
+     * can afford least-recently-attempted-first because a run carries {@code driven_at} and a run that cannot
+     * progress is sent to the back of its queue; a cycle carries no such mark.
+     *
+     * <p><strong>And that missing mark is the honest cost of this query, not an ordering choice.</strong> Nothing
+     * records that a pass looked at a cycle, so a cycle that cannot be computed - a group with nothing to settle
+     * at that instant - is returned on every pass until something changes: an obligation recorded later can carry
+     * an instant inside it, which is the ordinary shape of a backdated bill, so "cannot be computed" is not
+     * permanent and dropping it would lose a real settlement. What bounds the cost is the batch size (one cheap
+     * query and one refusal per such cycle) and the log, which names the ones that were refused. The fix is a
+     * column that records an attempt, and that is a migration rather than a different {@code order by}.
+     *
+     * <p><strong>There is no window either, and that follows from the same fact.</strong> A window would stop
+     * looking at an old cycle, and an old cycle is exactly the one a backdated commitment can still belong to.
+     *
+     * @param batchSize the most cycles to return, so one pass cannot compute a group's whole history
+     */
+    List<OpenedCycle> cyclesWithoutRuns(int batchSize);
+
+    /** A cycle with no run over it: the group, the instant it was opened for, and when it was opened. */
+    record OpenedCycle(UUID cycleId, UUID groupId, Instant asOf, Instant createdAt) {
+
+        public OpenedCycle {
+            Objects.requireNonNull(cycleId, "cycleId");
+            Objects.requireNonNull(groupId, "groupId");
+            Objects.requireNonNull(asOf, "asOf");
+            Objects.requireNonNull(createdAt, "createdAt");
+        }
+    }
 
     /**
      * The runs a driver may act on: those in a state where progress is possible, least recently attempted first.
@@ -92,6 +135,28 @@ public interface Runs {
      * it into a refusal rather than an empty report.
      */
     Optional<ComputedRun> findRunById(UUID runId);
+
+    /**
+     * Opens a cycle, and writes nothing else.
+     *
+     * <p><strong>The cycle before the plan, because the instant comes before it.</strong> A cycle says which
+     * commitments are being settled - everything recorded at or before {@code asOf} - and that is a decision
+     * somebody makes before any plan exists: a group closes its books for a period and settles what is in them,
+     * possibly days later. {@link #open} below opens the same row when it computes, so the two paths meet on
+     * {@code (group_id, as_of)} rather than on an id: this method and that one derive the cycle's identity the
+     * same way, and the unique constraint is what settles a race between them.
+     *
+     * <p><strong>Idempotent, and the answer says which call did the work.</strong> A second open for the same
+     * pair is not an error - the cycle exists, which is what the caller wanted - so the duplicate is not raised
+     * and the return value is how the caller tells "I opened it" from "somebody already had". The insert is
+     * {@code do nothing} on conflict for the same reason {@link #open} is: two operators, or an operator and a
+     * cadence, arriving together at one cycle is the race a check-then-insert would lose.
+     *
+     * @param cycleId the cycle's identity, derived from the pair by the use case rather than minted here
+     * @param at      when it was opened, which is a fact about the request rather than about the cycle's instant
+     * @return true when this call inserted the cycle, false when it was already open
+     */
+    boolean openCycle(UUID cycleId, UUID groupId, Instant asOf, Instant at);
 
     /**
      * Opens the cycle if it does not exist, records the run, writes the plan and the commitments it covers, and

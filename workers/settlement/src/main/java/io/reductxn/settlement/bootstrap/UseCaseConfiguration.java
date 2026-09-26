@@ -6,12 +6,17 @@ import io.reductxn.rails.api.BreakerPolicy;
 import io.reductxn.rails.api.PaymentRail;
 import io.reductxn.rails.api.Rails;
 import io.reductxn.settlement.application.Backoff;
+import io.reductxn.settlement.application.ComputeOpenedCyclesService;
 import io.reductxn.settlement.application.DriveRunsService;
+import io.reductxn.settlement.application.OpenCycleService;
 import io.reductxn.settlement.application.ReadStuckTransfersService;
 import io.reductxn.settlement.application.ResolveTransferService;
+import io.reductxn.settlement.port.in.ComputeOpenedCycles;
+import io.reductxn.settlement.port.in.ComputeRun;
 import io.reductxn.settlement.port.in.DriveRuns;
 import io.reductxn.settlement.port.in.Escalation;
 import io.reductxn.settlement.port.in.ExecuteRun;
+import io.reductxn.settlement.port.in.OpenCycle;
 import io.reductxn.settlement.port.in.ReadStuckTransfers;
 import io.reductxn.settlement.port.in.Reconciliation;
 import io.reductxn.settlement.port.in.ResolveTransfer;
@@ -60,6 +65,32 @@ public class UseCaseConfiguration {
     @Bean
     Clock clock() {
         return Clock.systemUTC();
+    }
+
+    /**
+     * Opening a cycle: saying a settlement is wanted, without computing it.
+     *
+     * <p>A bean for the same reason the driver is one, and this port is the clearest case of it: the two ways in
+     * are the operator's command and (next) the API's request rows, and both reach the module through
+     * {@link io.reductxn.settlement.port.in.OpenCycle} rather than through this class. Nothing about opening a
+     * cycle is decided in a bean factory - the derivation is {@code ComputeRunService}'s and the instant is the
+     * caller's - so what is visible here is only that this module can do it.
+     */
+    @Bean
+    OpenCycle openCycle(Runs runs, Clock clock) {
+        return new OpenCycleService(runs, clock);
+    }
+
+    /**
+     * The other cadence's use case: computing the runs for the cycles somebody opened.
+     *
+     * <p>It takes {@link ComputeRun} rather than the planner and the ports that use case takes, and that is the
+     * point of it: every rule about a plan lives in one place, and this service only decides which cycles get one.
+     * A second path to the planner would be a second answer to "what does this cycle settle?".
+     */
+    @Bean
+    ComputeOpenedCycles computeOpenedCycles(Runs runs, ComputeRun computeRun) {
+        return new ComputeOpenedCyclesService(runs, computeRun);
     }
 
     /**

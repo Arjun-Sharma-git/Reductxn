@@ -22,15 +22,17 @@ disagree about what an entry is.
 
 ## Running it
 
-**As a daemon** (the default): `java -jar workers-settlement.jar`. A cadence drives every run whose progress is
-possible, once a minute, rate-limited by a window and a batch size
-(`reductxn.settlement.drive.interval` / `.window` / `.batch-size`, or the `REDUCTXN_DRIVE_*` environment
-variables). This is also what keeps the process alive: it is a non-web application, so without a non-daemon
-thread the JVM exits after startup.
+**As a daemon** (the default): `java -jar workers-settlement.jar`. Two cadences run: one drives every run whose
+progress is possible, and one computes the cycles somebody has opened and nothing has computed (ADR 0032) -
+`reductxn.settlement.drive.interval` / `.window` / `.batch-size` and `reductxn.settlement.compute.interval` /
+`.batch-size`, or the `REDUCTXN_DRIVE_*` and `REDUCTXN_COMPUTE_*` environment variables. This is also what keeps
+the process alive: it is a non-web application, so without a non-daemon thread the JVM exits after startup.
 
-**As a scheduled job**: set `reductxn.settlement.drive.enabled=false` and let cron do it -
+**As a scheduled job**: set `reductxn.settlement.drive.enabled=false` and `reductxn.settlement.compute.enabled=false`,
+and let cron do it -
 
 ```
+java -jar workers-settlement.jar --reductxn.command=compute-opened
 java -jar workers-settlement.jar --reductxn.command=drive
 ```
 
@@ -38,9 +40,16 @@ java -jar workers-settlement.jar --reductxn.command=drive
 not exist):
 
 ```
-# open a cycle and print the plan
+# open a cycle, and compute nothing: a settlement policy decides the instant, and the plan follows from it
+java -jar workers-settlement.jar --reductxn.command=open \
+     --reductxn.group=<uuid> [--reductxn.as-of=<instant>]
+
+# open a cycle and print the plan, in one act
 java -jar workers-settlement.jar --reductxn.command=compute \
      --reductxn.group=<uuid> [--reductxn.as-of=<instant>]
+
+# compute every cycle that was opened and has no run - the cadence's pass, from a shell
+java -jar workers-settlement.jar --reductxn.command=compute-opened [--reductxn.limit=50]
 
 # one pass over what is due, or one specific run
 java -jar workers-settlement.jar --reductxn.command=drive [--reductxn.run=<uuid>]
@@ -62,6 +71,14 @@ java -jar workers-settlement.jar --reductxn.command=resolve --reductxn.run=<uuid
 Exit codes: `0` done, `1` refused by the domain, `2` the invocation was wrong. **No command approves or rejects a
 run** - answering is a member's act, and the member's surface is `apps/api` rather than an operator's command
 (ADR 0018, 0020).
+
+**Opening a cycle and computing it are two commands, and the difference is a policy (ADR 0032).** `open` writes the
+cycle and nothing else: a cycle says *which commitments are being settled* - everything recorded at or before the
+instant - and that is a decision a group makes before any plan exists, so a period can be closed today and settled
+tomorrow. `compute-opened` is the reply: it computes every cycle that has no run, and it is what the cadence runs, so
+a cycle opened by a group's schedule (or, next, by a member through `apps/api`) is computed without a person. What
+neither command does is decide that a cycle has come due - that is the group's, and it is why `open` is the one
+command with no cadence.
 
 ## Who writes a run's decisions
 

@@ -34,8 +34,11 @@ import java.util.UUID;
  * {@code libs/planning}'s (RULE B21), the obligations and the tax rules are read through ports, and the run's
  * status is the one thing decided here.
  *
- * <p>Nothing schedules this. The tests call it, and a scheduler or an operator's command is a later slice.
- * Saying so is better than a comment that implies a trigger exists.
+ * <p><strong>Nothing scheduled this until ADR 0032, and the reason was structural rather than an omission.</strong>
+ * Opening a cycle and computing it were one act, so there was no state that meant "wanted, not yet computed" and
+ * nothing for a cadence to find. {@link io.reductxn.settlement.port.in.ComputeOpenedCycles} is that caller now: it
+ * reads the cycles somebody opened and computes each one, which is why this use case asks {@code findRun} first
+ * rather than assuming it is the first caller - a cycle can exist before the plan over it does.
  */
 @Service
 public class ComputeRunService implements ComputeRun {

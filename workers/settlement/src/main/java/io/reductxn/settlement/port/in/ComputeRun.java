@@ -5,10 +5,13 @@ import io.reductxn.kernel.api.Result;
 /**
  * Opening and computing a run for a group's cycle.
  *
- * <p>This is the worker's whole inbound surface today. There is no controller behind it: the module has no HTTP
- * surface by design, so nothing triggers a run yet - the tests call this directly and a scheduler is a later
- * slice. Stating that plainly matters more than it looks, because a service that nothing calls is
- * indistinguishable from a service that works, and the difference is a caller.
+ * <p>This is the worker's whole inbound surface for a plan, and where it is called from has changed once: for several
+ * slices nothing called it at all - the tests did - and the honest thing to write down then was that a service
+ * nothing calls is indistinguishable from a service that works, and the difference is a caller. There are now three,
+ * and they are three different answers to "who asked for this settlement": an operator's command
+ * ({@code --reductxn.command=compute}), the cadence that computes cycles somebody opened
+ * ({@link ComputeOpenedCycles}, which is what makes a settlement policy expressible - ADR 0032), and a retry of
+ * either, which finds the run it already opened.
  *
  * <p><strong>Idempotent on {@code (group, as-of)}.</strong> Opening a run twice for the same cycle is a read of
  * the first, not a second plan: the cycle is keyed by that pair, the run is keyed by the cycle, and both ids are
