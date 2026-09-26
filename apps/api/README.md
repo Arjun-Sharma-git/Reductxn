@@ -162,6 +162,20 @@ than shown a number nobody could reproduce. One consequence is recorded rather t
 a position whose holder is the `fx_clearing` account, and the `NetPosition` schema carries no way to say so yet, so a
 client shows the identifier and the screen's footnote names both cases.
 
+`GET /v1/me` and the three auth operations are sign-in, and they are the first thing in this build that reads a token
+(ADR 0042). A phone number and a code: verifying a code **is** registering - a number nobody has seen becomes an account,
+because in an OTP build there is no separate sign-up and no admin to seed one. Three details are decisions rather than
+details. **A code is stored as a PBKDF2 hash with a per-challenge salt while a session token is a plain SHA-256** - twenty
+bits need a cost per guess and 256 random bits do not. **The code is never returned and never logged by this module**; it
+goes through `OneTimeCodes`, whose only adapter in this deployment writes it to the log at `WARN`, which is the stand-in
+named rather than implied. And **`bearerFormat: JWT` is gone**: the token is opaque, hashed at rest, and rotation rewrites
+the row - both tokens, in one conditional update, without moving the session's end, so a replayed refresh token finds
+nothing and the old access token dies with it.
+
+The one thing this slice deliberately did not do is require a token anywhere except `/me`. Enforcing it on the members
+write, the invitation acceptance and the decision endpoint is a slice of its own: it would break every existing caller at
+once, and doing it here would hide all of that behind identity's arrival.
+
 `POST /v1/groups/{groupId}/invites` and `POST /v1/invites/{code}/accept` are the last two operations of section 6's
 route tree, and serving them closes the route tree's screens (ADR 0041). The slice also created the table, and the shape
 of the data followed from the wire: acceptance is addressed by the code alone, so **the code is the primary key** and is

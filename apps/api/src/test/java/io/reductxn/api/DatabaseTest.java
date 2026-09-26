@@ -86,6 +86,18 @@ abstract class DatabaseTest {
         // than anything pointing at this method. `group_members` is the first table added since this list was
         // written, and it is the reason the comment above about "impossible to forget" is wrong (ADR 0035).
         jdbc.execute("DELETE FROM group_members");
+        // The invitations, which apps/api owns, and `users`, `otp_challenges` and `sessions` after them. The note above
+        // says the list is impossible to forget and then says it is wrong; this is the third time it has been right, so it
+        // now names the pattern instead of apologising for it: **every new table this module owns belongs in this method**,
+        // and the failure when it is missing is a count in the *next* test class that does not look like a fixture problem.
+        // The invite flow's tests never counted a global row, which is why its absence went unnoticed for a slice; the
+        // identity tests do count, which is how it was found.
+        jdbc.execute("DELETE FROM invitations");
+        // A challenge holds no foreign key; a session names a user, so it goes first - and neither has a constraint to
+        // enforce the order, which is exactly why the order has to be written down rather than relied on.
+        jdbc.execute("DELETE FROM sessions");
+        jdbc.execute("DELETE FROM otp_challenges");
+        jdbc.execute("DELETE FROM users");
         // No rate is seeded here, deliberately, so that a test which does not mention one is testing the
         // absence of one - which is the pair that must fail closed rather than the pair that works.
         jdbc.execute("DELETE FROM fx_quotes");
