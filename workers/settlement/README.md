@@ -54,6 +54,28 @@ java -jar workers-settlement.jar --reductxn.command=fund --reductxn.run=<uuid> \
 Exit codes: `0` done, `1` refused by the domain, `2` the invocation was wrong. **No command approves a run** -
 approving is a member's act, and there is no member surface yet (ADR 0018).
 
+## When a rail does not answer
+
+A refusal is classified by the port itself, and the worker does different things with the two kinds (ADR 0019):
+
+- **`rails.rejected`** - the rail answered that it will not take the instruction. The transfer is `failed`, the
+  run is `failed (partial)` (RULE S3), and no later pass offers it again.
+- **`rails.unreachable`** - the rail did not answer, or the breaker is leaving it alone. The transfer stays where
+  it was and waits; nothing is lost and nothing is marked failed that was never refused.
+
+The wait doubles from `reductxn.settlement.retry.base` (30s) to `reductxn.settlement.retry.cap` (15m), and the
+count it doubles from is *consecutive* unanswered calls: any answer resets it, so a rail that is working is never
+made to wait for failures it has recovered from. After
+`reductxn.rail.breaker.failures-before-opening` (5) unanswered calls the breaker stops calling the rail for
+`reductxn.rail.breaker.cooldown` (30s), then allows one call through to test it. The breaker's state is in
+memory, so restarting the worker clears it.
+
+**When a run looks stuck, the three columns to read are on `settlement_transfers`:** `status` (where it is),
+`rail_detail` (what the rail or the breaker said, in their own words), `unanswered_attempts` and `next_attempt_at`
+(how many times in a row it went unanswered, and when it will be tried again). A run whose transfers are all
+waiting is not driven at all, so `settlement_runs.driven_at` standing still is the ordinary sign of a rail that is
+being left alone rather than of a worker that has stopped.
+
 **Must NOT contain:** business rules that belong in `libs/*`. Orchestration and persistence only - and the one
 decision it does make, whether a run waits for approval or for funding, is a rule about the group's money rather
 than about how a row is written.
@@ -113,18 +135,21 @@ re-deriving them would mean running the engine again to read a run. `settlement_
 first. `settlement_fx_fundings` is keyed by the caller's `funding_ref`, which is the same idempotency rule (S2)
 applied to the other thing in this module that can half-happen.
 
-**Tests:** `./gradlew :workers:settlement:test` (Testcontainers, real Postgres; 74 tests across ten classes).
+**Tests:** `./gradlew :workers:settlement:test` (Testcontainers, real Postgres; 84 tests across thirteen classes).
 The tests drive the inbound ports rather than the service classes, and they verify *stored* state: per-currency
 zero-sum read back from the rows (N1), every participant zeroed by applying the plan's own transfers (N2), the
 clearing account's residual, that the rail was asked exactly once per transfer and not at all when a gate
 refused, and - for the ledger side - that the entries rebuilt from their own rows verify as a chain
 (`EntryChain`) and leave every position flat (`Balances`, L8).
 
-Two of those classes are about the *trigger* rather than the rules. `DriveRunsTest` executes runs through the
+Three of those classes are about the *trigger* rather than the rules. `DriveRunsTest` executes runs through the
 driver alone - no test touches `ExecuteRun` - and asserts that a run which cannot progress is left where it was
 with the gate's reason, that a transfer a rail never confirmed is resolved by a later pass, and that a pass is
 bounded and takes the least recently attempted first. `SettlementCommandTest` walks the operator's command line
 against the real bean and the real database, including an approved, funded run settled to `done` from a shell.
+`RailRetryTest` and `BrokenRailTest` cover a rail that does not answer, and they move time rather than sleeping:
+`MovingClockConfiguration` replaces the clock bean, which is possible because nothing below `application` reads a
+clock of its own.
 
 **Owner:** backend reviewer.
 

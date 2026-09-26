@@ -64,9 +64,10 @@ public final class MockRail implements PaymentRail {
         }
 
         if (!supportedCurrencies().contains(instruction.amount().currency())) {
-            return Result.ok(new RailReference(instruction.railRef(), new RailStatus(
-                    instruction.railRef(), RailStatus.State.FAILED,
-                    "this rail does not settle " + instruction.amount().currency().code())));
+            // A terminal refusal rather than an accepted-but-failed reference: the rail never took this
+            // instruction, and saying so is what lets the caller stop offering it (PaymentRail.RailRejected).
+            return Result.fail(new RailRejected(instruction.railRef(),
+                    "this rail does not settle " + instruction.amount().currency().code()));
         }
 
         RailStatus confirmed = new RailStatus(instruction.railRef(), RailStatus.State.CONFIRMED,

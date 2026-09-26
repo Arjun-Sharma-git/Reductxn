@@ -62,10 +62,12 @@ public interface Runs {
      * the queue, so a group that never approves its run cannot keep a different run - one that is ready to settle
      * - from ever being looked at. Ordering by creation would do exactly that.
      *
+     * @param now             what "now" means for a transfer's own wait: a run whose transfers are all waiting is
+     *                        not due, however long it has been since it was last driven
      * @param attemptedBefore a run attempted at or after this instant is not due
      * @param batchSize       the most runs to return; a backlog drains over several passes rather than in one
      */
-    List<SettlementRun> dueForDriving(Instant attemptedBefore, int batchSize);
+    List<SettlementRun> dueForDriving(Instant now, Instant attemptedBefore, int batchSize);
 
     /**
      * Records that an attempt was made, before it is made.
@@ -149,4 +151,30 @@ public interface Runs {
      * @param railDetail what the rail said, or null when it has not said anything
      */
     void markTransfer(UUID transferId, TransferStatus status, String railDetail, Instant at);
+
+    /**
+     * Records that we are about to offer this transfer to the rail, before the call is made.
+     *
+     * <p>Separate from {@link #markTransfer} because it is the one write that is not an outcome: the retry
+     * counter must be left alone here. Clearing it before the call would mean an attempt that then went
+     * unanswered counted as the first failure every time, so the backoff would restart at its base and never
+     * grow - which is the whole of what exponential means.
+     */
+    void markTransferAttempted(UUID transferId, TransferStatus status, Instant at);
+
+    /**
+     * Records a call the rail did not answer: the count grows, and the transfer is held back until
+     * {@code nextAttemptAt}.
+     *
+     * <p>The count is passed rather than incremented in SQL, so that the arithmetic that decides a wait lives in
+     * one place - the use case's {@code Backoff} - and the value written is the same value the wait was derived
+     * from. An adapter that incremented its own counter could disagree with the delay stored beside it.
+     *
+     * @param status              what the transfer stays - {@code authorized} for one never offered,
+     *                            {@code submitted} for one the rail already has
+     * @param consecutiveUnanswered the count after this failure, which is what {@code nextAttemptAt} was
+     *                            computed from
+     */
+    void markTransferUnanswered(UUID transferId, TransferStatus status, String railDetail, Instant at,
+            int consecutiveUnanswered, Instant nextAttemptAt);
 }

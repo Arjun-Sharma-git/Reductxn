@@ -1,11 +1,12 @@
 package io.reductxn.settlement;
 
-import io.reductxn.kernel.api.DomainError;
 import io.reductxn.kernel.api.Result;
 import io.reductxn.ledger.api.Currency;
 import io.reductxn.rails.api.PaymentRail;
 import io.reductxn.rails.api.PaymentRail.RailReference;
+import io.reductxn.rails.api.PaymentRail.RailRejected;
 import io.reductxn.rails.api.PaymentRail.RailStatus;
+import io.reductxn.rails.api.PaymentRail.RailUnreachable;
 import io.reductxn.rails.api.PaymentRail.TransferInstruction;
 
 import java.util.ArrayList;
@@ -40,8 +41,14 @@ final class StubRail implements PaymentRail {
         /** Accept it and leave it unconfirmed, which is a transfer in flight rather than a failure. */
         ACCEPT_WITHOUT_CONFIRMING,
 
-        /** Refuse it terminally: a domain-level failure such as insufficient funds. */
+        /** Accept it and answer that it failed, which is a transfer the rail took and then could not move. */
         REFUSE,
+
+        /**
+         * Refuse it before taking it: the rail answers that it will not accept this instruction, which is the
+         * terminal kind of refusal ({@code RailRejected}) and fails the transfer.
+         */
+        REJECT,
 
         /** Never receive it: the call does not complete, which is the retryable kind of failure. */
         UNREACHABLE
@@ -132,9 +139,9 @@ final class StubRail implements PaymentRail {
         return switch (behaviour) {
             case CONFIRM -> accept(instruction, RailStatus.State.CONFIRMED, "confirmed by the stub rail");
             case ACCEPT_WITHOUT_CONFIRMING -> accept(instruction, RailStatus.State.PENDING, "accepted by the stub");
-            case REFUSE -> Result.ok(new RailReference(instruction.railRef(), new RailStatus(
-                    instruction.railRef(), RailStatus.State.FAILED, "insufficient funds")));
-            case UNREACHABLE -> Result.fail(new RailUnreachable(instruction.railRef()));
+            case REFUSE -> accept(instruction, RailStatus.State.FAILED, "insufficient funds");
+            case REJECT -> Result.fail(new RailRejected(instruction.railRef(), "this rail will not take it"));
+            case UNREACHABLE -> Result.fail(new RailUnreachable(instruction.railRef(), "the network is down"));
         };
     }
 
@@ -161,18 +168,6 @@ final class StubRail implements PaymentRail {
      * {@code DomainErrorCodeTest}: that test reads the modules on its own classpath, and a test source is not part
      * of a module's published classes - which is the right boundary, since a stub rail cannot fail in production.
      */
-    record RailUnreachable(String railRef) implements DomainError {
-
-        static final String CODE = "rails.unreachable";
-
-        @Override
-        public String code() {
-            return CODE;
-        }
-
-        @Override
-        public String message() {
-            return "the rail could not be reached for " + railRef;
-        }
-    }
+    /** The two refusals the port defines are used as they are: a stub that invented its own would be a second
+     * vocabulary for the same thing, and the whole point of the classification is that every adapter speaks it. */
 }

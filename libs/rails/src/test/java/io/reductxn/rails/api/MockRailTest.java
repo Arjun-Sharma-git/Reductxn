@@ -97,16 +97,27 @@ class MockRailTest {
     void aCurrencyItCannotSettleIsRefusedTerminallyAndNamed() {
         PaymentRail rail = Rails.mock();
 
-        RailStatus status = rail
-                .submit(instruction("reductxn/run/KWD/alice/boris/100", 10_000L, KWD))
-                .orElseThrow()
-                .status();
+        Result<RailReference> answer = rail.submit(instruction("reductxn/run/KWD/alice/boris/100", 10_000L, KWD));
 
-        assertThat(status.state())
-                .as("a terminal failure rather than an exception: the rail answered, and its answer is that it "
-                        + "cannot do this. Accepting it would be a rail reporting a movement it cannot make")
-                .isEqualTo(RailStatus.State.FAILED);
-        assertThat(status.detail()).contains("KWD");
+        assertThat(answer.isOk())
+                .as("a refusal rather than an exception, and a `fail` rather than a reference to a transfer that "
+                        + "failed: the rail never took this instruction, so there is nothing for it to have a "
+                        + "reference to. Accepting it would be a rail reporting a movement it cannot make")
+                .isFalse();
+        assertThat(refusalOf(answer))
+                .isInstanceOf(PaymentRail.RailRejected.class)
+                .satisfies(refusal -> {
+                    assertThat(refusal.retryable())
+                            .as("asking again would settle KWD no more than it did the first time, and a caller "
+                                    + "that could not tell this from a rail that had a bad minute would retry a "
+                                    + "refusal for ever")
+                            .isFalse();
+                    assertThat(refusal.detail()).contains("KWD");
+                });
+    }
+
+    private static PaymentRail.RailRefusal refusalOf(Result<?> answer) {
+        return (PaymentRail.RailRefusal) ((Result.Failure<?>) answer).error();
     }
 
     private static TransferInstruction instruction(String railRef, long amountMinor, Currency currency) {

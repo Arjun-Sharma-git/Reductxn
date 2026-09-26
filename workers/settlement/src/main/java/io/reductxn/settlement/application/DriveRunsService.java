@@ -75,7 +75,7 @@ public class DriveRunsService implements DriveRuns {
                             + "broken rather than one that is idle");
         }
 
-        List<SettlementRun> due = runs.dueForDriving(attemptedBefore, batchSize);
+        List<SettlementRun> due = runs.dueForDriving(clock.instant(), attemptedBefore, batchSize);
 
         return Result.ok(drive(due, attemptedBefore));
     }

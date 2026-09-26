@@ -2,6 +2,7 @@ package io.reductxn.settlement.application;
 
 import io.reductxn.booking.api.Bookings;
 import io.reductxn.booking.api.SettledTransfer;
+import io.reductxn.kernel.api.DomainError;
 import io.reductxn.kernel.api.Result;
 import io.reductxn.ledger.api.Currency;
 import io.reductxn.rails.api.PaymentRail;
@@ -53,6 +54,13 @@ import java.util.UUID;
  * is {@code failed}: the confirmed ones stay confirmed, the failed one keeps the rail's reason, and a later pass
  * can still resolve anything left in flight - while the run stays failed, because the failure is a fact about
  * money that did not move and a group has to see it (RULE S3).
+ *
+ * <p><strong>A refusal is classified, and the classification decides the run's fate.</strong> A rail that answers
+ * that it will not take an instruction ({@code RailRejected}) has failed that transfer, and S3's partial failure
+ * follows. A rail that does not answer ({@code RailUnreachable}) has refused nothing and moved nothing, so the
+ * transfer stays where it is and waits out an exponential backoff - this class reads
+ * {@link PaymentRail.RailRefusal#retryable()} rather than a message, and an unclassified failure is treated as
+ * retryable because a run failed on the strength of an error nobody has explained is worse than a slow one.
  */
 @Service
 public class ExecuteRunService implements ExecuteRun {
@@ -61,6 +69,7 @@ public class ExecuteRunService implements ExecuteRun {
     private final PaymentRail rail;
     private final JournalEntries journalEntries;
     private final ChainHeads chainHeads;
+    private final Backoff backoff;
     private final Clock clock;
     private final TransactionTemplate transactions;
 
@@ -69,6 +78,7 @@ public class ExecuteRunService implements ExecuteRun {
             PaymentRail rail,
             JournalEntries journalEntries,
             ChainHeads chainHeads,
+            Backoff backoff,
             Clock clock,
             PlatformTransactionManager transactionManager) {
 
@@ -76,6 +86,7 @@ public class ExecuteRunService implements ExecuteRun {
         this.rail = Objects.requireNonNull(rail, "rail");
         this.journalEntries = Objects.requireNonNull(journalEntries, "journalEntries");
         this.chainHeads = Objects.requireNonNull(chainHeads, "chainHeads");
+        this.backoff = Objects.requireNonNull(backoff, "backoff");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.transactions = new TransactionTemplate(
                 Objects.requireNonNull(transactionManager, "transactionManager"));
@@ -107,8 +118,19 @@ public class ExecuteRunService implements ExecuteRun {
 
         inTransaction(() -> runs.updateStatus(run.run().withStatus(RunStatus.EXECUTING)));
 
+        Instant now = clock.instant();
+
         for (PlannedTransfer transfer : run.transfers()) {
             if (transfer.status().isResolved()) {
+                continue;
+            }
+
+            // A transfer the rail did not answer recently is left alone until its backoff expires. The wait is
+            // the rail's health rather than the run's, so it applies to a manual pass as well - an operator
+            // forcing a run should not be able to hammer a rail that is down. Nothing is lost by skipping: the
+            // transfer keeps the reason it is waiting, in `rail_detail`, and the next pass that finds it due
+            // tries again.
+            if (!transfer.isAttemptableAt(now)) {
                 continue;
             }
 
@@ -178,18 +200,13 @@ public class ExecuteRunService implements ExecuteRun {
      * transfer had ever been sent, and nothing would know to ask the rail about it.
      */
     private void giveItToTheRail(PlannedTransfer transfer, SettlementRun run) {
-        inTransaction(() -> runs.markTransfer(transfer.id(), TransferStatus.AUTHORIZED, null, clock.instant()));
+        inTransaction(() -> runs.markTransferAttempted(transfer.id(), TransferStatus.AUTHORIZED, clock.instant()));
 
         Result<PaymentRail.RailReference> answer = rail.submit(new PaymentRail.TransferInstruction(
                 run.id(), transfer.railRef(), transfer.fromUserId(), transfer.toUserId(), transfer.amount()));
 
         if (answer instanceof Result.Failure<PaymentRail.RailReference> failure) {
-            // The call did not complete: the rail never took the transfer. It stays `authorized` rather than
-            // `failed`, because nothing was refused and nothing moved - a later pass offers it again, which is
-            // what a retryable failure means. The reason is recorded so the next caller is not guessing.
-            String reason = failure.error().code() + ": " + failure.error().message();
-            inTransaction(() ->
-                    runs.markTransfer(transfer.id(), TransferStatus.AUTHORIZED, reason, clock.instant()));
+            refuse(transfer, TransferStatus.AUTHORIZED, failure.error());
             return;
         }
 
@@ -201,20 +218,57 @@ public class ExecuteRunService implements ExecuteRun {
      *
      * <p>Asked rather than re-submitted. Re-submitting would be safe - the rail is idempotent on the reference -
      * but the question a transfer in {@code submitted} poses is whether the money moved, and the rail's answer is
-     * the only thing that knows. A rail that cannot be reached leaves the transfer where it is: silence is not a
-     * failure state, and the sweep in section 4.4 is what will decide when patience runs out.
+     * the only thing that knows.
+     *
+     * <p><strong>A refused poll is read as "we still do not know" rather than as a terminal failure</strong>, even
+     * when the refusal is a {@code RailRejected}. The classification answers "could asking again help?", and for a
+     * poll the answer is always yes: polling has no side effects, and a terminal reading would turn a rail's
+     * refusal to answer a question into money marked as not having moved. What that costs is a rail that refuses
+     * to answer a reference being polled until the cap - which is the escalation gap, recorded as one, rather
+     * than a transfer failed on the strength of a question.
      */
     private void askTheRailForIt(PlannedTransfer transfer, SettlementRun run) {
         Result<PaymentRail.RailStatus> answer = rail.status(transfer.railRef());
 
         if (answer instanceof Result.Failure<PaymentRail.RailStatus> failure) {
-            String reason = failure.error().code() + ": " + failure.error().message();
-            inTransaction(() -> runs.markTransfer(transfer.id(), TransferStatus.SUBMITTED, reason,
-                    clock.instant()));
+            refuse(transfer, TransferStatus.SUBMITTED, failure.error());
             return;
         }
 
         record(transfer, run, answer.orElseThrow());
+    }
+
+    /**
+     * A rail that did not take the call, classified: wait and try again, or fail the transfer for good.
+     *
+     * <p><strong>The classification is what makes a refusal terminal.</strong> A {@code RailRejected} means the
+     * rail answered that it will not take this instruction, so the transfer has failed and RULE S3's partial
+     * failure follows from it - the run is {@code failed}, the transfers that confirmed stay confirmed, and the
+     * group sees which movement did not happen. A {@code RailUnreachable} means nothing was offered and nothing
+     * moved, so the transfer stays where it was and waits out its backoff.
+     *
+     * <p><strong>A failure that is not a {@code RailRefusal} is treated as retryable</strong>, and that is the
+     * safe direction rather than the clever one: an adapter that answered with some other {@code DomainError} has
+     * told us nothing about whether offering the instruction again would help, and a run failed on the strength of
+     * an unclassified error is money reported as not moving for a reason nobody can act on.
+     *
+     * @param statusToKeep what the transfer stays while it waits: {@code authorized} for one the rail never took,
+     *                     {@code submitted} for one it already has
+     */
+    private void refuse(PlannedTransfer transfer, TransferStatus statusToKeep, DomainError refusal) {
+        String reason = refusal.code() + ": " + refusal.message();
+        Instant now = clock.instant();
+
+        if (refusal instanceof PaymentRail.RailRefusal classified && !classified.retryable()) {
+            inTransaction(() -> runs.markTransfer(transfer.id(), TransferStatus.FAILED, reason, now));
+            return;
+        }
+
+        int unanswered = transfer.unansweredAttempts() + 1;
+        Instant nextAttempt = backoff.nextAttempt(unanswered, now);
+
+        inTransaction(() -> runs.markTransferUnanswered(
+                transfer.id(), statusToKeep, reason, now, unanswered, nextAttempt));
     }
 
     /**
