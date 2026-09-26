@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -93,6 +94,11 @@ class RuleCoverageTest {
             Map.entry("B14", List.of(
                     "ModuleBoundaryTest#b14_adapters_never_touch_application_or_web")),
             Map.entry("B15", List.of("ModuleBoundaryTest#b15_transactional_only_in_application")),
+            Map.entry("B16", List.of(
+                    "ModuleBoundaryTest#b16_row_types_never_leave_the_persistence_adapters")),
+            Map.entry("B17", List.of(
+                    "SchemaOwnershipTest#everyTableIsCreatedByExactlyOneModule",
+                    "SchemaOwnershipTest#everyMigrationVersionIsInItsOwnersRange")),
             Map.entry("B20", List.of("ModuleBoundaryTest#b20_api_has_no_way_to_localise")),
             Map.entry("B18", List.of("ModuleBoundaryTest#b18_fx_depends_only_on_kernel_and_ledger")),
             Map.entry("B19", List.of("ModuleBoundaryTest#b19_no_other_domain_module_knows_about_fx")),
@@ -116,16 +122,9 @@ class RuleCoverageTest {
             Map.entry("B9", "compiler settings live only in build-logic. They do, applied by the "
                     + "convention plugin - but nothing detects a module that hand-rolls its own. That "
                     + "check would have to read build files, a different guard from every other here"),
-            // B12-B15 and B20 left this map when apps/api gained sources and are enforced in
-            // ModuleBoundaryTest. What remains here are the rules an API module cannot satisfy however
-            // complete it becomes, and each names the missing mechanism rather than the missing work.
-            Map.entry("B16", "no persistence row types (jOOQ records) cross out of adapter/persistence. "
-                    + "The rule is expressible - it forbids any class outside adapter/persistence from "
-                    + "depending on org.jooq - but this module does not depend on jOOQ at all yet, so no "
-                    + "row type can leak and no sabotage could prove the rule bites. It arrives with the "
-                    + "persistence adapter"),
-            Map.entry("B17", "one owning module per table. Needs a schema and a persistence module: with "
-                    + "no table definitions anywhere, there is nothing to attribute to an owner"),
+            // B12-B17 and B20 have all left this map: each one needed something that now exists - an API
+            // module, a persistence adapter, a schema. What remains are the rules that need something
+            // bigger than a module, and each names the missing mechanism rather than the missing work.
             Map.entry("R1", "the fixed top-level layout. Enforceable and deliberately not enforced: the "
                     + "check would fail the build for adding a directory, and an ADR is already the "
                     + "documented barrier. Judged to be friction without a matching benefit"),
@@ -259,11 +258,34 @@ class RuleCoverageTest {
             return null;
         } catch (ClassNotFoundException missingClass) {
             return "no class named " + parts[0] + " exists in this package";
-        } catch (NoSuchFieldException missingField) {
-            return "no rule field named " + parts[1] + " exists, so this claim is stale";
+        } catch (NoSuchFieldException notARuleField) {
+            return methodOrStale(parts);
         }
     }
 
+    /**
+     * The other kind of enforcement: a plain JUnit test.
+     *
+     * <p>B17 cannot be an ArchUnit rule. It reads migration files rather than classes, and "each table
+     * has one owner" is a fact about SQL rather than about bytecode. The map has to be able to point at
+     * that kind of check, or the honest option becomes writing a weaker rule that fits the checker.
+     */
+    private static String methodOrStale(String[] parts) {
+        try {
+            Method method = Class.forName(RuleCoverageTest.class.getPackageName() + "." + parts[0])
+                    .getDeclaredMethod(parts[1]);
+
+            return method.isAnnotationPresent(Test.class)
+                    ? null
+                    : "a member named '" + parts[1] + "' exists but has neither @ArchTest nor @Test, "
+                            + "so nothing runs it";
+        } catch (ClassNotFoundException missingClass) {
+            return "no class named " + parts[0] + " exists in this package";
+        } catch (NoSuchMethodException missingMethod) {
+            return "no rule field and no test method named '" + parts[1] + "' exists, so this claim "
+                    + "is stale";
+        }
+    }
     private static Set<String> rulesDeclaredInTheDocs() throws IOException {
         Set<String> declared = new TreeSet<>();
 
