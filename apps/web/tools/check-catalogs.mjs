@@ -4,10 +4,11 @@
  * turns into behaviour.
  *
  * MASTER-PLAN section 8 lists "Locale coverage | catalog check | a key is missing versus en, unused, or a literal
- * appears in a component (F10, I1-I3)" and "Error-code parity | codegen check | ... **Not built**" - this file is
- * the half of that gate that reads the catalogs; the literal half is the ESLint rule in `eslint.config.js`. There
- * is no CI configuration in this repository yet (a finding recorded in MASTER-PLAN), so the check runs from
- * `pnpm check` and would be one step in whatever pipeline is added.
+ * appears in a component (F10, I1-I3)" and "Spec sync | codegen diff check | RULE C3 violated" - this file is the
+ * half of the first gate that reads the catalogs, the literal half is the ESLint rule in `eslint.config.js`, and the
+ * second gate now runs in the pipeline (`.github/workflows/ci.yml`), which regenerates the client and fails on a
+ * difference from the committed one. The check below also runs from `pnpm check`, so a developer sees it before a
+ * runner does; the pipeline exists because "before a runner does" is the half that was missing.
  *
  *   I1  every `en` key exists in every shipped locale, **or the locale is flagged incomplete**. A locale with
  *       `complete: false` in `_meta.json` is reported rather than failed, which is what makes a partial

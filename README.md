@@ -48,6 +48,15 @@ Pre-implementation. Phase 0 - decisions and ADRs.
 pnpm -C apps/web test      # frontend unit tests
 ```
 
+The same three commands a developer runs are what `.github/workflows/ci.yml` runs, in two jobs: `api` is
+`./gradlew clean build` (Temurin 25, on a runner with the Docker the Postgres-backed integration tests
+need) and `web` is `pnpm install --frozen-lockfile`, `pnpm check` and `pnpm e2e` (Node 24, Chromium
+installed by Playwright). The pipeline adds two checks a local run cannot make: it regenerates the
+OpenAPI client and the route tree and fails if the committed artefacts differ from what the sources
+produce (RULE C3), and it starts from an environment nobody has been warming up - which is where the
+last two verification defects were found. What it deliberately does not add is a second definition of
+"passing": no CI-only flags, no test selection. See ADR 0031.
+
 > **Note:** the `gradlew` wrapper must be generated once on a machine that has Gradle
 > (`gradle wrapper --gradle-version 9`). The wrapper JAR is binary and is intentionally not
 > committed by this scaffolding.
