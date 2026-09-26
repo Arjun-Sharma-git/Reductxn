@@ -59,11 +59,11 @@ export function NettingPreviewScreen({
       </header>
 
       {/*
-        The review-state rule, said out loud (`docs/specs/i18n.md` section 8.4): this screen is where a member
-        reads what they will pay, so an unreviewed translation does not get to write it - and an unexplained
-        fallback would look like a bug rather than a decision. It is the *screen* that says this and not the shell,
-        because `requireReviewed` is a property of the screen: a settings page may show a machine translation, and
-        a report that moves money may not.
+        The review-state rule, said out loud (`docs/specs/i18n.md` section 8.4): this screen is where a member reads
+        what they will pay, so an unreviewed translation does not get to write it - and an unexplained fallback
+        would look like a bug rather than a decision. The *route* declares that this screen needs a reviewed locale
+        (`staticData.requireReviewedLocale`, read by the shell); the notice is rendered here because here is where
+        the reader is looking.
       */}
       {fellBack ? (
         <Notice tone="warning">{t('common.unreviewedLocale', { locale })}</Notice>

@@ -103,10 +103,13 @@ rather than from a table).
   Japanese plural rules said "1 currencies" - Japanese has one category, so the English `one` form was never
   selected. The fallback is now English all the way down, which is the difference between a partial locale reading
   as *missing translation* and reading as *broken grammar*.
-- **The innermost locale provider owns the document's `lang`.** The shell provides the URL's locale and a money
-  screen provides its own with `requireReviewed`; both wrote `lang`, and React runs a child's effects before its
-  parent's, so the outer one won - English text with `lang="ru"`, which a screen reader would announce wrongly.
-  The browser test that asserts the notice and the attribute together caught it.
+- **The review requirement is declared by the route, and there is one locale provider.** A money screen needs an
+  unreviewed translation refused, and the first version gave each such screen its own provider. That cannot work:
+  both providers write the document's `lang`, React runs a child's effects before its parent's, and so the *outer*
+  one won - an English screen announced as Russian to a screen reader, which the browser test caught twice before
+  the design changed. A parent cannot know what a child decided, so the parent has to be told:
+  `staticData.requireReviewedLocale` on the route, read by the shell from the router's matches. One provider, one
+  decision, one attribute - and the screen renders the notice, because that is where the reader is looking.
 - **A hash-anchored skip link and a first-tab assertion.** The focus test initially failed with `body` as the
   active element: it pressed Tab before React had rendered. The fix is a wait for the heading, and the assertion
   is now that the *skip link* takes focus and has a visible outline - the skill's first priority, made mechanical.

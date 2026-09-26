@@ -50,14 +50,10 @@ export function LocaleProvider({
   const direction = directionOf(resolved.locale);
 
   /**
-   * Only the innermost provider writes the document's `lang` and `dir`.
-   *
-   * Providers nest: the shell provides the URL's locale for the header and the navigation, and a money screen
-   * provides its own with `requireReviewed`. Both would otherwise set `lang`, and React runs a child's effects
-   * before its parent's - so the *outer* provider won, and a screen that had fallen back to English still told a
-   * screen reader the page was Russian. Caught by the browser test that asserts `lang` and the notice together:
-   * the text was English and the attribute said `ru`, which is the exact combination a screen reader would
-   * announce wrongly.
+   * A guard rather than a rule: the shell is the only locale provider (`routes/__root.tsx`), so nothing is ever
+   * nested. It stays because the failure it prevents is silent - a second provider would write the document's
+   * `lang` and, since React runs a child's effects before its parent's, the *outer* one would win. That is how the
+   * first version of the review-state rule produced English text with `lang="ru"`.
    */
   const nested = useContext(LocaleContext) !== null;
 

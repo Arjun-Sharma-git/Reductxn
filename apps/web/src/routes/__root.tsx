@@ -1,4 +1,4 @@
-import { createRootRoute, Link, Outlet, useSearch } from '@tanstack/react-router';
+import { createRootRoute, Link, Outlet, useMatches, useSearch } from '@tanstack/react-router';
 import { z } from 'zod';
 
 import { availableLocales, bestMatch, DEFAULT_LOCALE, LocaleProvider, useTranslations } from '@/shared/i18n';
@@ -9,13 +9,20 @@ import { AppHeaderControls } from '@/shared/ui';
  * The shell: what every screen is inside.
  *
  * It owns three things and no fourth. The locale, resolved from the URL and provided to the tree - which is why
- * the search-param schema for `lang` is here rather than repeated on every route. The skip link, because the
- * first tab stop of a report should not be the header. And the header itself, with the two document-level
- * preferences.
+ * the search-param schema for `lang` is here rather than repeated on every route. The skip link, because the first
+ * tab stop of a report should not be the header. And the header itself, with the two document-level preferences.
  *
- * It deliberately does **not** resolve a locale from a stored user preference: that is step one of the spec's
- * order and it needs identity, which does not exist yet (`docs/specs/i18n.md` section 3). The URL is step two
- * and the browser's `Accept-Language` is step three, both of which work today.
+ * **It is the only locale provider, and that is a decision with a bug behind it.** A money screen needs an
+ * unreviewed translation refused (`docs/specs/i18n.md` section 8.4), and the first version of this gave each such
+ * screen its own provider around itself. That cannot work: both providers write the document's `lang`, React runs a
+ * child's effects before its parent's, so the *outer* one won - an English screen announced as Russian to a screen
+ * reader, which the browser test caught. A parent cannot know what a child decided, so the parent has to be *told*:
+ * a route declares `staticData.requireReviewedLocale`, the shell reads the matches, and there is one provider, one
+ * decision and one attribute.
+ *
+ * It deliberately does **not** resolve a locale from a stored user preference: that is step one of the spec's order
+ * and it needs identity, which does not exist yet. The URL is step two and the browser's `Accept-Language` is step
+ * three, both of which work today.
  */
 const search = z.object({
   /** The locale, part of the page's identity: a link shared in Russian opens in Russian. */
@@ -31,8 +38,17 @@ function RootLayout() {
   const { lang } = useSearch({ from: Route.id });
   const locale = lang ?? bestMatchFromBrowser();
 
+  // The current route's own declaration, which is the only place that knows whether the screen it renders shows
+  // money. A route that says nothing requires nothing.
+  const requireReviewed = useMatches({
+    select: (matches) =>
+      matches.some(
+        (match) => (match.staticData as { requireReviewedLocale?: boolean }).requireReviewedLocale === true,
+      ),
+  });
+
   return (
-    <LocaleProvider locale={locale}>
+    <LocaleProvider locale={locale} requireReviewed={requireReviewed}>
       <Shell />
     </LocaleProvider>
   );
