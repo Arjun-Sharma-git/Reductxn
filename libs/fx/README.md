@@ -18,7 +18,10 @@ Everything callers may touch lives in `io.reductxn.fx.api` (RULE B10).
 | `FxConversion` | Converted amount plus the fractional rounding residual |
 | `FxQuote` | An immutable, locked conversion of one amount; `FxQuote.lock(...)` validates freshness |
 | `FxConverter` / `FxConverters` | The conversion operation, reached through `FxConverters.exact()` |
-| `FxRateProvider` | Port for a rate source. The adapter lives in `apps/api`'s `adapter/persistence` package, because RULE B16 keeps every jOOQ type in one package |
+| `FxRateProvider` | Port for a rate *reader*: the most recent rate for a pair as of an instant. The adapter lives in `apps/api`'s `adapter/persistence` package, because RULE B16 keeps every jOOQ type in one package and this one reads a table |
+| `PublishedRates` | One provider's publication: what it quoted, against one base currency, at one instant, all at one scale. The shape a market-data provider actually publishes |
+| `FxRateFeed` | Port for a rate *source*: what the provider published most recently, asked by a job rather than by a request. The adapter lives in `apps/api`'s `adapter/feed` package, which reads no table |
+| `CrossRates` | The rates a deployment can transact, derived from a publication made against one base - the one division of a rate by a rate |
 | `FxException` + subtypes | Failures carrying stable, non-localized codes (RULE B20) |
 
 `io.reductxn.fx.internal` is private and must not be referenced from outside this module.
@@ -30,10 +33,15 @@ currency at a time and its proofs depend on that, so it must not acquire FX awar
 
 ## What this module does NOT do
 
-- It does **not** fetch rates. That is an adapter behind `FxRateProvider`, and it lives in `apps/api` - the
-  module that also stores obligations, so that a rate is read and a quote is written by the same deployable.
-  Its package is `adapter/persistence` rather than a package of its own, because RULE B16 keeps every jOOQ type
-  inside that one package and a provider that reads a table cannot be anywhere else.
+- It does **not** decide which currencies exist, or how old a rate may be. The catalogue is `currencies` (a table a
+  deployment inserts into), and freshness is `reductxn.rates.max-age`, applied when a rate is stored.
+- It does **not** fetch rates. Two adapters sit behind two ports, both in `apps/api`: `FxRateProvider` is answered
+  from `fx_rates` by a class in `adapter/persistence`, and `FxRateFeed` is answered from the provider's document by a
+  class in `adapter/feed` (ADR 0027). Neither package is a choice - RULE B16 pins jOOQ to one package, and a
+  document-fetching adapter is not a table read.
+- It does **not** apply a spread. A rate is stored as the provider's own mid rate with the spread at zero, and the
+  columns for a margin exist so that adding one is not a migration. Taking a margin is a decision about what a
+  creditor is promised, and it is not this module's to make.
 - It does **not** format a rate or an amount for display. That is the client, per locale
   (RULE F11, ADR 0014). `FxRate.pair()` is for logs, not for users.
 - It does **not** post to the ledger, and it does not know what an `fx_clearing` account is. It

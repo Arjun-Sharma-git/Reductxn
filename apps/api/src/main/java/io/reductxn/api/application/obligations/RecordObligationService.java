@@ -49,14 +49,14 @@ import java.util.UUID;
  * is appended, so a duplicate key - the one thing a read-then-write replay cannot see coming - aborts the
  * transaction before anything is booked.
  *
- * <p><strong>{@code settleInCurrency} does not work yet, and it fails closed rather than quietly.</strong>
- * A rate comes from {@link FxRateProvider} and no provider is configured in any environment, so a
- * cross-currency request is answered {@code 503} with the provider's own {@code fx.rate_unavailable} - what
- * MASTER-PLAN section 4 means by "no rate means no cross-currency". What this class deliberately does not do
- * is book the pair: a cross-currency obligation's quote has nowhere to live until {@code fx_quotes} and the
- * obligation's quote columns exist, and recording one would store its debt side only - which the netting
- * preview would then read back as a single-currency obligation, silently, in the currency the creditor is
- * not being paid in.
+ * <p><strong>{@code settleInCurrency} works when a rate is stored, and fails closed when none is.</strong> A rate
+ * comes from {@link FxRateProvider}, which reads {@code fx_rates}; since ADR 0027 that table is filled by
+ * {@code ScheduledRateIngestion} from a provider's document, so a deployment with a feed converts and one without
+ * it answers {@code 503} with {@code fx.rate_unavailable} - what MASTER-PLAN section 4 means by "no rate means no
+ * cross-currency". What this class deliberately does not do is book the pair when there is no rate: a
+ * cross-currency obligation without its quote has nowhere to put the conversion, and recording one would store its
+ * debt side only - which the netting preview would then read back as a single-currency obligation, silently, in the
+ * currency the creditor is not being paid in.
  *
  * <p>Nothing here reads a clock: {@code occurredAt} arrives decided (RULE B21), which is what makes a request
  * for a past instant meaningful and a test reproducible.

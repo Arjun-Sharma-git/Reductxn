@@ -3,6 +3,7 @@ package io.reductxn.api.port.out;
 import io.reductxn.ledger.api.Currency;
 
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The currency catalogue: a code as the exponent needed to read amounts in it.
@@ -22,4 +23,15 @@ public interface CurrencyCatalog {
 
     /** The currency with this code, or empty when the catalogue does not have it. */
     Optional<Currency> byCode(String code);
+
+    /**
+     * Every currency the catalogue holds, which is every currency this deployment can transact.
+     *
+     * <p>The second question, and it arrived with the second caller rather than with the first: a request resolves
+     * one code into an exponent, and a rate refresh has to know the whole set - not to iterate it, but to say what
+     * the *feed* did not quote. A deployment that knows a currency its provider prices nowhere would otherwise
+     * look healthy after every refresh while every obligation in that currency failed closed, which is the kind of
+     * silence this table's constraint check exists to make loud.
+     */
+    Set<Currency> all();
 }
