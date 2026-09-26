@@ -1,0 +1,68 @@
+/* Shared by the three tables on the preview screen. One file, because they are one table style - and a per-table
+   copy would be the same rules three times, drifting. */
+
+.table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--rn-text-sm);
+}
+
+.caption {
+  caption-side: top;
+  text-align: start;
+  padding-block-end: var(--rn-space-2);
+  color: var(--rn-text-muted);
+}
+
+.table th,
+.table td {
+  text-align: start;
+  padding-block: var(--rn-space-2);
+  padding-inline-end: var(--rn-space-4);
+  border-block-end: 1px solid var(--rn-border);
+  vertical-align: top;
+}
+
+.table thead th {
+  font-size: var(--rn-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--rn-text-muted);
+}
+
+.rowHeader {
+  font-family: var(--rn-font-amount);
+  font-weight: var(--rn-weight-medium);
+}
+
+/* Amounts align on the right, which is only meaningful because the amount face has tabular figures. */
+.numeric {
+  text-align: end !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Direction and status: a word, plus weight and colour. Never colour alone. */
+.pay,
+.receive,
+.flat {
+  font-weight: var(--rn-weight-medium);
+}
+
+.pay {
+  color: var(--rn-danger-text);
+}
+
+.receive {
+  color: var(--rn-positive-text);
+}
+
+.flat {
+  color: var(--rn-text-muted);
+}
+
+.footnote {
+  margin-block: var(--rn-space-3) 0;
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-xs);
+  max-inline-size: 70ch;
+}

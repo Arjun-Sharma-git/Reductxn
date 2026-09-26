@@ -1,0 +1,182 @@
+/*
+ * The base layer: the document's own defaults, the type scale's application, focus, and the two accessibility
+ * guards the skill puts first.
+ *
+ * Logical properties throughout (`margin-inline-start`, `padding-block`) rather than left/right. The launch
+ * locales are LTR, and `ar` and `he` are reserved in `docs/specs/i18n.md` section 1 - so this is the cheap
+ * half of RTL support, paid before there is a locale that needs it, because retrofitting direction into
+ * physical properties is a rewrite rather than a token change.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /* The type scale is in rem, so the user's own font-size preference scales the whole app. Pinning the root to
+     16px would take that away, and the skill's "base 16px" rule is about a floor, not a ceiling. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--rn-bg);
+  color: var(--rn-text);
+  font-family: var(--rn-font-body);
+  font-size: var(--rn-text-base);
+  line-height: var(--rn-leading-normal);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  margin-block: 0 var(--rn-space-3);
+  line-height: var(--rn-leading-tight);
+  font-weight: var(--rn-weight-bold);
+}
+
+h1 {
+  font-size: var(--rn-text-2xl);
+}
+
+h2 {
+  font-size: var(--rn-text-xl);
+}
+
+h3 {
+  font-size: var(--rn-text-lg);
+}
+
+p {
+  margin-block: 0 var(--rn-space-3);
+}
+
+/*
+ * Focus. Never removed, and never only a colour change: a ring plus an outline offset survives a background
+ * image, a table row and a dark theme, and `:focus-visible` keeps it off a mouse click without taking it away
+ * from a keyboard.
+ */
+:focus-visible {
+  outline: 3px solid var(--rn-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--rn-radius-sm);
+}
+
+/* A skip link, because the first thing in a keyboard user's tab order should not be the whole navigation. */
+.rn-skip-link {
+  position: absolute;
+  inset-inline-start: var(--rn-space-3);
+  inset-block-start: calc(-1 * var(--rn-space-10));
+  z-index: 10;
+  padding: var(--rn-space-2) var(--rn-space-4);
+  background: var(--rn-surface);
+  border: 1px solid var(--rn-border-strong);
+  border-radius: var(--rn-radius-md);
+  color: var(--rn-text);
+  text-decoration: none;
+  transition: inset-block-start var(--rn-motion-fast) var(--rn-ease-standard);
+}
+
+.rn-skip-link:focus-visible {
+  inset-block-start: var(--rn-space-3);
+}
+
+/*
+ * The reduced-motion branch, in CSS.
+ *
+ * GSAP has its own branch in `shared/gsap/presets.ts`, and both exist on purpose: GSAP writes inline styles
+ * from JavaScript (a media query cannot stop it), and CSS transitions are invisible to GSAP. One guard per
+ * mechanism, or the animation a user asked not to see is the one that slips through.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Tabular figures on every amount, so a column of money aligns whether or not it happens to be short. */
+.rn-amount {
+  font-family: var(--rn-font-amount);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --- The shell ------------------------------------------------------------------------------------- */
+
+.rn-app-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rn-space-4);
+  align-items: end;
+  justify-content: space-between;
+  padding: var(--rn-space-4) var(--rn-space-5);
+  background: var(--rn-surface);
+  border-block-end: 1px solid var(--rn-border);
+}
+
+.rn-app-brand {
+  font-family: var(--rn-font-amount);
+  font-size: var(--rn-text-lg);
+  font-weight: var(--rn-weight-medium);
+  color: var(--rn-text);
+  text-decoration: none;
+}
+
+.rn-app-main {
+  display: block;
+  max-inline-size: 80rem;
+  margin-inline: auto;
+  padding: var(--rn-space-6) var(--rn-space-5);
+}
+
+/* --- Forms ----------------------------------------------------------------------------------------- */
+/* A visible label above every field, and the error directly under the field it belongs to. The skill's eighth
+   priority; the alternative - a placeholder as a label and a list of errors at the top - is a form a user has to
+   read twice. */
+
+.rn-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-1);
+  margin-block-end: var(--rn-space-4);
+  max-inline-size: 32rem;
+}
+
+.rn-input {
+  min-block-size: 44px;
+  padding-inline: var(--rn-space-3);
+  background: var(--rn-surface);
+  color: var(--rn-text);
+  border: 1px solid var(--rn-border-strong);
+  border-radius: var(--rn-radius-md);
+  font: inherit;
+}
+
+.rn-button {
+  min-block-size: 44px;
+  padding-inline: var(--rn-space-5);
+  background: var(--rn-accent);
+  color: var(--rn-accent-ink);
+  border: 1px solid transparent;
+  border-radius: var(--rn-radius-md);
+  font: inherit;
+  font-weight: var(--rn-weight-medium);
+  cursor: pointer;
+  transition: filter var(--rn-motion-fast) var(--rn-ease-standard);
+}
+
+.rn-button:hover {
+  filter: brightness(0.95);
+}
+
+[aria-invalid='true'].rn-input {
+  border-color: var(--rn-danger-text);
+}

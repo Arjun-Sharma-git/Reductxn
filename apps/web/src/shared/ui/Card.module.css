@@ -1,0 +1,23 @@
+.card {
+  background: var(--rn-surface);
+  border: 1px solid var(--rn-border);
+  border-radius: var(--rn-radius-lg);
+  box-shadow: var(--rn-shadow-card);
+  padding: var(--rn-space-5);
+}
+
+.header {
+  margin-block-end: var(--rn-space-4);
+}
+
+.title {
+  margin-block: 0 var(--rn-space-1);
+  font-size: var(--rn-text-lg);
+}
+
+.description {
+  margin: 0;
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-sm);
+  max-inline-size: 70ch;
+}

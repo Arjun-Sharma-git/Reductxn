@@ -1,0 +1,19 @@
+.info,
+.warning {
+  margin-block: 0 var(--rn-space-4);
+  padding: var(--rn-space-3) var(--rn-space-4);
+  border-radius: var(--rn-radius-md);
+  border-inline-start: 4px solid var(--rn-border-strong);
+  font-size: var(--rn-text-sm);
+}
+
+.info {
+  background: var(--rn-surface-muted);
+  color: var(--rn-text);
+}
+
+.warning {
+  background: var(--rn-danger-surface);
+  border-inline-start-color: var(--rn-danger-text);
+  color: var(--rn-text);
+}

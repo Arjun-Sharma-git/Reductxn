@@ -1,0 +1,21 @@
+{
+  "skipToContent": "Перейти к содержимому",
+  "language": "Язык",
+  "theme": "Тема",
+  "themeSystem": "Как в системе",
+  "themeLight": "Светлая",
+  "themeDark": "Тёмная",
+  "localeName.en": "English",
+  "localeName.hi": "हिन्दी",
+  "localeName.ru": "Русский",
+  "localeName.ja": "日本語",
+  "unknownCurrency": "Сумма в {currency} недоступна",
+  "unknownCurrencyTitle": "Валюты {currency} ещё нет в справочнике, поэтому сумму нельзя показать. Перезагрузите страницу, чтобы запросить справочник снова.",
+  "openGroup": {
+    "title": "Открыть группу",
+    "description": "В reductxn пока нет входа в систему и списка групп, поэтому группа открывается по её идентификатору — тому, что был в ссылке.",
+    "groupId": "Идентификатор группы",
+    "invalid": "Это не идентификатор группы. Он выглядит так: 3f7c1c1e-0d2a-4a5e-9a6f-6c1d2f4b8e10.",
+    "submit": "Открыть"
+  }
+}

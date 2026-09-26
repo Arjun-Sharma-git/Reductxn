@@ -1,0 +1,16 @@
+{
+  "$comment": "Per-locale review state, read by shared/i18n and checked by tools/check-catalogs.mjs. A locale seeded by machine translation must be here as reviewed:false; the app refuses to render an unreviewed locale on money-moving and approval screens (docs/specs/i18n.md section 8.4), falling back to English with a visible notice.",
+  "locales": {
+    "en": {
+      "reviewed": true,
+      "complete": true,
+      "note": "Source of truth. Edited by developers in the same change as the feature."
+    },
+    "ru": {
+      "reviewed": false,
+      "complete": false,
+      "note": "Seeded so the four-form plural path has a real locale to run in, and deliberately left unreviewed: a machine translation of 'you will pay 12,500 rupees' is not something to ship unreviewed to a money screen. Partial on purpose - `complete: false` is what makes I1 report rather than fail, and the missing keys fall back to English per key.",
+      "seededBy": "unreviewed seed"
+    }
+  }
+}

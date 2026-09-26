@@ -1,0 +1,21 @@
+<!doctype html>
+<!--
+  The document is the shell of a money-moving application, so three things in it are load-bearing rather than
+  decorative: the language attribute (the catalogs are per locale, and a screen reader picks a voice from it),
+  the viewport meta tag (the layout is mobile-first, and disabling zoom is an accessibility failure the skill
+  puts in its first priority category), and `color-scheme`, which tells the browser that both themes exist so
+  native controls - scrollbars, form widgets, the address bar - follow the theme rather than fighting it.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" content="reductxn" />
+    <title>reductxn</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

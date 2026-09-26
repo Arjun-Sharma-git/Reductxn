@@ -1,0 +1,12 @@
+# pnpm 12's settings file for apps/web. (Its name says "workspace", but it is where pnpm reads package-manager
+# settings from, including for a single package.)
+#
+# pnpm blocks dependency build scripts by default, and that is the right default: an install script runs
+# arbitrary code on a developer's machine and in CI. This is the one exception, granted by name.
+#
+# `unrs-resolver` is a native module that `eslint-plugin-import-x` loads to resolve import paths. Without its
+# build the resolver cannot load, and the failure looks like a broken lint rule rather than a missing binary -
+# which is exactly the kind of silent breakage this repository writes a rule about. Nothing else is allowed;
+# adding a package here should be a decision with a reason next to it.
+allowBuilds:
+  unrs-resolver: true

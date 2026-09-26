@@ -19,6 +19,9 @@ node_modules/
 dist/
 .turbo/
 coverage/
+# Playwright's artefacts: a report per run and a directory of failure contexts. Machine-local.
+playwright-report/
+test-results/
 
 # --- Test artefacts ---
 # jqwik writes a shrinking/statistics database per module. Machine-local, never shared.

@@ -1,0 +1,30 @@
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rn-space-4);
+  align-items: end;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-1);
+}
+
+/* A visible label, always. A placeholder is not a label - it disappears as soon as somebody types, which is
+   exactly when a user with a memory difficulty needs it most. */
+.label {
+  font-size: var(--rn-text-xs);
+  color: var(--rn-text-muted);
+}
+
+.select {
+  min-block-size: 44px;
+  padding-inline: var(--rn-space-2);
+  background: var(--rn-surface);
+  color: var(--rn-text);
+  border: 1px solid var(--rn-border-strong);
+  border-radius: var(--rn-radius-md);
+  font: inherit;
+  transition: background-color var(--rn-motion-fast) var(--rn-ease-standard);
+}
