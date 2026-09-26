@@ -243,11 +243,6 @@ class SettlementBookkeepingTest extends WorkerDatabaseTest {
                 .isTrue();
     }
 
-    /** The run's status as stored, for the assertions about what the status means. */
-    private String storedRunStatus(UUID runId) {
-        return jdbc.queryForObject("SELECT status FROM settlement_runs WHERE id = ?", String.class, runId);
-    }
-
     /**
      * Records a single-currency obligation <em>and</em> books it, which is what the API does in one transaction.
      *

@@ -292,10 +292,6 @@ class ExecuteRunTest extends WorkerDatabaseTest {
         assertThat(refusalCode(executeRun.execute(UUID.randomUUID()))).isEqualTo("settlement.run_not_found");
     }
 
-    private String storedRunStatus(UUID runId) {
-        return jdbc.queryForObject("SELECT status FROM settlement_runs WHERE id = ?", String.class, runId);
-    }
-
     private List<String> storedTransferStatuses(UUID runId) {
         return jdbc.queryForList(
                 "SELECT status FROM settlement_transfers WHERE run_id = ? ORDER BY rail_ref", String.class, runId);

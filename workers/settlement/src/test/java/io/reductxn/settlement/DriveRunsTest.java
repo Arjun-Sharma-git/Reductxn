@@ -1,0 +1,235 @@
+package io.reductxn.settlement;
+
+import io.reductxn.kernel.api.Result;
+import io.reductxn.settlement.port.in.ComputedRun;
+import io.reductxn.settlement.port.in.DriveRuns;
+import io.reductxn.settlement.port.in.DrivenRuns;
+import io.reductxn.settlement.port.in.RunRequest;
+import io.reductxn.settlement.port.in.RunStatus;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * The driver: what moves a run that nothing else moves.
+ *
+ * <p>Before this, every test in the module called {@code ExecuteRun} itself. That made the module's tests pass
+ * and left a deployment where a run could sit in {@code awaiting_approval} for ever - because the last step had
+ * no caller. So the assertions here are about the caller: a run is driven by the driver alone, a run that cannot
+ * progress is left where it is with the gate's reason, a run starts as soon as its last fact arrives, and a
+ * transfer the rail never answered is finished by a later pass.
+ *
+ * <p>The cut-offs are explicit rather than implicit. A pass is told how stale an attempt must be
+ * ({@link DriveRuns#driveDue}), so a test can express "a pass now" and "a pass a minute later" without waiting
+ * for a clock - and that argument is also what makes the threshold a setting rather than a rule about settlement.
+ */
+@SpringBootTest(classes = {SettlementWorkerApplication.class, StubRailConfiguration.class})
+class DriveRunsTest extends WorkerDatabaseTest {
+
+    @Autowired
+    private StubRail rail;
+
+    @Autowired
+    private DriveRuns driveRuns;
+
+    @Autowired
+    private Clock clock;
+
+    @BeforeEach
+    void resetTheRail() {
+        rail.reset();
+    }
+
+    @Test
+    void aRunNothingIsWaitingOnIsDrivenToDoneByTheDriverAlone() {
+        crossCurrencyObligation(ALICE, BORIS, 12_500L, 224L);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+        approveEveryone(run);
+        fundEveryRequirement(run);
+
+        DrivenRuns report = ok(driveRuns.driveDue(aPassNow(), 10));
+
+        assertThat(report.outcomes()).hasSize(1);
+        assertThat(report.driven()).as("the everybody-has-answered case").isEqualTo(1);
+        assertThat(report.completed()).hasSize(1);
+        assertThat(storedRunStatus(run.run().id())).isEqualTo("done");
+        assertThat(rail.submissions())
+                .as("and the money moved, because the driver drove it rather than the test")
+                .hasSize(2);
+    }
+
+    @Test
+    void aRunThatCannotProgressIsLeftWhereItIsWithTheGatesReason() {
+        obligation(ALICE, BORIS, 10_000L, "INR", 2);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+
+        DrivenRuns report = ok(driveRuns.driveDue(aPassNow(), 10));
+
+        assertThat(report.refused()).isEqualTo(1);
+        assertThat(report.outcomes().get(0).reason())
+                .as("a refusal is an answer, not a fault: the operator reading the report is told which gate is "
+                        + "waiting and on whom")
+                .contains("settlement.quorum_not_met");
+        assertThat(report.outcomes().get(0).status()).isEqualTo(RunStatus.AWAITING_APPROVAL);
+        assertThat(rail.submissions())
+                .as("and nothing reached a rail, which is the point of the gates being in the use case rather "
+                        + "than in the caller")
+                .isEmpty();
+    }
+
+    @Test
+    void aRunStartsAsSoonAsItsLastFactArrives() {
+        crossCurrencyObligation(ALICE, BORIS, 12_500L, 224L);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+
+        // A pass first, which finds a run waiting on funding and approval and does nothing.
+        assertThat(ok(driveRuns.driveDue(aPassNow(), 10)).driven()).isZero();
+        assertThat(storedRunStatus(run.run().id()))
+                .as("a refusal leaves the run exactly where it was - and where that is, is the funding gate's "
+                        + "answer rather than the quorum's, because currency the group does not hold blocks a run "
+                        + "before a group's approval could allow it (RULE S4)")
+                .isEqualTo("awaiting_fx_funding");
+
+        approveEveryone(run);
+        fundEveryRequirement(run);
+
+        // The facts have arrived; nothing calls a use case about it. The next pass is what notices.
+        DrivenRuns later = ok(driveRuns.driveDue(aPassAMinuteLater(), 10));
+
+        assertThat(later.driven()).isEqualTo(1);
+        assertThat(storedRunStatus(run.run().id())).isEqualTo("done");
+    }
+
+    @Test
+    void aTransferTheRailNeverAnsweredIsResolvedByALaterPass() {
+        crossCurrencyObligation(ALICE, BORIS, 12_500L, 224L);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+        approveEveryone(run);
+        fundEveryRequirement(run);
+
+        String inFlight = run.transfers().get(0).railRef();
+        rail.scripting(inFlight, StubRail.Behaviour.ACCEPT_WITHOUT_CONFIRMING);
+
+        DrivenRuns first = ok(driveRuns.driveDue(aPassNow(), 10));
+
+        assertThat(first.driven()).isEqualTo(1);
+        assertThat(storedRunStatus(run.run().id()))
+                .as("the rail accepted one transfer and said nothing about it, so the run cannot be done - and "
+                        + "must not be failed either: silence is not a refusal")
+                .isEqualTo("executing");
+
+        // What a rail does between two passes. No test calls `ExecuteRun` here: the driver is the only caller,
+        // and the second pass is what resolves the transfer the first one left in flight - section 4.4's
+        // reconciliation claim in the form this project can actually assert.
+        rail.confirm(inFlight);
+
+        DrivenRuns second = ok(driveRuns.driveDue(aPassAMinuteLater(), 10));
+
+        assertThat(second.driven()).isEqualTo(1);
+        assertThat(storedRunStatus(run.run().id())).isEqualTo("done");
+        assertThat(rail.polls()).as("asked rather than re-submitted").isPositive();
+        assertThat(rail.submissionsOf(inFlight)).as("offered to the rail once, ever").isEqualTo(1);
+    }
+
+    @Test
+    void theSameRunIsNotDrivenTwiceWithinTheWindow() {
+        obligation(ALICE, BORIS, 10_000L, "INR", 2);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+
+        ok(driveRuns.driveDue(aPassNow(), 10));
+
+        DrivenRuns again = ok(driveRuns.driveDue(aPassNow(), 10));
+
+        assertThat(again.outcomes())
+                .as("the window is the anti-stampede guard: a second instance (or a second tick) within it sees "
+                        + "nothing due rather than re-driving a run another process is working on")
+                .isEmpty();
+        assertThat(storedDrivenAt(run.run().id()))
+                .as("and the mark the window reads is a real column, written before the attempt")
+                .isNotNull();
+    }
+
+    @Test
+    void aFinishedRunIsNeverConsideredAgain() {
+        obligation(ALICE, BORIS, 10_000L, "INR", 2);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+        approveEveryone(run);
+        ok(driveRuns.driveDue(aPassNow(), 10));
+        assertThat(storedRunStatus(run.run().id())).isEqualTo("done");
+
+        DrivenRuns muchLater = ok(driveRuns.driveDue(Instant.parse("2099-01-01T00:00:00Z"), 10));
+
+        assertThat(muchLater.outcomes()).isEmpty();
+        assertThat(rail.submissions()).hasSize(1);
+    }
+
+    @Test
+    void drivingANamedRunIgnoresTheWindow() {
+        obligation(ALICE, BORIS, 10_000L, "INR", 2);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+
+        ok(driveRuns.driveDue(aPassNow(), 10));
+        assertThat(ok(driveRuns.driveDue(aPassNow(), 10)).outcomes()).isEmpty();
+
+        DrivenRuns named = ok(driveRuns.driveOne(run.run().id()));
+
+        assertThat(named.outcomes())
+                .as("an operator asking for one run is not a stampede, and refusing on the grounds that it was "
+                        + "attempted recently would make the command useless in the case it exists for")
+                .hasSize(1);
+        assertThat(named.refused()).isEqualTo(1);
+    }
+
+    @Test
+    void drivingARunThatDoesNotExistIsARefusal() {
+        Result<DrivenRuns> missing = driveRuns.driveOne(new UUID(0L, 999L));
+
+        assertThat(refusalCode(missing)).isEqualTo("settlement.run_not_found");
+    }
+
+    @Test
+    void aPassIsBoundedAndTakesTheLeastRecentlyAttemptedFirst() {
+        obligation(ALICE, BORIS, 10_000L, "INR", 2);
+
+        // Two cycles over one group, an hour apart: two runs, both drivable, and the obligation is open at both
+        // cut-offs - so this is about the queue rather than about what the runs contain.
+        computed(new RunRequest(GROUP, AS_OF));
+        computed(new RunRequest(GROUP, AS_OF.minusSeconds(3_600)));
+
+        DrivenRuns oneAtATime = ok(driveRuns.driveDue(aPassNow(), 1));
+
+        assertThat(oneAtATime.outcomes()).hasSize(1);
+
+        DrivenRuns theNextPass = ok(driveRuns.driveDue(aPassAMinuteLater(), 1));
+
+        assertThat(theNextPass.outcomes())
+                .as("a batch size bounds one pass, and the next pass takes the run the first one left - oldest "
+                        + "attempt first, so a backlog of waiting runs cannot starve one that is ready")
+                .hasSize(1);
+        assertThat(theNextPass.outcomes().get(0).runId())
+                .isNotEqualTo(oneAtATime.outcomes().get(0).runId());
+    }
+
+    /** A cut-off one second ago: anything never attempted is due, and anything just attempted is not. */
+    private Instant aPassNow() {
+        return clock.instant().minusSeconds(1);
+    }
+
+    /** A cut-off a minute ahead, which is what the next tick would use with a one-minute window. */
+    private Instant aPassAMinuteLater() {
+        return clock.instant().plusSeconds(60);
+    }
+
+    private String storedDrivenAt(UUID runId) {
+        return jdbc.queryForObject("SELECT driven_at::text FROM settlement_runs WHERE id = ?", String.class,
+                runId);
+    }
+}

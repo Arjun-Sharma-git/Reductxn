@@ -4,10 +4,15 @@ import io.reductxn.planning.api.SettlementPlanner;
 import io.reductxn.planning.api.SettlementPlans;
 import io.reductxn.rails.api.PaymentRail;
 import io.reductxn.rails.api.Rails;
+import io.reductxn.settlement.application.DriveRunsService;
+import io.reductxn.settlement.port.in.DriveRuns;
+import io.reductxn.settlement.port.in.ExecuteRun;
+import io.reductxn.settlement.port.out.Runs;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.time.Clock;
 
@@ -44,6 +49,24 @@ public class UseCaseConfiguration {
     @Bean
     Clock clock() {
         return Clock.systemUTC();
+    }
+
+    /**
+     * The driver: what moves the runs nothing else moves.
+     *
+     * <p>A bean here rather than a component on the class, so the layer rule stays visible: the service is in
+     * {@code application}, and the two things that trigger it - the cadence in {@code adapter/schedule} and the
+     * command in {@code adapter/command} - are the only callers, and both reach it through
+     * {@link io.reductxn.settlement.port.in.DriveRuns} rather than through this class.
+     *
+     * <p>One instance of the clock is shared with every other use case, which is what keeps the driver's mark and
+     * a transfer's authorisation on the same timeline.
+     */
+    @Bean
+    DriveRuns driveRuns(
+            Runs runs, ExecuteRun executeRun, Clock clock, PlatformTransactionManager transactionManager) {
+
+        return new DriveRunsService(runs, executeRun, clock, transactionManager);
     }
 
     /**
