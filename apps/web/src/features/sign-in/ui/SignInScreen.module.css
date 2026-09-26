@@ -1,0 +1,34 @@
+/* Signing in: one field at a time, in a column that does not stretch on a wide screen. */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-5);
+  max-inline-size: 44ch;
+  margin-inline: auto;
+  padding-block: var(--rn-space-8);
+}
+
+.lede {
+  color: var(--rn-text-muted);
+}
+
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rn-space-3);
+  align-items: end;
+  margin-block-start: var(--rn-space-4);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-1);
+  font-size: var(--rn-text-sm);
+}
+
+/* The way back to the other number, quieter than the submit: it is a correction rather than a step. */
+.aside {
+  font-size: var(--rn-text-xs);
+}

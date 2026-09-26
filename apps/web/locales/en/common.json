@@ -1,5 +1,8 @@
 {
   "skipToContent": "Skip to the content",
+  "signIn": "Sign in",
+  "signOut": "Sign out",
+  "signedInAs": "Signed in as {name}",
   "language": "Language",
   "theme": "Theme",
   "themeSystem": "Follow the system",

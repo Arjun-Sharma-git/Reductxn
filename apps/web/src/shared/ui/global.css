@@ -122,6 +122,27 @@ p {
   border-block-end: 1px solid var(--rn-border);
 }
 
+/* Who is signed in, or the way to become somebody. Aligned with the brand rather than the controls: it is a fact about
+   the session, not a document-level preference. */
+.rn-app-account {
+  display: inline-flex;
+  gap: var(--rn-space-3);
+  align-items: baseline;
+  font-size: var(--rn-text-sm);
+  color: var(--rn-text-muted);
+}
+
+/* A button that reads as a link, because signing out is not a form submission. */
+.rn-app-account-action {
+  font: inherit;
+  color: var(--rn-accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .rn-app-brand {
   font-family: var(--rn-font-amount);
   font-size: var(--rn-text-lg);

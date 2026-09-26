@@ -13,7 +13,26 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Request an OTP for a phone number */
+        /**
+         * Request an OTP for a phone number
+         * @description Send a code that proves the caller's phone number. This is the whole of sign-in: there is no password, so there is
+         *     nothing to leak and no reset to get wrong.
+         *
+         *     **The response does not contain the code, and that is deliberate.** A code in a response is a code anybody reading
+         *     the response has, which is the same as no code at all - so it goes to the phone, and a deployment answers `202`
+         *     whether or not the number is one it has seen before. Not distinguishing those two is what stops this operation
+         *     from being a way to ask which numbers have accounts.
+         *
+         *     **The values a caller cannot choose.** A code lives five minutes, and one number may ask for three in ten - the
+         *     second is the `429`, and it exists because an endpoint that sends a message on every request is a way to spend
+         *     somebody else's money. Neither is configurable here, for the reason the invite window is not: a window a
+         *     deployment can change is one whose behaviour nobody can reproduce from the code.
+         *
+         *     **The stand-in, stated where a client will read it.** This deployment has no SMS provider and no email, so the
+         *     code is written to the server log by the delivery adapter - a working answer for a single-machine deployment and a
+         *     hole anywhere else. The port exists so that replacing it is one class, and the ADR records the gap rather than
+         *     this document pretending otherwise (ADR 0042).
+         */
         post: {
             parameters: {
                 query?: never;
@@ -36,12 +55,15 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Rate limited */
+                400: components["responses"]["Problem"];
+                /** @description Too many codes asked for in the last few minutes */
                 429: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
                 };
             };
         };
@@ -60,7 +82,28 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Verify an OTP and receive tokens */
+        /**
+         * Verify an OTP and receive tokens
+         * @description Hand the code back and receive a session: an access token for authenticated reads and a refresh token that renews
+         *     the pair.
+         *
+         *     **Verifying a code is registering a person.** A number nobody has seen before becomes a user here, because in an
+         *     OTP build the code *is* the registration - there is no separate sign-up, and no admin would be needed to seed one.
+         *     What this deployment calls them is the number itself, until a group records its own name for them
+         *     (`group_members.display_name`).
+         *
+         *     **Every failure answers one code.** A number that never asked, a code that is wrong, one that has expired and one
+         *     that has been spent are all `api.otp_not_accepted`, because telling a caller which of them it was tells somebody
+         *     guessing whether there is a live challenge to guess at. A wrong code does spend an attempt, and a challenge dies
+         *     after five, which is what makes that one answer affordable.
+         *
+         *     **`deviceId` is a label, not a credential.** It is client-supplied and unverified, like a decision's `memberId`;
+         *     it is recorded on the session so "where am I signed in" has an answer.
+         *
+         *     **The tokens are opaque.** `bearerFormat` no longer says JWT: a JWT would need a signing key and a rotation story
+         *     for that key, and `POST /auth/refresh` needs a row to rotate either way, so a stateless token would buy one
+         *     indexed lookup at the cost of a key management problem (ADR 0042).
+         */
         post: {
             parameters: {
                 query?: never;
@@ -87,6 +130,7 @@ export interface paths {
                         "application/json": components["schemas"]["TokenPair"];
                     };
                 };
+                400: components["responses"]["Problem"];
                 401: components["responses"]["Problem"];
             };
         };
@@ -105,7 +149,23 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Rotate the refresh token */
+        /**
+         * Rotate the refresh token
+         * @description Replace both tokens, given the refresh token.
+         *
+         *     **The body is an addition this contract needed.** The operation declares `security: []` - the OpenAPI way of
+         *     saying "the bearer token does not authenticate this" - and it declared no request body, so there was nowhere for
+         *     the refresh token to travel. Reading the `Authorization` header as an access token on some paths and a refresh
+         *     token on others was the alternative, and it would make one header mean two things depending on the URL (ADR 0042).
+         *
+         *     **Both tokens are replaced, always.** Keeping the refresh token while renewing the access half would leave a
+         *     credential valid for the rest of its life, which is the opposite of what rotating one is for - so a replay of the
+         *     previous refresh token is a `401`, and two rotations racing on one token produce one pair rather than two.
+         *
+         *     **A rotation does not extend the session.** The refresh window is carried over untouched, so a client that
+         *     refreshes for twenty-nine days is signed out on the thirtieth. That is what a session length means; the
+         *     alternative is a session that never ends as long as somebody keeps using it.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -113,7 +173,11 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RefreshRequest"];
+                };
+            };
             responses: {
                 /** @description New token pair */
                 200: {
@@ -124,6 +188,7 @@ export interface paths {
                         "application/json": components["schemas"]["TokenPair"];
                     };
                 };
+                400: components["responses"]["Problem"];
                 401: components["responses"]["Problem"];
             };
         };
@@ -140,7 +205,28 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Current user profile and KYC tier */
+        /**
+         * Current user profile and KYC tier
+         * @description Who is asking, according to the bearer token in the request.
+         *
+         *     **This is the read the client has been working around since its first screen.** Without it there is no way to know
+         *     which member a person is, so every screen that names somebody fell back to showing a uuid - and the missing members
+         *     read looked deliberate rather than missing for seven slices (ADR 0035, 0038).
+         *
+         *     **No credential is a `401`, and so is a token nobody issued.** From the outside those are the same request, and
+         *     telling them apart would tell a caller whether a token was ever real. The refusal's `code` says one thing -
+         *     `api.not_signed_in` - for an unknown token, an expired one and one that has been rotated away.
+         *
+         *     **`kycTier` is `none` for everybody in this deployment.** There is no KYC provider, so no tier has been
+         *     established; the schema requires the field and the value means "not established", not "established as nothing". A
+         *     stored tier nobody ever checked would read as a decision somebody made.
+         *
+         *     **The global `bearerAuth` finally means what it says.** Every operation in this document is declared `bearerAuth`
+         *     at the top and the auth operations opt out; this is the first operation that reads the token. What it deliberately
+         *     does not do is enforce the declaration on the other boundaries - requiring tokens everywhere would break every
+         *     existing caller at once, and doing that is the next slice rather than something to smuggle in behind the first
+         *     token (ADR 0042).
+         */
         get: {
             parameters: {
                 query?: never;
@@ -159,6 +245,7 @@ export interface paths {
                         "application/json": components["schemas"]["User"];
                     };
                 };
+                401: components["responses"]["Problem"];
             };
         };
         put?: never;
@@ -1822,12 +1909,36 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /**
+         * @description A session: an access token for authenticated reads, and the refresh token that renews it.
+         *
+         *     Both are opaque and are returned exactly once - the server stores only their hashes, so a lost pair is a new
+         *     sign-in. `expiresIn` is the access token's remaining life in seconds; the refresh token's life is the session's and
+         *     is not reported, because a client that needs it needs it to renew, and renewing is what tells it.
+         */
         TokenPair: {
             accessToken: string;
             refreshToken: string;
             /** @description Seconds */
             expiresIn: number;
         };
+        /**
+         * @description The refresh token, so a rotation has something to rotate. Added by ADR 0042, because `POST /auth/refresh`
+         *     declared no body and `security: []` means the bearer header is not where this token belongs.
+         */
+        RefreshRequest: {
+            refreshToken: string;
+        };
+        /**
+         * @description Who a session speaks for.
+         *
+         *     `displayName` is what this deployment calls them - which in a build with no profile screen is their phone number,
+         *     because that is the only thing the deployment knows. A group's own name for them is
+         *     `group_members.display_name`, and it is the one a person actually sees.
+         *
+         *     `kycTier` is `none` for everybody here: there is no KYC provider, so no tier has been established. The value means
+         *     "not established" rather than "established as nothing".
+         */
         User: {
             /** Format: uuid */
             id: string;

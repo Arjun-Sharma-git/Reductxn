@@ -1,0 +1,20 @@
+{
+  "title": "Sign in",
+  "lede": "No password: this deployment signs you in with a code sent to your phone number.",
+  "phone": {
+    "title": "Your phone number",
+    "description": "This is who you are to this deployment. Nothing about your groups changes because of it - a group records its own name for you.",
+    "label": "Phone number",
+    "submit": "Send me a code",
+    "busy": "Sending…"
+  },
+  "code": {
+    "title": "The code",
+    "description": "Six digits. It is good for five minutes, and a few wrong tries in a row will use it up.",
+    "label": "Code",
+    "submit": "Sign in",
+    "busy": "Signing in…",
+    "other": "Use a different number",
+    "where": "A code was sent to {phoneNumber}. This deployment has no SMS provider yet, so look for it in the server log - the line names the number it was for."
+  }
+}
