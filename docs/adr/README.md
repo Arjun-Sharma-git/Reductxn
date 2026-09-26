@@ -26,3 +26,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0018 | The worker drives what it owns, and an operator triggers the rest | accepted |
 | 0019 | A rail's refusal says whether asking again could help | accepted |
 | 0020 | The API records a member's answer; the run judges it | accepted |
+| 0021 | A read model projects a run's rows; it does not recompute its judgements | accepted |

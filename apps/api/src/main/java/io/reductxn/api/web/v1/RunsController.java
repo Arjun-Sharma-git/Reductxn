@@ -1,10 +1,13 @@
 package io.reductxn.api.web.v1;
 
-import io.reductxn.api.port.in.ApprovalRefusals;
+import io.reductxn.api.port.in.ReadRun;
 import io.reductxn.api.port.in.ApproveRun;
 import io.reductxn.api.port.in.NewApproval;
 import io.reductxn.api.port.in.RecordedApproval;
+import io.reductxn.api.port.in.RunRefusals;
+import io.reductxn.api.port.in.RunReport;
 import io.reductxn.api.web.dto.ApprovalMapper;
+import io.reductxn.api.web.dto.RunMapper;
 import io.reductxn.api.web.dto.ApproveRunRequest;
 import io.reductxn.api.web.error.ExpectedFailures;
 import io.reductxn.kernel.api.DomainError;
@@ -16,6 +19,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -45,10 +49,12 @@ import java.util.UUID;
 public class RunsController {
 
     private final ApproveRun approveRun;
+    private final ReadRun readRun;
     private final Clock clock;
 
-    public RunsController(ApproveRun approveRun, Clock clock) {
+    public RunsController(ApproveRun approveRun, ReadRun readRun, Clock clock) {
         this.approveRun = Objects.requireNonNull(approveRun, "approveRun");
+        this.readRun = Objects.requireNonNull(readRun, "readRun");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -76,6 +82,52 @@ public class RunsController {
         return problem(((Result.Failure<RecordedApproval>) result).error(), http.getRequestURI());
     }
 
+    /**
+     * {@code GET /v1/runs/{runId}}: the run, its figures per currency and who has answered.
+     *
+     * <p>This is the other half of approving, and the contract's own word for the approve operation shows why it is
+     * needed: {@code 200 Approval recorded} is true and incomplete, because whether an answer reached the run's
+     * quorum is a judgement this deployable does not make (ADR 0020). The answers appear here as rows, and the run's
+     * {@code status} is the state machine's answer to what is happening next.
+     */
+    @GetMapping("/{runId}")
+    public ResponseEntity<Object> read(@PathVariable String runId, HttpServletRequest http) {
+        DomainError malformed = malformedRunId(runId);
+        if (malformed != null) {
+            return problem(malformed, http.getRequestURI());
+        }
+
+        Result<RunReport> result = readRun.read(UUID.fromString(runId));
+
+        if (result instanceof Result.Ok<RunReport> run) {
+            return ResponseEntity.ok(RunMapper.toResponse(run.value()));
+        }
+
+        return problem(((Result.Failure<RunReport>) result).error(), http.getRequestURI());
+    }
+
+    /**
+     * {@code GET /v1/runs/{runId}/transfers}: the who-pays-whom instruction list.
+     *
+     * <p>Served from the same read as the run above, so the two endpoints cannot disagree about a plan that a group
+     * approved and a rail is executing.
+     */
+    @GetMapping("/{runId}/transfers")
+    public ResponseEntity<Object> transfers(@PathVariable String runId, HttpServletRequest http) {
+        DomainError malformed = malformedRunId(runId);
+        if (malformed != null) {
+            return problem(malformed, http.getRequestURI());
+        }
+
+        Result<RunReport> result = readRun.read(UUID.fromString(runId));
+
+        if (result instanceof Result.Ok<RunReport> run) {
+            return ResponseEntity.ok(RunMapper.toInstructions(run.value()));
+        }
+
+        return problem(((Result.Failure<RunReport>) result).error(), http.getRequestURI());
+    }
+
     /** A refusal as the response the contract describes, with the status its code carries. */
     private static ResponseEntity<Object> problem(DomainError failure, String instance) {
         ProblemDetail problem = ExpectedFailures.toProblem(failure, instance);
@@ -91,14 +143,30 @@ public class RunsController {
      * branch on.
      */
     private static DomainError malformedRequest(String runId, ApproveRunRequest request) {
-        if (runId == null || runId.isBlank() || !isUuid(runId)) {
-            return new ApprovalRefusals.RequestIncomplete("runId in the path, as a uuid");
+        DomainError path = malformedRunId(runId);
+        if (path != null) {
+            return path;
         }
         if (request == null) {
-            return new ApprovalRefusals.RequestIncomplete("body");
+            return new RunRefusals.RequestIncomplete("body");
         }
         if (request.memberId() == null) {
-            return new ApprovalRefusals.RequestIncomplete("memberId");
+            return new RunRefusals.RequestIncomplete("memberId");
+        }
+
+        return null;
+    }
+
+    /**
+     * The path parameter, which the contract declares as a uuid.
+     *
+     * <p>Taken as a {@code String} and checked here rather than bound as a {@code UUID}, so that a malformed id gets
+     * the same coded problem body every other refusal gets instead of Spring's own uncoded {@code 400} - the
+     * compromise {@code ObligationsController} refuses for a missing header, for the same reason.
+     */
+    private static DomainError malformedRunId(String runId) {
+        if (runId == null || runId.isBlank() || !isUuid(runId)) {
+            return new RunRefusals.RequestIncomplete("runId in the path, as a uuid");
         }
 
         return null;

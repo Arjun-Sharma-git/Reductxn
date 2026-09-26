@@ -399,17 +399,28 @@ paths:
     get:
       tags: [settlement]
       summary: Settlement run status and headline numbers
+      description: |
+        The run's status, its figures per currency, and every answer on the record. This is what a member
+        reads before approving, so it says what the plan asks for rather than what it concludes.
+
+        It does not say whether quorum is met. Quorum is the run's arithmetic over its own participants
+        (ADR 0016), computed in the module that owns the run, and recomputing it in the API would be a
+        second implementation that a member reads while the first one moves money (ADR 0021). The `status`
+        is the state machine's answer instead: `awaiting_approval` and `awaiting_fx_funding` distinguish
+        the two blockers a group has, people and currency.
+
+        `answers` carries every stored answer, including any that cannot count; whether one counted is the
+        run's judgement, not this response's.
       parameters:
-        - name: runId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/RunId'
       responses:
         '200':
           description: Run
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SettlementRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /runs/{runId}/approve:
     post:
@@ -464,11 +475,16 @@ paths:
     get:
       tags: [settlement]
       summary: The who-pays-whom instruction list
+      description: |
+        Every movement the plan asks for, in a stable order derived from each transfer's own coordinates
+        (`railRef`) rather than from insertion order - a plan whose reported order changed between two
+        reads would make the plan a group approved and the plan a rail executed look different when they
+        are the same.
+
+        Served from the same read as `GET /runs/{runId}`, so the two endpoints cannot disagree about one
+        plan.
       parameters:
-        - name: runId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/RunId'
       responses:
         '200':
           description: Transfer instructions
@@ -477,6 +493,8 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/TransferInstruction' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /tax/reports:
     get:
@@ -860,7 +878,7 @@ components:
 
     TransferInstruction:
       type: object
-      required: [fromUserId, toUserId, amount, tax, status]
+      required: [fromUserId, toUserId, amount, status]
       properties:
         fromUserId: { type: string, format: uuid }
         toUserId: { type: string, format: uuid }
@@ -871,7 +889,14 @@ components:
             `fx_clearing` marks the leg that crosses currencies, so the FX cost of a plan is visible
             in the report rather than hidden inside a member's transfer (ADR 0012).
         amount: { $ref: '#/components/schemas/Money' }
-        tax: { $ref: '#/components/schemas/Money' }
+        tax:
+          $ref: '#/components/schemas/Money'
+          description: |
+            Not populated, and not required any more. The worker stores tax per currency rather than per
+            movement: the plan's tax figure and what netting saved are partition columns, because the
+            saving is a property of netting rather than of any one payment (ADR 0021). Splitting a
+            partition's tax across its transfers would be the API inventing an arithmetic the worker never
+            ran. The tax a group reads is on the run summary, per currency.
         status:
           type: string
           enum: [pending, authorized, submitted, confirmed, failed]
@@ -879,14 +904,17 @@ components:
           type: string
           format: uuid
           nullable: true
-          description: Links this instruction to the paired entry in the other currency (L9).
+          description: |
+            Not populated: the pairing this field describes is a ledger fact, recorded on the entries a
+            confirmed transfer books, not a column of the transfer row. Read it through the ledger.
         railRef: { type: string, nullable: true }
         failureCode:
           type: string
           nullable: true
           description: |
-            Stable machine-readable failure code, for example `rail.insufficient_funds`. This is what
-            the client localizes (RULE B20).
+            Not populated: the transfer row carries what the rail said (`failureReason`) and no stable
+            machine-readable code. A code a client could branch on would be worth having, and nothing
+            writes one yet.
         failureReason:
           type: string
           nullable: true
@@ -1005,6 +1033,9 @@ components:
           description: |
             Headline figures in the group's reporting currency, using a reporting rate. An estimate,
             never a ledger figure, and never used to compute a transfer or an assessment.
+
+            Not populated: the reporting currency is a group's property and groups do not exist as tables
+            yet, and a total without a rate as-of is a number nobody could restate (ADR 0021).
           properties:
             currency: { $ref: '#/components/schemas/Currency' }
             tax: { $ref: '#/components/schemas/Money' }
@@ -1016,9 +1047,35 @@ components:
           description: |
             Currencies the group must obtain from outside. Empty means the run is internally
             settlable. Non-empty puts the run in `awaiting_fx_funding` (ADR 0012, RULE S4).
+
+            Not populated: the requirement is derived by the settlement worker from the plan's clearing
+            residual, and re-deriving it in the API would be a second implementation of the same rule
+            (ADR 0021). The currencies involved are visible as transfers whose `toAccountType` is
+            `fx_clearing`.
           items: { $ref: '#/components/schemas/FxRequirement' }
         computedAt: { type: string, format: date-time, nullable: true }
-        executedAt: { type: string, format: date-time, nullable: true }
+        executedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Not populated: nothing records the instant a run reached `done`. The run's `drivenAt` - when
+            the driver last looked at it - is a different fact, and using it here would answer a question
+            nobody asked.
+        answers:
+          type: array
+          description: |
+            Every member's answer, as the run's decision rows hold it - including answers that cannot
+            count, because the run's arithmetic intersects them with its own participants (ADR 0020). No
+            entry is marked as counted: whether an answer counted is the run's judgement, and a boolean
+            here would be the API guessing (ADR 0021).
+          items:
+            type: object
+            required: [memberId, decision, decidedAt]
+            properties:
+              memberId: { type: string, format: uuid }
+              decision: { type: string, enum: [approve, reject] }
+              decidedAt: { type: string, format: date-time }
 
     TaxRule:
       type: object

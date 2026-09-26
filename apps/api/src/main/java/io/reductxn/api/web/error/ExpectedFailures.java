@@ -1,6 +1,7 @@
 package io.reductxn.api.web.error;
 
 import io.reductxn.api.port.in.ApprovalRefusals;
+import io.reductxn.api.port.in.RunRefusals;
 import io.reductxn.api.port.in.ObligationRefusals;
 import io.reductxn.fx.api.AmountTooSmallToConvertException;
 import io.reductxn.fx.api.StaleRateException;
@@ -43,7 +44,7 @@ public final class ExpectedFailures {
             // The request itself is malformed, so the server has not begun to answer it.
             Map.entry(ObligationRefusals.RequestIncomplete.CODE, HttpStatus.BAD_REQUEST),
             Map.entry(ObligationRefusals.MemoTooLong.CODE, HttpStatus.BAD_REQUEST),
-            Map.entry(ApprovalRefusals.RequestIncomplete.CODE, HttpStatus.BAD_REQUEST),
+            Map.entry(RunRefusals.RequestIncomplete.CODE, HttpStatus.BAD_REQUEST),
 
             // The request is understood and the answer is no: an obligation that cannot exist, or a
             // conversion that is not possible at all.
@@ -60,7 +61,7 @@ public final class ExpectedFailures {
 
             // There is nothing to answer, which is not the same as answering nothing: a client that got this for a
             // malformed body would go looking for an id that was correct all along.
-            Map.entry(ApprovalRefusals.NoSuchRun.CODE, HttpStatus.NOT_FOUND),
+            Map.entry(RunRefusals.NoSuchRun.CODE, HttpStatus.NOT_FOUND),
 
             // A conflict with what is already on the record: this member has answered this run, and an answer is
             // final. 409 rather than 422, because the request is well-formed and could have succeeded earlier - the

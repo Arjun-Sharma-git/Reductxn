@@ -6,12 +6,16 @@ import io.reductxn.kernel.api.DomainError;
 import java.util.UUID;
 
 /**
- * Recording an answer's expected failures, as values.
+ * An answer's expected failures, as values.
  *
- * <p>Three of them, and their small number is the slice's most interesting property: every rule about *what an
- * answer means* lives in the module that owns the run, so this deployable cannot refuse an answer for being early,
- * for coming from a member the run does not concern, or for arriving after the run has moved on. Those are judged
- * where they are computable, and this module's refusals are limited to what it can see from where it stands.
+ * <p>Two of them, and their small number is the slice's most interesting property: every rule about *what an answer
+ * means* lives in the module that owns the run, so this deployable cannot refuse an answer for being early, for
+ * coming from a member the run does not concern, or for arriving after the run has moved on. Those are judged where
+ * they are computable, and this module's refusals are limited to what it can see from where it stands.
+ *
+ * <p>The two failures that are about the *request* rather than about the answer - a malformed body and an unknown
+ * run - are {@link RunRefusals}, because reading a run meets them too and a code identifies a condition rather than
+ * an endpoint (RULE B20).
  *
  * <p>One record per code with a {@code public static final String CODE}, because
  * {@code DomainErrorCodeTest} requires it of every concrete {@code DomainError} so the error-code parity gate can
@@ -22,47 +26,6 @@ import java.util.UUID;
 public final class ApprovalRefusals {
 
     private ApprovalRefusals() {
-    }
-
-    /** The request is missing something the use case cannot be handed at all. */
-    public record RequestIncomplete(String field) implements DomainError {
-
-        public static final String CODE = "api.approval_incomplete";
-
-        public RequestIncomplete {
-            DomainCodes.requireWellFormed(CODE);
-        }
-
-        @Override
-        public String code() {
-            return CODE;
-        }
-
-        @Override
-        public String message() {
-            return "this request has no " + field + ", so there is no answer to record";
-        }
-    }
-
-    /** There is no run with this id, so there is nothing to answer. */
-    public record NoSuchRun(UUID runId) implements DomainError {
-
-        public static final String CODE = "api.approval_no_such_run";
-
-        public NoSuchRun {
-            DomainCodes.requireWellFormed(CODE);
-        }
-
-        @Override
-        public String code() {
-            return CODE;
-        }
-
-        @Override
-        public String message() {
-            return "no settlement run has the id " + runId + ", so this answer is about nothing. A run is opened "
-                    + "for a cycle before it can be approved, and the id has to be that run's";
-        }
     }
 
     /** This member has already answered this run, and an answer is final. */
