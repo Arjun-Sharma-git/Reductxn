@@ -8,8 +8,9 @@ import java.util.UUID;
  * <p><strong>The contract had no body for this operation, and that was not implementable.</strong> "Approve a
  * computed run" with only a path parameter describes an approval by nobody: a quorum is a count of *members*, so an
  * answer has to name one. This adds the field the operation was missing rather than inventing a shape - the
- * obligation request already names its parties the same way - and it is the honest place for the identity gap to
- * show: until there is authentication, the member is whoever the client says, exactly as an obligation's debtor is.
+ * obligation request already names its parties the same way - and it is where the one remaining body-named actor
+ * shows: the caller is resolved from a session everywhere the group writes ask (ADR 0043), while the member who is
+ * answering is still whoever the client says, exactly as an obligation's debtor is.
  *
  * <p><strong>{@code decision} is the answer, and it is optional because yes is the common one.</strong> Absent means
  * approve, which is what the request meant before a refusal was expressible; the mapper applies that default, so

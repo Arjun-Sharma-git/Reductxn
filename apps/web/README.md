@@ -7,9 +7,11 @@ the obligations list and its recording form (ADR 0029, 0036), the settlement rep
 entirely: `/invites/$code`, where somebody with a code joins (ADR 0041) - it cannot be under a group, because the person
 arriving is usually not a member yet and the code is what says which group it is for - `/sign-in`, which is the only way to
 become somebody this deployment knows (ADR 0042), and `/` itself, which is now the list of groups you are in rather than
-the group-id box it was (ADR 0043). The route tree's remaining screens are groups of one kind or another - activity, and
-the policy and schedule screens - and each arrives the same way: screen by screen, feeding on a read that the server had to
-be made to answer.
+the group-id box it was (ADR 0043). The activity feed arrived with ADR 0044, and this sentence listed it as a screen still
+to come. The route tree's remaining screens are groups of one kind or another - the group's policy and its settlement
+schedule - and each needs a read the contract does not serve: a group's `nettingPolicy` exists in the schema as an unserved
+field, and a schedule has no operation at all, which is the gap the plan calls "nothing decides when a cycle is due". Each
+arrives the same way: screen by screen, feeding on a read that the server had to be made to answer.
 
 **Public surface:** the app itself; consumed by browsers only.
 
@@ -59,6 +61,8 @@ be made to answer.
 | F1-F3 (import direction) | `eslint-plugin-boundaries`, as an error |
 | F2, F8 (a feature is reached through `index.ts`) | `no-restricted-imports` patterns |
 | F4 (thin routes) | Review - no rule can see "one component and no logic" |
+| F6 (server state through TanStack Query) | `react-hooks`' `set-state-in-effect`, as an error: an effect that sets state **synchronously** fails the build. The asynchronous shape (`fetch(...).then(setState)`) is not what that rule reads, and it is F5's ban on `fetch` outside `shared/api` plus review that keep it out - both shapes were linted to write this row, which is why it says which one is caught |
+| F7 (no timeline in `entities` or `shared/api`) | Review - no linter reads where a timeline was created, and the layer rule allows `entities -> shared`, so only a reader sees this one |
 | F5 (HTTP only in `shared/api`) | `no-restricted-globals` on `fetch` |
 | F9 (no money arithmetic) | `no-restricted-syntax` on dividing by a hundred |
 | F10 (no literals) | `no-restricted-syntax` on JSX text |
@@ -68,8 +72,10 @@ be made to answer.
 | The skill's contrast and focus rules | Playwright and axe, in a real browser |
 | P9 (GA dependencies only) | `package.json` versions, reviewed |
 
-**There is no CI configuration in this repository**, so these run from `pnpm check` and `pnpm e2e` on a developer's
-machine and would be two steps in a pipeline that does not exist yet.
+**The pipeline exists** (`.github/workflows/ci.yml`, ADR 0031): its `web` job installs from the lockfile and runs
+`pnpm check` and `pnpm e2e`, so these are steps in a pipeline as well as what a developer runs before pushing. This
+paragraph said there was no CI configuration until the pass that corrected it - the same sentence had already been
+fixed in `tools/check-catalogs.mjs` when the pipeline landed, and this copy was missed.
 
 ## Two things worth knowing before changing anything here
 

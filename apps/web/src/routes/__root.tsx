@@ -24,8 +24,9 @@ import { AppHeaderControls } from '@/shared/ui';
  * decision and one attribute.
  *
  * It deliberately does **not** resolve a locale from a stored user preference: that is step one of the spec's order
- * and it needs identity, which does not exist yet. The URL is step two and the browser's `Accept-Language` is step
- * three, both of which work today.
+ * and it needs a preference stored on the account, which no column holds - identity itself arrived in ADR 0042, and
+ * this comment went on saying it did not. The URL is step two and the browser's `Accept-Language` is step three,
+ * both of which work today.
  */
 const search = z.object({
   /** The locale, part of the page's identity: a link shared in Russian opens in Russian. */
