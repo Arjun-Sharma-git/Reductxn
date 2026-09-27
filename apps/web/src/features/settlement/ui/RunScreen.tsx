@@ -28,9 +28,11 @@ import styles from './SettlementScreens.module.css';
  *     screen does not warn that refusing ends the run: that is the run's own status change, and stating it here would
  *     be predicting arithmetic this screen does not have.
  *
- * <p>The member is chosen rather than assumed. This build has no identity, so the answer names its member - the same
- * honesty as an obligation's debtor (`DecisionRequest`'s own comment) - and the screen asks instead of guessing,
- * because an answer attributed to nobody would be refused by the server anyway.
+ * <p>The member is chosen rather than assumed. This operation names its *acting* member in the body rather than
+ * taking it from the session - the last one that does, which is what `DecisionRequest`'s own comment carries - so the
+ * screen asks instead of guessing, because an answer attributed to nobody is refused by the server anyway. This
+ * paragraph said "this build has no identity" until the pass that corrected it; identity arrived in ADR 0042, and a
+ * body-named member is a property of this operation rather than of the build.
  */
 /**
  * The answer form: who is answering, and which way.

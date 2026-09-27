@@ -1457,11 +1457,13 @@ export interface paths {
          *     an absent `decision` is an approval, so a client that sent the old body still sends what it
          *     meant.
          *
-         *     `memberId` is client-supplied, as an obligation's `debtorId` is: this build has no identity, and
-         *     the field is `required` so that an answer by nobody is refused rather than attributed to nobody.
-         *     Requiring it is the honest shape until authentication exists - and it is why a refusal is read
-         *     through the run's own membership rather than taken at face value: the member is whoever the
-         *     client says, so only the run decides whether that member's answer counts.
+         *     `memberId` is client-supplied, as an obligation's `debtorId` is: since the group writes began
+         *     resolving a caller (ADR 0043) this is the last operation that names its *acting* member in the
+         *     body rather than taking it from the session, and the field is `required` so that an answer by
+         *     nobody is refused rather than attributed to nobody. A `memberId` that is not the caller's is not
+         *     a forgery to detect: a refusal is read through the run's own membership rather than taken at face
+         *     value, so only the run decides whether that member's answer counts (ADR 0016). Closing this
+         *     boundary is the same change the group writes made.
          */
         post: {
             parameters: {
@@ -2598,8 +2600,9 @@ export interface components {
              * @description Headline figures in the group's reporting currency, using a reporting rate. An estimate,
              *     never a ledger figure, and never used to compute a transfer or an assessment.
              *
-             *     Not populated: the reporting currency is a group's property and groups do not exist as tables
-             *     yet, and a total without a rate as-of is a number nobody could restate (ADR 0021).
+             *     Not populated: the reporting currency is a group's property - a row that exists since ADR 0043,
+             *     which the run's projection does not read - and a total without a rate as-of is a number nobody
+             *     could restate (ADR 0021).
              */
             reportingTotals?: {
                 currency?: components["schemas"]["Currency"];

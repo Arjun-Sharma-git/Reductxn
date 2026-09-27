@@ -23,8 +23,10 @@ import java.util.UUID;
  *
  * <p>{@code requestedAt} is non-null while the wire does not carry it, because the boundary is the only layer
  * allowed to read a clock (RULE B21): the controller substitutes "now", and everything below receives an instant.
- * The group is named by the client for the reason {@link NewDecision} gives - there is no authentication in this
- * build - and the identity slice changes that boundary rather than this record.
+ * The group is named in the path because it is the resource being closed, and the caller travels beside this record
+ * rather than inside it ({@link OpenCycle#open}) - a caller is who is asking rather than what is being asked. That
+ * caller must be a member of the group since ADR 0049, which is what this paragraph used to defer to "the identity
+ * slice".
  *
  * @param groupId     the group whose books are being closed
  * @param asOf        the instant the cycle is cut off at

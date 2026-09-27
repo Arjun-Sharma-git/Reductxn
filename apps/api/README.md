@@ -91,10 +91,15 @@ participants are the worker's positions and are not published here.
 
 ## What is not here yet
 
-Identity, groups, and the rest of the settlement surface. An obligation's `group_id` has no foreign key because
-`groups` does not exist yet, which is stated in the migration rather than left to be noticed. A cross-currency
-obligation *can* be stored since `V103` and `libs/fx`'s quote tables - and it is why rate ingestion exists (ADR
-0027), because a conversion with no rate is refused rather than guessed.
+The rest of the settlement surface, and the last place an acting member can be named by a request body. Identity
+arrived in ADR 0042 and the group writes take their actor from the session (ADR 0047, 0048, 0049); `groups` is a
+table since ADR 0043. An obligation's `group_id` still has no foreign key, but not for the reason this section used
+to give: that table is additive, so a group with commitments and no row keeps working, and a foreign key would refuse
+exactly that case. The one boundary left where the body names the member is `POST /v1/runs/{runId}/decisions`, and
+ADR 0016 is what makes it safe rather than merely unchecked - quorum intersects an answer with the run's own
+participants, so the worst a mistaken write does is record an answer the run ignores. A cross-currency obligation
+*can* be stored since `V103` and `libs/fx`'s quote tables - and it is why rate ingestion exists (ADR 0027), because
+a conversion with no rate is refused rather than guessed.
 
 The sentence this paragraph used to carry - that a cross-currency obligation could not be stored because
 `obligations` had no quote columns - outlived the columns by several slices. Recorded here rather than quietly

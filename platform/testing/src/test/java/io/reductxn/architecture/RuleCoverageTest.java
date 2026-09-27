@@ -163,7 +163,14 @@ class RuleCoverageTest {
     private static final Map<String, String> OUT_OF_SCOPE_FAMILIES = Map.of(
             "C", "contract and codegen rules (C1-C4). Their gate is a codegen diff check in CI "
                     + "(MASTER-PLAN section 8), not an ArchUnit rule and not a test in this module",
-            "F", "frontend rules (F1-F12). There is no apps/web yet; Appendix B records it as unstarted");
+            // The F entry used to say "there is no apps/web yet", which was true when it was written and false from
+            // ADR 0028 onwards. Naming the family's real gate is what keeps this a scope decision rather than a
+            // stale claim: ten of the twelve are rules of the client's linter, and F4 and F7 are review even there.
+            "F", "frontend rules (F1-F12). Their gate is apps/web's ESLint configuration, run by `pnpm check` and by "
+                    + "the pipeline's `web` job: eslint-plugin-boundaries for the import direction, no-restricted-* "
+                    + "for the money, literal and parse bans, react-hooks for state set in an effect. That is a gate "
+                    + "in another language and another tool from every rule here - which is the whole reason the "
+                    + "family is out of scope, and not that the client is unstarted");
 
     private static final String BUILD_LOGIC = "build-logic";
 

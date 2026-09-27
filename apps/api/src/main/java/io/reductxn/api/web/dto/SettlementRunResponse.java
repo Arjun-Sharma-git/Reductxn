@@ -10,7 +10,8 @@ import java.util.UUID;
  * The contract's {@code SettlementRun} schema, for {@code GET /v1/runs/{runId}}.
  *
  * <p><strong>Three of the contract's fields are absent, each for a stated reason rather than for brevity.</strong>
- * {@code reportingTotals} needs the group's reporting currency and a rate, and groups do not exist as tables yet;
+ * {@code reportingTotals} needs the group's reporting currency and a rate; the group is a row since ADR 0043 but
+ * this projection does not read it, and a total without a rate as-of is a figure nobody could restate (ADR 0021);
  * {@code fxRequirements} is the worker's derivation of what the group must obtain from outside, and re-deriving it
  * here is the drift ADR 0021 refuses - the FX legs are visible in the transfers instead, on the endpoint that exists
  * for exactly that; and {@code executedAt} has no source, because nothing records the instant a run reached

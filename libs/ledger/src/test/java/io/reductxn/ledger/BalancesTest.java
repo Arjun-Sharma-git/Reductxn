@@ -20,9 +20,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * The projection itself, and the measurement that L8 needs.
  *
  * <p>None of the assertions here carry an id, deliberately. L5's negative half - that no balance is
- * stored anywhere - is a property of a schema that does not exist yet, and L8's decision half needs the
- * run that does not exist yet, so both stay deferred in {@code PropertyCoverageTest}. Labelling them
- * from a test that cannot make the claim would be the exact overstatement this suite is built to avoid.
+ * stored anywhere - is a property of the database permissions the spec names rather than of this module,
+ * so it stays deferred in {@code PropertyCoverageTest}. L8's *decision* half left that map when the
+ * settlement worker arrived and is asserted there instead (by {@code SettlementBookkeepingTest}, which
+ * books a cross-currency commitment, executes the run and reads the clearing position back) - this
+ * paragraph went on saying the run did not exist for a while after it did. Labelling what a test cannot
+ * make true would be the exact overstatement this suite is built to avoid.
  * What is asserted is what genuinely holds: the figure is derived from postings, order cannot change it,
  * and a non-zero clearing position is reported rather than absorbed.
  */

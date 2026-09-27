@@ -7,9 +7,10 @@
  * because retrofitting RTL is a rewrite rather than a token change.
  *
  * Resolution follows the spec's order (section 3): a signed-in user's preference, then the URL, then
- * `Accept-Language`, then English. The first of those needs identity, which does not exist yet, so it is the one
- * step of the four that is not implemented - and it is a step *before* the URL rather than a missing branch, so
- * adding it later changes the order of two arguments rather than the shape of the code.
+ * `Accept-Language`, then English. The first of those needs a preference stored on the account, and no column holds
+ * one - sign-in itself exists since ADR 0042, which this comment denied for a while - so it is the one step of the
+ * four that is not implemented. It is a step *before* the URL rather than a missing branch, so adding it later
+ * changes the order of two arguments rather than the shape of the code.
  */
 
 export type Direction = 'ltr' | 'rtl';

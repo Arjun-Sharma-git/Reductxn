@@ -19,8 +19,9 @@ import io.reductxn.kernel.api.Result;
  * nothing does not spend a use: an invitation is spent by joining, and nobody joined (ADR 0041).
  *
  * <p>What this use case does <em>not</em> do is check whether the group exists, or whether the person is allowed to
- * join: there is no identity in this build, so there is no admin whose word would decide it, and the body is who the
- * caller says (ADR 0020, 0041).
+ * join: the code is the permission, so there is no admin whose word would decide it (ADR 0041). The joiner is the
+ * signed-in account rather than a field in the body (ADR 0047) - this paragraph said "the body is who the caller
+ * says" until the pass that corrected it, and by then the acceptance had become about its caller.
  */
 public interface AcceptInvite {
 

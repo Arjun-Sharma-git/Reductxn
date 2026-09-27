@@ -5,13 +5,17 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * A member's answer on a run, as {@code POST /v1/runs/{runId}/approve} carries it.
+ * A member's answer on a run, as {@code POST /v1/runs/{runId}/decisions} carries it. (The path was
+ * {@code /runs/{runId}/approve} until refusals were expressible; this javadoc went on saying {@code approve} for a
+ * while after the contract stopped.)
  *
- * <p><strong>The member is named by the client, and that is the identity gap rather than a decision.</strong> There
- * is no authentication in this build - an obligation's {@code debtorId} is equally client-supplied - and groups and
- * membership do not exist as tables yet (MASTER-PLAN's phase 3). What matters here is that this type does not
- * pretend otherwise: it records *who the client says answered*, and the worker decides whether that member's answer
- * counts. Fixing it is the identity slice, and it changes the boundary rather than this record.
+ * <p><strong>The member is named by the client, and that is a property of this operation rather than of the
+ * build.</strong> Authentication exists (ADR 0042) and the group writes resolve a caller (ADR 0043, 0047-0049), so
+ * this is the last operation whose *acting* member arrives in the body - an obligation's {@code debtorId} is
+ * client-supplied too, and it names the debt's party rather than its author. What matters here is that this type
+ * does not pretend otherwise: it records *who the client says answered*, and the run decides whether that member's
+ * answer counts (ADR 0016). Closing that boundary is the same change the group writes made, and it changes the
+ * boundary rather than this record.
  *
  * <p>{@code recordedAt} is non-null while the wire may not carry it, because the boundary is the only layer allowed
  * to read a clock (RULE B21): the controller substitutes "now" and everything below receives an instant, which is

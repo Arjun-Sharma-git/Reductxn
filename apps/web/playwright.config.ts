@@ -30,7 +30,8 @@ export default defineConfig({
    * serves the bundle on the first request, and a cold machine can take longer to answer that first request than a
    * warm one - so the timeout was measuring the machine, not the screen. A longer ceiling does not hide a real
    * failure (a wrong assertion still fails, four seconds later); it removes a source of noise that only appears
-   * where the suite matters most, which is a fresh checkout in a pipeline that does not exist yet.
+   * where the suite matters most, which is a fresh checkout in the pipeline (`.github/workflows/ci.yml`, ADR 0031).
+   * This comment said the pipeline did not exist yet, written a slice before it did.
    */
   expect: { timeout: 15_000 },
   use: {
