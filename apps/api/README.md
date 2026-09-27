@@ -116,9 +116,7 @@ same `security: []` the invitation preview has, for the same reason: the person 
 It answers the group's positions with the names the group recorded, and nothing else: no memos, no activity, no
 invitations, and nothing that can change anything. The two reads of a group's positions share one composition
 (`GroupPositions`) and differ only in who may ask - a membership, or a code - which is the split that keeps ADR 0039's
-"one computation" rule while adding a second reader. What is still open, in the same list: who may hand a code out (the
-`admin` role is recorded and nothing reads it), revocation (a link stops when its window closes and there is no way to
-stop one earlier), a window a caller chooses, and nothing still decides when a cycle is due - a group has no schedule.
+"one computation" rule while adding a second reader. **Who may hand a code out is decided rather than open (ADR 0056)**: any member, because a role is a word a member may mint - `POST /groups/{groupId}/members` adds anybody with any role in the vocabulary, including a new identity of the caller's own - so an admin-only check would be one the restricted party grants themselves, and a group that has members and no admin could make no code at all. What is still open in the same list: revocation (a link stops when its window closes and there is no way to stop one earlier), a window a caller chooses, and nothing still decides when a cycle is due - a group has no schedule.
 
 The sentence this paragraph used to carry - that a cross-currency obligation could not be stored because
 `obligations` had no quote columns - outlived the columns by several slices. Recorded here rather than quietly

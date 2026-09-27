@@ -137,9 +137,12 @@ is readable before it is spent.**
 - **ADR 0049's "what is still open" bullet is answered and amended there**, since it is the later statement of it. What
   remains open from it is the `execute` + rail-webhook *mechanism* list, which ADR 0050 and 0051 then served.
 - **The next question is named rather than implied**: who may hand a code out (the unread `admin` role), and whether a
-  group can share a *read* with somebody who must not join. The first is a policy over an existing column; the second is
-  a new kind of principal, and both are in the plan's open list rather than in this slice.
-
-  independently of a membership - and it is a feature rather than a permission, because it introduces a principal that
-  is not a user. Named in the plan rather than half-built here.
+  group can share a *read* with somebody who must not join. The first is a policy over an existing column; the second
+  looked like a new kind of principal - a token scoped to a read, revocable independently of a membership - and was
+  therefore a feature rather than a permission, because it would introduce a principal that is not a user. Both are in
+  the plan's open list rather than in this slice. **(This paragraph's second half was pasted in without its head and
+  read as an orphan for a day; ADR 0055 found it while quoting this ADR, and it is repaired here.)** Both were answered
+  the same day, and the second needed no new principal at all: the code already was the capability, so ADR 0055 added a
+  word (`grants`) rather than a credential. Who may hand one out is decided by ADR 0056, and the answer is "any member",
+  because the role is a word a member can mint.
 - **Group schedules.** Nothing still decides when a cycle is due, and this slice does not change that.
