@@ -27,3 +27,10 @@
   font-weight: var(--rn-weight-medium);
   border-block-end-color: var(--rn-accent);
 }
+
+/* The group's name above the navigation. It is the identifier when the API does not know the group - see GroupHeading. */
+.heading {
+  font-size: var(--rn-text-xl);
+  font-family: var(--rn-font-amount);
+  margin-block: var(--rn-space-5) var(--rn-space-3);
+}
