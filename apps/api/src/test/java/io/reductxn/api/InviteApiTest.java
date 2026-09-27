@@ -21,6 +21,7 @@ import java.util.Locale;
 import java.util.UUID;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
@@ -52,6 +53,7 @@ class InviteApiTest extends DatabaseTest {
 
     private static final String ALICE_PHONE = "+919812345678";
     private static final String BORIS_PHONE = "+919800000000";
+    private static final String CREATOR_PHONE = "+919899999998";
 
     @Autowired
     private WebApplicationContext context;
@@ -68,6 +70,17 @@ class InviteApiTest extends DatabaseTest {
     private UUID aliceId;
     private String boris;
 
+    /**
+     * The group's own member, separate from the people accepting codes.
+     *
+     * <p>It has to be somebody else, and the first version of this fixture got that wrong: making Alice a member so she
+     * could create a code turned every acceptance of hers into "the group already has you", which is a {@code 200} - so
+     * eleven tests that were about joining stopped testing joining. The creator is who the condition is about (ADR 0048);
+     * the invitee is who the invitation is for, and the two are different people in every one of these tests.
+     */
+    private String creator;
+    private UUID creatorId;
+
     /** Built from the framework rather than annotated: Spring Boot 4 no longer ships {@code @AutoConfigureMockMvc}. */
     @BeforeEach
     void buildMockMvc() {
@@ -76,6 +89,22 @@ class InviteApiTest extends DatabaseTest {
         alice = signedIn(ALICE_PHONE);
         aliceId = user(ALICE_PHONE);
         boris = signedIn(BORIS_PHONE);
+
+        creator = signedIn(CREATOR_PHONE);
+        creatorId = user(CREATOR_PHONE);
+
+        // The creator is in the group, because creating an invitation requires a member (ADR 0048). She is not the
+        // invitee: making her one would answer every acceptance below with "already a member".
+        memberOf(GROUP, creatorId);
+    }
+
+    /** A membership as the table holds it, for the group a caller has to be in before a code exists for it. */
+    private void memberOf(UUID group, UUID person) {
+        jdbc.update("""
+                INSERT INTO group_members (group_id, user_id, display_name, role, joined_at)
+                VALUES (?, ?, 'Creator', 'admin', TIMESTAMPTZ '2026-09-01 00:00:00+00')
+                ON CONFLICT DO NOTHING
+                """, group, person);
     }
 
     @Test
@@ -125,11 +154,12 @@ class InviteApiTest extends DatabaseTest {
                 // `admin` would be a privilege handed out by a default.
                 .andExpect(jsonPath("$.role").value("member"));
 
-        // The group now has them, which is the only thing that makes the acceptance meaningful.
+        // The group now has them, which is the only thing that makes the acceptance meaningful. Asserted by predicate,
+        // because the group's member who created the code is in the list as well - and asserting a position would make
+        // this depend on the order two memberships were written in.
         mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].displayName").value("Alice Rao"));
+                .andExpect(jsonPath("$[?(@.userId=='" + aliceId + "')].displayName", contains("Alice Rao")));
     }
 
     /**
@@ -147,11 +177,11 @@ class InviteApiTest extends DatabaseTest {
         accept(code, alice, "Alice").andExpect(status().isCreated());
         accept(code, alice, "Alice again").andExpect(status().isOk());
 
+        // The name the group first recorded stands: a second acceptance is not a rename, for the reason the members
+        // write is not an upsert - any caller could otherwise rename anybody by asking again. The group holds the member
+        // who created the code as well, so the row this is about is found by predicate rather than by position.
         mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
-                .andExpect(jsonPath("$", hasSize(1)))
-                // The name the group first recorded stands: a second acceptance is not a rename, for the reason the
-                // members write is not an upsert - any caller could otherwise rename anybody by asking again.
-                .andExpect(jsonPath("$[0].displayName").value("Alice"));
+                .andExpect(jsonPath("$[?(@.userId=='" + aliceId + "')].displayName", contains("Alice")));
 
         assertThat(usesOf(code), is(1));
     }
@@ -191,7 +221,10 @@ class InviteApiTest extends DatabaseTest {
                 // existed, and it is the *time* that stopped it.
                 .andExpect(jsonPath("$.code").value("api.invite_expired"));
 
-        mvc.perform(get("/v1/groups/{groupId}/members", GROUP)).andExpect(jsonPath("$", hasSize(0)));
+        mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
+                .andExpect(jsonPath("$", hasSize(1)))
+                // The caller and nobody else: the group had her before the request, and the invitation joined no one.
+                .andExpect(jsonPath("$[0].userId").value(creatorId.toString()));
     }
 
     /** An invitation that existed, is still in time, and has been spent as often as it allows. */
@@ -205,10 +238,10 @@ class InviteApiTest extends DatabaseTest {
                 .andExpect(status().isGone())
                 .andExpect(jsonPath("$.code").value("api.invite_exhausted"));
 
-        // Refused, so nobody was joined: an acceptance that cannot record a membership records nothing at all.
+        // Refused, so nobody was joined: an acceptance that cannot record a membership records nothing at all. The
+        // group still has the member who created the code, which is why this asks about Alice's row rather than a count.
         mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].displayName").value("Alice"));
+                .andExpect(jsonPath("$[?(@.userId=='" + aliceId + "')].displayName", contains("Alice")));
     }
 
     /** A code nobody holds. Not 410: there was never an invitation for the client to have used up. */
@@ -246,8 +279,11 @@ class InviteApiTest extends DatabaseTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("api.member_name_too_long"));
 
-        // And none of it joined anybody or spent anything.
-        mvc.perform(get("/v1/groups/{groupId}/members", GROUP)).andExpect(jsonPath("$", hasSize(0)));
+        // And none of it joined anybody or spent anything. One member, because the caller is one: what these refusals
+        // must not do is add somebody, so the assertion is that the group has nobody *new*.
+        mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].userId").value(creatorId.toString()));
         assertThat(usesOf(code), is(0));
     }
 
@@ -274,8 +310,11 @@ class InviteApiTest extends DatabaseTest {
         }
 
         // Refused before the write, so nothing joined and nothing was spent: an acceptance the server cannot attribute
-        // to a person records no membership, and a use spent by nobody would cost somebody else the invitation.
-        mvc.perform(get("/v1/groups/{groupId}/members", GROUP)).andExpect(jsonPath("$", hasSize(0)));
+        // to a person records no membership, and a use spent by nobody would cost somebody else the invitation. The only
+        // member is the one who created the code, and this asserts she is still the only one.
+        mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].userId").value(creatorId.toString()));
         assertThat(usesOf(code), is(0));
     }
 
@@ -291,21 +330,55 @@ class InviteApiTest extends DatabaseTest {
                 .andExpect(jsonPath("$.userId").value(aliceId.toString()));
 
         mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].userId").value(aliceId.toString()))
-                .andExpect(jsonPath("$[0].displayName").value("Alice"));
+                .andExpect(jsonPath("$[?(@.userId=='" + aliceId + "')].displayName", contains("Alice")));
     }
 
     @Test
     void aMalformedGroupIdIsRefusedWith400OnCreation() throws Exception {
-        mvc.perform(post("/v1/groups/{groupId}/invites", "not-a-uuid"))
+        mvc.perform(post("/v1/groups/{groupId}/invites", "not-a-uuid")
+                        .header("Authorization", "Bearer " + creator))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("api.request_incomplete"));
     }
 
+    /**
+     * Who may hand out a code, which is the policy the contract's description used to leave open.
+     *
+     * <p>It said, in as many words: "Anyone can create an invitation, and that is the recorded identity gap rather than a
+     * policy." The gap is closed now (ADR 0048), so the policy is this: a member of the group, because an invitation is a
+     * link a group gives to somebody it trusts.
+     */
+    @Test
+    void aStrangerCannotCreateAnInvitationForAGroup() throws Exception {
+        String stranger = signedIn("+919899999999");
+
+        mvc.perform(post("/v1/groups/{groupId}/invites", GROUP)
+                        .header("Authorization", "Bearer " + stranger))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_group"));
+
+        // Nothing minted: a refused creation leaves no code behind for anybody to find.
+        Integer codes = jdbc.queryForObject("SELECT count(*) FROM invitations", Integer.class);
+
+        assertThat(codes == null ? 0 : codes, is(0));
+    }
+
+    @Test
+    void aCreationWithNoSessionIsRefusedWith401() throws Exception {
+        mvc.perform(post("/v1/groups/{groupId}/invites", GROUP))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("api.not_signed_in"));
+
+        // Nothing minted, which is the difference between a refusal and a code somebody could have found.
+        Integer codes = jdbc.queryForObject("SELECT count(*) FROM invitations", Integer.class);
+
+        assertThat(codes == null ? 0 : codes, is(0));
+    }
+
     /** A code for {@link #GROUP}, from the operation itself - which is what a client actually calls. */
     private String create() throws Exception {
-        String body = mvc.perform(post("/v1/groups/{groupId}/invites", GROUP))
+        String body = mvc.perform(post("/v1/groups/{groupId}/invites", GROUP)
+                        .header("Authorization", "Bearer " + creator))
                 .andExpect(status().isCreated())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.code").exists())

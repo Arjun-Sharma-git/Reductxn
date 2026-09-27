@@ -28,8 +28,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * the client's tests stub the API, and this module had never asked for members. A promise in a contract with nothing
  * behind it is a bug that both suites agree is fine, which is what makes this test the interesting kind (ADR 0035).
  *
- * <p>The rows are written through the endpoint where the test is about the read, and through SQL where it needs an
- * instant the clock does not choose - the ordering test is the one that cares.
+ * <p>The rows are written as rows, through SQL, including the ones a test would otherwise record through the endpoint:
+ * since ADR 0048 that write requires a member of the group, and a read test whose fixture had to join first would be
+ * counting its fixture. The write has its own class against the same database, and what this read serves is the same rows
+ * whoever wrote them.
  */
 @SpringBootTest
 class ReadGroupMembersApiTest extends DatabaseTest {
@@ -126,20 +128,24 @@ class ReadGroupMembersApiTest extends DatabaseTest {
                 .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("groupId")));
     }
 
-    /** A member recorded through the endpoint, so the fixture is the write path rather than a copy of it. */
-    private void record(UUID groupId, UUID userId, String displayName) throws Exception {
-        record(groupId, userId, displayName, null);
+    /**
+     * A member written as a row.
+     *
+     * <p>This used to go through the endpoint, "so the fixture is the write path rather than a copy of it" - and that
+     * stopped being the right call in ADR 0048, when the write became restricted to a member of the group. A read test
+     * whose fixture had to join the group first would count its own fixture in every assertion, and the counts are the
+     * assertions here. The write's rules have their own class, against the same database (`AddMemberApiTest`); this one
+     * is about what the read serves, and what it serves is the same rows whoever wrote them.
+     */
+    private void record(UUID groupId, UUID userId, String displayName) {
+        record(groupId, userId, displayName, "member");
     }
 
-    private void record(UUID groupId, UUID userId, String displayName, String role) throws Exception {
-        String body = role == null
-                ? "{\"userId\":\"" + userId + "\",\"displayName\":\"" + displayName + "\"}"
-                : "{\"userId\":\"" + userId + "\",\"displayName\":\"" + displayName + "\",\"role\":\"" + role + "\"}";
-
-        mvc.perform(post("/v1/groups/{groupId}/members", groupId)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
-                .andExpect(status().isCreated());
+    private void record(UUID groupId, UUID userId, String displayName, String role) {
+        jdbc.update("""
+                INSERT INTO group_members (group_id, user_id, display_name, role, joined_at)
+                VALUES (?, ?, ?, ?, TIMESTAMPTZ '2026-09-01 00:00:00+00')
+                """, groupId, userId, displayName, role);
     }
 
     private void joinedAt(UUID groupId, UUID userId, String displayName, Instant joined) {

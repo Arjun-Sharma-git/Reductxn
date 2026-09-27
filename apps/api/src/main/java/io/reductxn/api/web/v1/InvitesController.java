@@ -75,16 +75,30 @@ public class InvitesController {
      */
     @PostMapping("/groups/{groupId}/invites")
     public ResponseEntity<Object> create(@PathVariable String groupId, HttpServletRequest http) {
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
         DomainError malformed = malformedGroupId(groupId);
 
         if (malformed != null) {
             return problem(malformed, http.getRequestURI());
         }
 
-        CreatedInvite created = createInvite.create(new NewInvite(UUID.fromString(groupId), clock.instant()));
+        Result<CreatedInvite> created = createInvite.create(
+                ((Result.Ok<SignedInUser>) caller).value().id(),
+                new NewInvite(UUID.fromString(groupId), clock.instant()));
+
+        if (created instanceof Result.Failure<CreatedInvite> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
+        CreatedInvite invite = ((Result.Ok<CreatedInvite>) created).value();
 
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(new InviteResponse(created.code(), created.expiresAt(), created.maxUses()));
+                .body(new InviteResponse(invite.code(), invite.expiresAt(), invite.maxUses()));
     }
 
     /**

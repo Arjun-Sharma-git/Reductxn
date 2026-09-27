@@ -366,11 +366,14 @@ paths:
         Writes one row of `group_members`: who the member is, what the group calls them, and whether the group
         calls them an admin.
 
-        **No `admin only`, because there is no admin.** This summary used to claim "Add a member directly (admin
-        only)", which is a check this build cannot make: there is no identity, so there is nobody whose `admin`
-        row would authorise anything. The endpoint is unauthorised and says so - the stance the decision endpoint
-        already takes, where the member is whoever the body says (ADR 0020) - because identity is the recorded
-        gap, and a summary promising a check that does not exist is worse than one admitting there is none.
+        **A member of the group may add somebody, and that is the rule rather than `admin only`** (ADR 0048). This
+        paragraph used to say the endpoint was unauthorised: there was no identity, so no `admin` row could authorise
+        anything, and the summary admitted that rather than promising a check it could not make. Identity exists now, so
+        the caller is resolved and must be in the group - and the check is *membership* rather than the role, because the
+        role is recorded and nothing reads it yet: an admin-only rule here would invent a privilege whose only effect
+        would be to make this operation unusable for everybody the invitation flow creates, which is every member but
+        the group's creator (ADR 0043). A caller who is not in the group gets the `404` below, which is one answer for
+        "no such group" and "not yours", so a guessed id cannot be tested by comparing two refusals.
 
         **Idempotent by rule rather than by a key.** `(groupId, userId)` is unique, so a second request for the
         same member answers `200` with the member that exists instead of recording a second one, and a retry whose
@@ -394,6 +397,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Member' }
         '400': { $ref: '#/components/responses/Problem' }
+        # Both of these arrived with the rule that a member is who may add somebody (ADR 0048). The 404 is one answer for
+        # "no such group" and "not yours", so a guessed id cannot be tested by comparing two refusals.
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /groups/{groupId}/invites:
     parameters:
@@ -416,9 +423,11 @@ paths:
         across the deployment rather than within the group, and the next operation's shape is why: acceptance is
         addressed by the code alone, so the code has to say which group it is for.
 
-        **Anyone can create an invitation, and that is the recorded identity gap rather than a policy.** There is no
-        authentication in this build, so nothing here decides who may invite whom. Recorded, not papered over
-        (ADR 0020, 0035, 0041).
+        **A member of the group may create one, because the group is what an invitation is for** (ADR 0048). This
+        paragraph used to be the recorded identity gap said out loud - "anyone can create an invitation, and that is the
+        recorded identity gap rather than a policy" - and the policy it left open is now decided: a code is a link a group
+        hands to somebody it trusts, so the caller must be in the group. One who is not gets the `404` below, which is one
+        answer for "no such group" and "not yours", so a guessed id cannot be tested by comparing two refusals.
       responses:
         '201':
           description: Invite created
@@ -426,6 +435,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Invite' }
         '400': { $ref: '#/components/responses/Problem' }
+        # A member of the group is who may create one, which is the policy this operation's description used to leave
+        # open (ADR 0048). The 404 is one answer for "no such group" and "not yours".
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /invites/{code}/accept:
     post:

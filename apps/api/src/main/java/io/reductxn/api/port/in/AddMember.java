@@ -1,13 +1,18 @@
 package io.reductxn.api.port.in;
 
+import io.reductxn.kernel.api.Result;
+
+import java.util.UUID;
+
 /**
- * The use case: record a member of a group.
+ * The use case: record a member of a group, if the caller is one of them.
  *
- * <p><strong>No {@code Result}, because nothing here can fail.</strong> The boundary refuses a malformed request
- * before this is called, and the store cannot refuse: {@code (groupId, userId)} is the table's primary key and the
- * insert is {@code ON CONFLICT DO NOTHING}, so a membership that already exists is a {@code 200} with the row as it
- * stands rather than a refusal. A refusal for a duplicate would be this use case reporting an idempotent call as a
- * mistake, which is the shape P8 exists to avoid.
+ * <p><strong>It answers a {@code Result} since ADR 0048, and the reason it used not to is the point.</strong> This
+ * interface described itself as unable to fail, because the store cannot refuse: {@code (groupId, userId)} is the table's
+ * primary key and the insert is {@code ON CONFLICT DO NOTHING}, so a membership that already exists is a {@code 200} with
+ * the row as it stands rather than a refusal (P8). What can refuse is the *caller* - adding somebody to a group is an act
+ * within that group - so the condition arrived from outside the write, which is why the shape changed here and the store
+ * did not.
  *
  * <p><strong>A member is data, not a consequence of activity.</strong> The alternative considered was deriving the
  * list from the parties of the group's obligations, which needs no table and no write - and it is wrong for two
@@ -18,9 +23,12 @@ package io.reductxn.api.port.in;
 public interface AddMember {
 
     /**
-     * Records the membership if the group does not already have it, and answers with the member either way.
+     * Records the membership if {@code callerId} is a member of the group and the group does not already have
+     * {@code member}, and answers with the member either way.
      *
-     * @return the member as stored, with {@link AddedMember#created()} saying whether this call recorded them
+     * @param callerId who is asking, from the boundary's session - the condition this use case gained in ADR 0048
+     * @return the member as stored, with {@link AddedMember#created()} saying whether this call recorded them, or
+     *         {@code GroupRefusals.NoSuchGroup} when the caller is not in the group
      */
-    AddedMember add(NewMember member);
+    Result<AddedMember> add(UUID callerId, NewMember member);
 }

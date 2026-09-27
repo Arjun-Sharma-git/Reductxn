@@ -24,6 +24,11 @@ const CODE = 'JKM2345P';
 test('the members screen makes a code and says what it is handing out', async ({ page }) => {
   await stubMembersApi(page);
   await stubInvitesApi(page);
+  await stubIdentityApi(page);
+
+  // Signed in, because a member of the group is who may create a code (ADR 0048): the stub refuses the creation without
+  // the session's token, so this test also says the client sent one.
+  await signIn(page);
 
   await page.goto(MEMBERS_URL);
   await page.getByRole('button', { name: 'Make a code' }).click();
