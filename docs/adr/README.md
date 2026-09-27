@@ -51,3 +51,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0043 | A group becomes a row, and a caller becomes required | accepted |
 | 0044 | A group's history is derived, and membership is the whole condition | accepted |
 | 0045 | Voiding is a transition, a refusal that names nothing, and idempotence by state | accepted |
+| 0046 | A quote is locked by recording it, so the second door is removed | accepted |
