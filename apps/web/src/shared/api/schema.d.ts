@@ -947,7 +947,26 @@ export interface paths {
             };
         };
         put?: never;
-        /** Record an obligation (a commitment, not a money movement) */
+        /**
+         * Record an obligation (a commitment, not a money movement)
+         * @description Records what one member owes another, and books what that does to the group's ledger.
+         *
+         *     **A member of the group may record one, and the recording is attributed to them** (ADR 0049). A caller who is not
+         *     in the group named in the body gets the `404` below, which is one answer for "no such group" and "not yours", so a
+         *     guessed id cannot be tested by comparing refusals - the same reading this operation's own `void` has used since
+         *     ADR 0045. The `debtorId` and `creditorId` are the two *parties* and are not the caller: a member records a
+         *     commitment between any two members of their group, including two other people.
+         *
+         *     **Attribution is part of the entry, not a column beside it.** The member who recorded the commitment travels to
+         *     the ledger as the journal entry's `createdBy`, which the entry's hash covers (L4) - so what the chain commits to
+         *     includes who caused it, and an offline verifier recomputing the chain from its own rows gets the same answer. That
+         *     field was `null` for every recorded obligation until this slice, with a comment saying no identity module existed;
+         *     it has existed since ADR 0042.
+         *
+         *     **Idempotent on `Idempotency-Key`**, per the header's own description: a replay answers with the obligation the
+         *     first attempt recorded and writes nothing - not even a second attempt at attribution, because the key identifies
+         *     an obligation rather than a request.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -995,6 +1014,8 @@ export interface paths {
                         "application/json": components["schemas"]["Obligation"];
                     };
                 };
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
                 422: components["responses"]["Problem"];
                 /** @description Group ingestion rate limit exceeded */
                 429: {
@@ -1226,9 +1247,13 @@ export interface paths {
          *     later, which is why there is not one: the refusal belongs to the worker, when it computes.
          *
          *     What a client sees after this is a cycle to wait on, and the group's runs
-         *     (`GET /groups/{groupId}/runs`) once it is computed. There is no `404` for a group nobody has
-         *     heard of: groups are not tables in this build, so "no such group" cannot be told apart from a
-         *     group whose books are empty, and opening a cycle for either is the same act.
+         *     (`GET /groups/{groupId}/runs`) once it is computed. **A member of the group may open one, and since ADR 0049 a
+         *     caller who is not gets the `404` below** - one answer for "no such group" and "not yours", so a guessed id
+         *     cannot be tested by comparing two refusals. This paragraph used to say the opposite, in as many words: "There is
+         *     no `404` for a group nobody has heard of: groups are not tables in this build, so 'no such group' cannot be told
+         *     apart from a group whose books are empty". That was true when it was written and false since ADR 0043 gave groups
+         *     a table and a creator - and a description that disagrees with the code is worse than no description, which is
+         *     what RULE B20 means by a code being contract surface.
          */
         post: {
             parameters: {
@@ -1276,6 +1301,8 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
             };
         };
         delete?: never;

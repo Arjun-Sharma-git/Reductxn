@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { MEMBERS, WAITING_RUN, stubSettlementApi } from './stubs';
+import { MEMBERS, WAITING_RUN, signIn, stubIdentityApi, stubSettlementApi } from './stubs';
 
 /**
  * The approval path, end to end in a browser: find a run, read it, answer it.
@@ -25,6 +25,12 @@ async function open(page: Page, member = ASHA): Promise<void> {
 
 test('closes the group’s books and sees the cycle waiting to be computed', async ({ page }) => {
   const api = await stubSettlementApi(page);
+  await stubIdentityApi(page);
+
+  // Signed in, because closing a group's books is a member's act (ADR 0049) and the stub refuses the write without the
+  // session's token. The runs read below is untouched by the rule, so nothing else in this file needs a session.
+  await signIn(page);
+
   await page.goto(RUNS);
 
   await page.getByLabel('Close the books at').fill('2026-10-31T23:59');

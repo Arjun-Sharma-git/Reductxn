@@ -2,8 +2,16 @@ package io.reductxn.api.port.in;
 
 import io.reductxn.kernel.api.Result;
 
+import java.util.UUID;
+
 /**
  * The use case: record a member's commitment, and book what it does to the ledger.
+ *
+ * <p><strong>Since ADR 0049 it is also where "a member of the group" is decided, and where the commitment is
+ * attributed.</strong> Recording a commitment is an act within a group - the same reading its own void has had since
+ * ADR 0045 - so the caller must be in the group, asked of {@code Groups.isMember} before anything is written. And the
+ * caller's id travels on as {@code Commitment.createdBy}, which is what turns "no identity module yet, so nothing can
+ * say who submitted it" (the comment this replaced) into a fact the ledger carries.
  *
  * <p>Returns a {@link Result} rather than throwing, because the failures this use case can produce are
  * expected ones: an unknown currency, a member owing themselves, an amount that cannot be posted. The
@@ -21,12 +29,14 @@ import io.reductxn.kernel.api.Result;
 public interface RecordObligation {
 
     /**
-     * Records the commitment and books the entries it produces.
+     * Records the commitment and books the entries it produces, if the caller is a member of the group.
      *
      * <p>Idempotent on the request's key: a second call with the same key in the same group answers with
      * what the first one recorded, and writes nothing.
      *
+     * @param callerId who is asking, from the boundary's session - the member this commitment is attributed to
+     *                 (ADR 0049)
      * @return the obligation as recorded, or the reason it was refused
      */
-    Result<RecordedObligation> record(NewObligation request);
+    Result<RecordedObligation> record(UUID callerId, NewObligation request);
 }

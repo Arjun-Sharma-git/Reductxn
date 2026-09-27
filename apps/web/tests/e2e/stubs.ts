@@ -347,6 +347,22 @@ export async function stubObligationsApi(
       return;
     }
 
+    // A member of the group is who may record into it (ADR 0049), so the stub refuses a write without the session's
+    // token exactly as the API does - the client sends the token on every request, and this is where that is proved.
+    if (route.request().headers()['authorization'] !== `Bearer ${TOKEN_PAIR.accessToken}`) {
+      return route.fulfill({
+        status: 401,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'about:blank',
+          title: 'Unauthorized',
+          status: 401,
+          detail: 'stubbed refusal',
+          code: 'api.not_signed_in',
+        }),
+      });
+    }
+
     const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
 
     posted.push({
@@ -631,6 +647,22 @@ export async function stubSettlementApi(
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(cycles) });
 
       return;
+    }
+
+    // Closing a group's books is a member's act (ADR 0049): the stub refuses a write without the session's token, as
+    // the API does. The read is untouched, which is the half of the gap this slice deliberately left alone.
+    if (route.request().headers()['authorization'] !== `Bearer ${TOKEN_PAIR.accessToken}`) {
+      return route.fulfill({
+        status: 401,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'about:blank',
+          title: 'Unauthorized',
+          status: 401,
+          detail: 'stubbed refusal',
+          code: 'api.not_signed_in',
+        }),
+      });
     }
 
     const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;

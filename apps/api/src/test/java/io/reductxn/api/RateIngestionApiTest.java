@@ -51,6 +51,8 @@ class RateIngestionApiTest extends DatabaseTest {
 
     private static final String ECB_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
 
+    private static final String CALLER_PHONE = "+919812345678";
+
     @Autowired
     private WebApplicationContext context;
 
@@ -58,6 +60,10 @@ class RateIngestionApiTest extends DatabaseTest {
     private IngestRates ingestRates;
 
     private MockMvc mvc;
+
+    private String caller;
+    private UUID callerId;
+
     private Path feedFile;
 
     @BeforeEach
@@ -68,6 +74,28 @@ class RateIngestionApiTest extends DatabaseTest {
         // that makes this test independent of the bank being up.
         feedFile = Files.createTempFile("eurofxref-daily", ".xml");
         Files.writeString(feedFile, EcbFeedDocument.DAILY);
+    }
+
+    /**
+     * A signed-in member of the group, because a member of the group is who may write to its books (ADR 0049).
+     *
+     * <p>The membership is written as a row: it is a precondition of the requests these tests make rather than their
+     * subject, and the tests that assert the rule itself belong to the classes that own each write.
+     */
+    @BeforeEach
+    void signInACaller() {
+        caller = signedIn(CALLER_PHONE);
+        callerId = user(CALLER_PHONE);
+        memberOf(GROUP);
+    }
+
+    /** A membership as a row, because {@code groups.isMember} reads exactly this. */
+    private void memberOf(UUID group) {
+        jdbc.update("""
+                INSERT INTO group_members (group_id, user_id, display_name, role, joined_at)
+                VALUES (?, ?, 'Caller', 'admin', TIMESTAMPTZ '2026-09-01 00:00:00+00')
+                ON CONFLICT DO NOTHING
+                """, group, callerId);
     }
 
     @Test
@@ -153,6 +181,7 @@ class RateIngestionApiTest extends DatabaseTest {
         // refused rather than converted at a guess. The report is what tells an operator why.
         org.springframework.test.web.servlet.ResultActions refused = mvc.perform(post("/v1/obligations")
                 .header("Idempotency-Key", "rouble")
+                .header("Authorization", "Bearer " + caller)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -213,6 +242,7 @@ class RateIngestionApiTest extends DatabaseTest {
 
         return mvc.perform(post("/v1/obligations")
                 .header("Idempotency-Key", key)
+                .header("Authorization", "Bearer " + caller)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {

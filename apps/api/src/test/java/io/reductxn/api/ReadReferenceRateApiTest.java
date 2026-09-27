@@ -40,14 +40,42 @@ class ReadReferenceRateApiTest extends DatabaseTest {
     private static final UUID ASHA = new UUID(0L, 301L);
     private static final UUID BHAVESH = new UUID(0L, 302L);
 
+    private static final String CALLER_PHONE = "+919812345678";
+
     @Autowired
     private WebApplicationContext context;
 
     private MockMvc mvc;
 
+    private String caller;
+    private UUID callerId;
+
+
     @BeforeEach
     void buildMockMvc() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
+    }
+
+    /**
+     * A signed-in member of the group, because a member of the group is who may write to its books (ADR 0049).
+     *
+     * <p>The membership is written as a row: it is a precondition of the requests these tests make rather than their
+     * subject, and the tests that assert the rule itself belong to the classes that own each write.
+     */
+    @BeforeEach
+    void signInACaller() {
+        caller = signedIn(CALLER_PHONE);
+        callerId = user(CALLER_PHONE);
+        memberOf(GROUP);
+    }
+
+    /** A membership as a row, because {@code groups.isMember} reads exactly this. */
+    private void memberOf(UUID group) {
+        jdbc.update("""
+                INSERT INTO group_members (group_id, user_id, display_name, role, joined_at)
+                VALUES (?, ?, 'Caller', 'admin', TIMESTAMPTZ '2026-09-01 00:00:00+00')
+                ON CONFLICT DO NOTHING
+                """, group, callerId);
     }
 
     @Test
@@ -81,6 +109,7 @@ class ReadReferenceRateApiTest extends DatabaseTest {
         // learns that this cannot be settled in before filling in the form rather than after.
         mvc.perform(post("/v1/obligations")
                         .header("Idempotency-Key", "stale-1")
+                        .header("Authorization", "Bearer " + caller)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body("USD")))
                 .andExpect(status().isUnprocessableContent())
@@ -105,6 +134,7 @@ class ReadReferenceRateApiTest extends DatabaseTest {
 
         mvc.perform(post("/v1/obligations")
                         .header("Idempotency-Key", "hinted-1")
+                        .header("Authorization", "Bearer " + caller)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body("USD")))
                 .andExpect(status().isCreated())

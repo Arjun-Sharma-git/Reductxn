@@ -155,12 +155,23 @@ class ReadGroupCyclesApiTest extends DatabaseTest {
                 .andExpect(jsonPath("$.length()").value(1));
     }
 
-    /** A cycle asked for through the endpoint, so the fixture is the write path rather than a copy of it. */
-    private void open(UUID groupId, Instant asOf) throws Exception {
-        mvc.perform(post("/v1/groups/{groupId}/cycles", groupId)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"asOf\":\"" + asOf.toString() + "\"}"))
-                .andExpect(status().isCreated());
+    /**
+     * A cycle written as a row.
+     *
+     * <p>This used to go through the endpoint, so the fixture was the write path rather than a copy of it. That stopped
+     * being the right call in ADR 0049, when opening a cycle became a member's act: a read test whose fixture had to
+     * join the group first would count its own fixture in every assertion, and the counts are what this class asserts.
+     * The write's rules are {@code OpenCycleApiTest}'s subject, against the same database; what this read serves is the
+     * same rows whoever wrote them.
+     *
+     * <p>{@code created_at} is the clock's now here, and only where a test does not care: the ordering test writes its
+     * instants explicitly, through {@link #cycleOpenedAt}, because that is the one that does.
+     */
+    private void open(UUID groupId, Instant asOf) {
+        jdbc.update("""
+                INSERT INTO settlement_cycles (id, group_id, as_of, created_at)
+                VALUES (?, ?, ?::timestamptz, now())
+                """, UUID.randomUUID(), groupId, toOffset(asOf));
     }
 
     private UUID cycleOpenedAt(UUID groupId, Instant asOf, Instant openedAt) {

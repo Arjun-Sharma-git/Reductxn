@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { MEMBERS, stubObligationsApi } from './stubs';
+import { MEMBERS, signIn, stubIdentityApi, stubObligationsApi } from './stubs';
 
 /**
  * Recording a commitment, in a browser, with the API stubbed so that the *requests* can be inspected.
@@ -40,6 +40,12 @@ test('lists the group’s commitments with names rather than identifiers', async
 test('shows the new commitment before the server has answered, then the server’s row', async ({ page }) => {
   // A deliberately slow endpoint, so the optimistic row is observable rather than a race the test usually wins.
   await stubObligationsApi(page, { delayMs: 1500, list: [] });
+  await stubIdentityApi(page);
+
+  // Signed in, because a member of the group is who may record into it (ADR 0049) - and the stub refuses the write
+  // without the session's token, so this test also says the client sent one.
+  await signIn(page);
+
   await page.goto(URL);
 
   await fill(page, '1250.00');
@@ -84,6 +90,9 @@ test('offers a retry after a 503, and the retry carries the same idempotency key
   const posted = await stubObligationsApi(page, {
     behaviour: { kind: 'refuse', code: 'fx.rate_unavailable', status: 503 },
   });
+  await stubIdentityApi(page);
+  await signIn(page);
+
   await page.goto(URL);
 
   await fill(page, '1250.00');
@@ -109,6 +118,10 @@ test('does not offer a retry after a 422, because the answer would be the same',
   const posted = await stubObligationsApi(page, {
     behaviour: { kind: 'refuse', code: 'ledger.currency_mismatch', status: 422 },
   });
+  await stubIdentityApi(page);
+  // Signed in for the same reason the recording test is: the write requires a member (ADR 0049).
+  await signIn(page);
+
   await page.goto(URL);
 
   await fill(page, '1250.00', 'INR');
