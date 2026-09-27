@@ -913,17 +913,6 @@ function withDates(
 
 export type Invite = paths['/groups/{groupId}/invites']['post']['responses']['201']['content']['application/json'];
 
-/** A code with a week to live and no limit, which is what this deployment's creation operation produces. */
-export const INVITE: Invite = {
-  code: 'JKM2345P',
-  expiresAt: '2026-10-03T09:00:00Z',
-};
-
-export type InviteRecorder = {
-  /** Every acceptance the screen sent, as the body the server would have read. */
-  readonly acceptances: readonly string[];
-};
-
 /**
  * The group a code in this suite joins.
  *
@@ -931,6 +920,54 @@ export type InviteRecorder = {
  * other specs open by path (`3f7c1c1e-...`), so "the link goes to the group you joined" is a claim a test can follow.
  */
 export const GROUP_WITH_A_CODE = '3f7c1c1e-0d2a-4a5e-9a6f-6c1d2f4b8e10';
+
+/** A code with a week to live and no limit, which is what this deployment's creation operation produces. */
+export const INVITE: Invite = {
+  code: 'JKM2345P',
+  grants: 'membership',
+  expiresAt: '2026-10-03T09:00:00Z',
+};
+
+/** A share link: the same shape, granting reading rather than membership (ADR 0055). */
+export const SHARE: Invite = {
+  code: 'LOOKAT22',
+  grants: 'read',
+  expiresAt: '2026-10-03T09:00:00Z',
+};
+
+/** What a share link shows: the group's positions with the names the group recorded. */
+export const SHARED_VIEW: paths['/shared/{code}']['get']['responses']['200']['content']['application/json'] = {
+  code: SHARE.code,
+  expiresAt: SHARE.expiresAt,
+  generatedAt: '2026-09-27T12:00:00Z',
+  group: { id: GROUP_WITH_A_CODE, name: 'Flat 3B', memberCount: 4 },
+  positions: [
+    {
+      memberId: '11111111-1111-4111-8111-111111111111',
+      displayName: 'Asha Menon',
+      direction: 'pay',
+      net: { amountMinor: 12_345_678, currency: 'INR' },
+    },
+    {
+      memberId: '22222222-2222-4222-8222-222222222222',
+      displayName: 'Bhavesh Rao',
+      direction: 'receive',
+      net: { amountMinor: 12_345_678, currency: 'INR' },
+    },
+    {
+      // No name: the currency clearing account, or somebody the group's membership does not name. The screen shows the
+      // identifier and the footnote says which two things it might be.
+      memberId: '99999999-9999-4999-8999-999999999999',
+      direction: 'flat',
+      net: { amountMinor: 0, currency: 'INR' },
+    },
+  ],
+};
+
+export type InviteRecorder = {
+  /** Every acceptance the screen sent, as the body the server would have read. */
+  readonly acceptances: readonly string[];
+};
 
 /**
  * The invite API: making a code, and spending one.
@@ -950,6 +987,8 @@ export async function stubInvitesApi(
      * a group that exists only as rows, whose preview has no name to show at all (ADR 0043).
      */
     readonly group?: { readonly id: string; readonly name?: string | null; readonly memberCount?: number };
+    /** What the code grants, so a spec can check the screen that shows what it is for. Guest codes are a share link. */
+    readonly grants?: 'membership' | 'read';
   } = {},
 ): Promise<InviteRecorder> {
   const acceptances: string[] = [];
@@ -978,6 +1017,7 @@ export async function stubInvitesApi(
       contentType: 'application/json',
       body: JSON.stringify({
         code: INVITE.code,
+        grants: options.grants ?? 'membership',
         expiresAt: INVITE.expiresAt,
         group: {
           id: options.group?.id ?? GROUP_WITH_A_CODE,
@@ -1055,6 +1095,71 @@ export async function stubInvitesApi(
   });
 
   return { acceptances };
+}
+
+// --- Share links ---------------------------------------------------------------------------------------
+
+export type ShareRecorder = {
+  /** The codes the screen asked for, so a test can see which link was made rather than assumed. */
+  readonly created: readonly string[];
+};
+
+/**
+ * The share-link API: making a link, and what it shows (ADR 0055).
+ *
+ * **Making one requires a session, and reading one must not have one.** That asymmetry is the operation: a link is
+ * something a member hands out, and the read is what the person they handed it to does - usually without an account
+ * here at all. The stub enforces both directions, so a spec that shows a group's positions to a signed-out visitor has
+ * proved the read needs no credential, and a spec that makes a link has proved the token was sent.
+ *
+ * The creation is a POST, like the invitation's, and it is registered on the group's path rather than on the shared one:
+ * a link is addressed by its code only once it exists.
+ */
+export async function stubSharesApi(
+  page: Page,
+  options: { readonly refusal?: { readonly status: number; readonly code: string } } = {},
+): Promise<ShareRecorder> {
+  const created: string[] = [];
+
+  await page.route('**/v1/groups/*/shares', (route) => {
+    if (!isSignedIn(route)) {
+      return route.fulfill(NOT_SIGNED_IN);
+    }
+
+    created.push(new URL(route.request().url()).pathname);
+
+    return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(SHARE) });
+  });
+
+  // Reading a link: **no token check at all**, deliberately. The contract gives both code reads `security: []`, and a
+  // stub that demanded a session here would make the operation's whole reason untestable.
+  await page.route('**/v1/shared/*', (route) => {
+    if (options.refusal !== undefined) {
+      return route.fulfill({
+        status: options.refusal.status,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'about:blank',
+          title: options.refusal.status === 422 ? 'Unprocessable Content' : 'Not Found',
+          status: options.refusal.status,
+          detail: 'stubbed refusal',
+          code: options.refusal.code,
+        }),
+      });
+    }
+
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(SHARED_VIEW) });
+  });
+
+  // The currency catalogue, because an amount cannot be rendered without its exponent - and the screen reports a
+  // catalogue it could not read rather than printing a figure with the wrong scale. Registering it here rather than
+  // reusing `stubApi` is deliberate: that helper signs the page in, and this read's whole point is that it needs no
+  // session at all.
+  await page.route('**/v1/currencies', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CURRENCIES) }),
+  );
+
+  return { created };
 }
 
 // --- Identity ------------------------------------------------------------------------------------------

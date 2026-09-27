@@ -71,6 +71,7 @@ public class ReadInviteService implements ReadInvite {
 
         return Result.ok(new InvitePreview(
                 code,
+                invite.grants(),
                 invite.expiresAt(),
                 invite.maxUses(),
                 new InvitePreview.Group(invite.groupId(), invite.groupName(), invite.memberCount())));

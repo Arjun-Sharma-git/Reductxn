@@ -4,6 +4,7 @@ import io.reductxn.api.port.in.AcceptInvite;
 import io.reductxn.api.port.in.AcceptedInvitation;
 import io.reductxn.api.port.in.AddedMember;
 import io.reductxn.api.port.in.Invitation;
+import io.reductxn.api.port.in.InvitationGrant;
 import io.reductxn.api.port.in.InviteRefusals;
 import io.reductxn.api.port.in.NewMember;
 import io.reductxn.api.port.out.GroupMembers;
@@ -69,6 +70,13 @@ public class AcceptInviteService implements AcceptInvite {
         }
 
         Invitation invite = found.get();
+
+        // Second, because it is the other thing about the code's *nature* rather than about its state: a share link does
+        // not join anybody, and no window makes it able to (ADR 0055). Answering 422 rather than 404 is deliberate - the
+        // refusal names the true condition because the caller already holds the code.
+        if (invite.grants() != InvitationGrant.MEMBERSHIP) {
+            return Result.fail(new InviteRefusals.NotAMembership(code));
+        }
 
         // Half-open, like every window in this codebase: an acceptance exactly at the expiry instant is too late, and
         // the instant one invitation ends is the instant the next one could begin.

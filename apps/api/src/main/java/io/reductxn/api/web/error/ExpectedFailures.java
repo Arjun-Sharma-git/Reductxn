@@ -96,6 +96,12 @@ public final class ExpectedFailures {
             Map.entry(InviteRefusals.InviteExpired.CODE, HttpStatus.GONE),
             Map.entry(InviteRefusals.InviteExhausted.CODE, HttpStatus.GONE),
 
+            // A code that grants reading rather than membership, and the other way round: each operation refuses the
+            // other's grant (ADR 0055). 422 because the request is well formed and understood, the answer is no, and
+            // asking again with the same code changes nothing - the reading `ObligationRefusals.SameParty` carries.
+            Map.entry(InviteRefusals.NotAMembership.CODE, HttpStatus.UNPROCESSABLE_CONTENT),
+            Map.entry(InviteRefusals.NotAShare.CODE, HttpStatus.UNPROCESSABLE_CONTENT),
+
             // A conflict with what is already on the record: this member has answered this run, and an answer is
             // final. 409 rather than 422, because the request is well-formed and could have succeeded earlier - the
             // state of the world is what refuses it.

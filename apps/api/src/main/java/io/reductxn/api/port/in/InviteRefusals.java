@@ -69,9 +69,10 @@ public final class InviteRefusals {
         }
     }
 
-    /** The invitation existed, its window is open, and it has been spent. */
+    /**
+     * The invitation existed, its window is open, and it has been spent.
+     */
     public record InviteExhausted(String code) implements DomainError {
-
         public static final String CODE = "api.invite_exhausted";
 
         public InviteExhausted {
@@ -87,6 +88,59 @@ public final class InviteRefusals {
         public String message() {
             return "the invitation " + code + " has been used as many times as it allows, so it no longer joins "
                     + "anybody. Ask the group for a current code";
+        }
+    }
+
+    /**
+     * The code is real, it is in time, and it does not join anybody: it is a share link (ADR 0055).
+     *
+     * <p><strong>The refusal names the true condition, which is the opposite of what every other refusal in this module
+     * does with a missing id.</strong> {@code api.no_such_group} and {@code api.no_such_run} answer "does not exist" and
+     * "not yours" identically, because a group id and a run id can be guessed and compared - telling two conditions
+     * apart would let somebody learn which ids are real. A **code** cannot be guessed (forty bits) and cannot be
+     * enumerated, and the person asking this question holds it: they were handed it. So a refusal that pretends not to
+     * know the code exists would be withholding a fact about the caller's own credential, and the useful answer is what
+     * the code is actually for. The contract's own paragraph for both operations says this, because a reader comparing
+     * them would otherwise think one of them was a mistake.
+     */
+    public record NotAMembership(String code) implements DomainError {
+
+        public static final String CODE = "api.invite_not_a_membership";
+
+        public NotAMembership {
+            DomainCodes.requireWellFormed(CODE);
+        }
+
+        @Override
+        public String code() {
+            return CODE;
+        }
+
+        @Override
+        public String message() {
+            return "the code " + code + " is a share link: it shows what the group owes whom, and it does not join "
+                    + "anybody to it. Ask a member for an invitation if you want to become one";
+        }
+    }
+
+    /** The code is a real invitation and it does not show anything: the other end of {@link NotAMembership}. */
+    public record NotAShare(String code) implements DomainError {
+
+        public static final String CODE = "api.invite_not_a_share";
+
+        public NotAShare {
+            DomainCodes.requireWellFormed(CODE);
+        }
+
+        @Override
+        public String code() {
+            return CODE;
+        }
+
+        @Override
+        public String message() {
+            return "the code " + code + " joins somebody to a group rather than showing them what it owes. A share link "
+                    + "is what a group makes with `POST /groups/{groupId}/shares`";
         }
     }
 }

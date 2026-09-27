@@ -136,7 +136,7 @@ public class InvitesController {
         CreatedInvite invite = ((Result.Ok<CreatedInvite>) created).value();
 
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(new InviteResponse(invite.code(), invite.expiresAt(), invite.maxUses()));
+                .body(InviteResponse.of(invite));
     }
 
     /**

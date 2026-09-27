@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { signIn, stubIdentityApi, stubMembersApi } from './stubs';
+import { SHARE, signIn, stubIdentityApi, stubMembersApi, stubSharesApi } from './stubs';
 
 /**
  * The group's members, end to end in a browser: read who is in the group, and record somebody.
@@ -96,6 +96,23 @@ test('a signed-out visitor cannot record a member, and is told why', async ({ pa
   // signed-out visitor is told that the group's members are not theirs to read rather than being shown them. This line
   // asserted the opposite - that Asha Menon's row was visible - because the read answered anybody then.
   await expect(page.getByRole('cell', { name: 'Asha Menon' })).toHaveCount(0);
+});
+
+test('a member makes a link somebody can look through, and it says what it is handing out', async ({ page }) => {
+  // The invitation card's sibling: the same act with a different audience (ADR 0055). The share stub refuses a creation
+  // without the session's token - a link is something a member hands out - so this spec also proves the token was sent.
+  await stubMembersApi(page);
+  const shares = await stubSharesApi(page);
+
+  await page.goto(MEMBERS);
+  await page.getByRole('button', { name: 'Make a link' }).click();
+
+  await expect(page.getByTestId('share-code')).toHaveText(SHARE.code);
+  await expect(page.getByText(/Usable until/)).toBeVisible();
+  // The warning is the reason the card exists rather than being decoration: a link is a bearer credential, and the person
+  // making one is the only one who can judge whether the group's numbers may travel with it.
+  await expect(page.getByText(/Whoever holds this link can read those numbers/)).toBeVisible();
+  expect(shares.created).toEqual([`/v1/groups/${GROUP}/shares`]);
 });
 
 test('says nothing about a group with no members except how to start', async ({ page }) => {

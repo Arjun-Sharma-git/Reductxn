@@ -5,28 +5,35 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * What a code is for: the group it joins somebody to, and the code's own terms.
+ * What a code is for: the group it is for, what holding it entitles somebody to, and whether it still works.
  *
  * <p><strong>It carries less than an {@link Invitation} and more than nothing, and the difference is who reads
- * it.</strong> An {@code Invitation} is the stored row - its group id, its window, its limit and how often it has been
- * spent - and it exists for the use case that decides whether a spend is allowed. A preview is for somebody who has not
- * joined: they are told what they would be joining and whether the code still works, and nothing else. No amounts, no
- * member names, no commitments: a group that hands out a code has agreed to say "you are invited", not to open its
- * ledger (ADR 0054).
+ * it.</strong> An {@code Invitation} is the stored row - what it grants, its group id, its window, its limit and how
+ * often it has been spent - and it exists for the use cases that decide what may be done with it. A preview is for
+ * somebody who has not joined: they are told what they would be joining (or looking at) and whether the code still
+ * works, and nothing else. No amounts, no member names, no commitments: a group that hands out a code has agreed to say
+ * "you are invited" or "you may look at this", not to open its ledger (ADRs 0054, 0055).
+ *
+ * <p><strong>{@code grants} is what makes this read serve both kinds of code</strong> (ADR 0055), and it is why the
+ * operation is no longer called "what an invite code is for": a client shows the acceptance form for a
+ * {@link InvitationGrant#MEMBERSHIP} code and the shared view for a {@link InvitationGrant#READ} one, which is a
+ * decision it can only make from this field.
  *
  * <p>{@code maxUses} is null for no limit, which is the reading the contract's `Invite` schema already requires - and
  * the row's {@code uses} is deliberately not here: how often a link has been used is the group's business, and the
  * only question a joiner has about it ("is it finished?") is answered by the refusal rather than by a count.
  *
  * @param code      the code, echoed so a screen can show what was typed and what was recognised
- * @param expiresAt when the window closes; an acceptance at or after this instant is refused
+ * @param grants    what holding the code entitles somebody to
+ * @param expiresAt when the window closes; a use at or after this instant is refused
  * @param maxUses   how many times the code may be spent, or null for no limit
- * @param group     the group the code joins somebody to
+ * @param group     the group the code is for
  */
-public record InvitePreview(String code, Instant expiresAt, Integer maxUses, Group group) {
+public record InvitePreview(String code, InvitationGrant grants, Instant expiresAt, Integer maxUses, Group group) {
 
     public InvitePreview {
         Objects.requireNonNull(code, "code");
+        Objects.requireNonNull(grants, "grants");
         Objects.requireNonNull(expiresAt, "expiresAt");
         Objects.requireNonNull(group, "group");
     }

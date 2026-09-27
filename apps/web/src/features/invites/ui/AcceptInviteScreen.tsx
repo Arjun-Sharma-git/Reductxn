@@ -65,6 +65,17 @@ export function AcceptInviteScreen({ code }: { readonly code: string }) {
           needs to read. It is the same three codes the acceptance answers with, one step earlier. */}
       {preview.isError ? <ProblemNotice fault={preview.error} /> : null}
 
+      {/* And a code that grants reading is not something to accept (ADR 0055): it shows the group's positions, which is
+          what its own screen is for. The link is here rather than a redirect so that somebody who followed an invitation
+          URL by mistake keeps the code they were sent and can see what it does. */}
+      {preview.isSuccess && preview.data.grants === 'read' ? (
+        <Card title={t('invites.share.title')} description={t('invites.share.description')}>
+          <Link to="/shared/$code" params={{ code }}>
+            {t('invites.share.open')}
+          </Link>
+        </Card>
+      ) : null}
+
       {preview.isSuccess ? (
         <Card
           title={t('invites.preview.title')}
@@ -102,7 +113,7 @@ export function AcceptInviteScreen({ code }: { readonly code: string }) {
             </Link>
           )}
         </Card>
-      ) : preview.isSuccess ? (
+      ) : preview.isSuccess && preview.data.grants === 'membership' ? (
         <Card title={t('invites.form.title')} description={t('invites.form.description')}>
           <Notice>{t('invites.form.identity')}</Notice>
 

@@ -6,6 +6,7 @@ import { Card, Notice, ProblemNotice } from '@/shared/ui';
 
 import { AddMemberForm } from './AddMemberForm';
 import { InviteSomebodyCard } from './InviteSomebodyCard';
+import { ShareLinkCard } from './ShareLinkCard';
 import styles from './MembersScreen.module.css';
 
 /**
@@ -75,6 +76,11 @@ export function MembersScreen({ groupId }: { readonly groupId: string }) {
       </Card>
 
       <InviteSomebodyCard groupId={groupId} />
+
+      {/* The other thing a group hands out: a way to look, for somebody who is not going to join (ADR 0055). Shown only
+          once the list has loaded, because making a link is a member's act and a signed-out visitor's request for one
+          answers `401` - the same reason the invitation card sits beside the member list. */}
+      {members.isSuccess ? <ShareLinkCard groupId={groupId} /> : null}
     </div>
   );
 }
