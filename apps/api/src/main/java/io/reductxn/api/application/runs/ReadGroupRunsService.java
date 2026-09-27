@@ -1,8 +1,11 @@
 package io.reductxn.api.application.runs;
 
+import io.reductxn.api.port.in.GroupRefusals;
 import io.reductxn.api.port.in.ReadGroupRuns;
 import io.reductxn.api.port.in.RunReport;
+import io.reductxn.api.port.out.Groups;
 import io.reductxn.api.port.out.SettlementRuns;
+import io.reductxn.kernel.api.Result;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +26,11 @@ import java.util.UUID;
  * <p>{@code @Transactional(readOnly = true)} for the reason {@link ReadRunService} gives, and it matters more here:
  * a listed run is four projections, so a list of twenty is eighty reads, and without one transaction two runs in the
  * same list could be reported at two different instants - a page that never existed.
+ *
+ * <p><strong>The membership check is the second decision, since ADR 0054, and it is first in the method.</strong> It
+ * is the one {@code ReadActivityService} makes and for its reason: a group's runs are a page of the group's history,
+ * so the check comes before the rows are read and a stranger sees the `404` rather than a page they should not have
+ * been shown. The clamp after it is unchanged - a refusal costs nothing when it comes first.
  */
 @Service
 public class ReadGroupRunsService implements ReadGroupRuns {
@@ -37,17 +45,24 @@ public class ReadGroupRunsService implements ReadGroupRuns {
      */
     static final int MAX_RUNS = 100;
 
+    private final Groups groups;
     private final SettlementRuns runs;
 
-    public ReadGroupRunsService(SettlementRuns runs) {
+    public ReadGroupRunsService(Groups groups, SettlementRuns runs) {
+        this.groups = Objects.requireNonNull(groups, "groups");
         this.runs = Objects.requireNonNull(runs, "runs");
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<RunReport> list(UUID groupId, int limit) {
+    public Result<List<RunReport>> list(UUID callerId, UUID groupId, int limit) {
+        Objects.requireNonNull(callerId, "callerId");
         Objects.requireNonNull(groupId, "groupId");
 
-        return runs.listByGroup(groupId, Math.min(Math.max(limit, 1), MAX_RUNS));
+        if (!groups.isMember(groupId, callerId)) {
+            return Result.fail(new GroupRefusals.NoSuchGroup(groupId));
+        }
+
+        return Result.ok(runs.listByGroup(groupId, Math.min(Math.max(limit, 1), MAX_RUNS)));
     }
 }

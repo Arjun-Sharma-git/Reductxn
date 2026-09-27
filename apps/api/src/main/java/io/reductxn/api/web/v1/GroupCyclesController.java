@@ -1,5 +1,6 @@
 package io.reductxn.api.web.v1;
 
+import io.reductxn.api.port.in.CycleReport;
 import io.reductxn.api.port.in.NewCycle;
 import io.reductxn.api.port.in.OpenCycle;
 import io.reductxn.api.port.in.OpenedCycle;
@@ -133,19 +134,32 @@ public class GroupCyclesController {
             @RequestParam(name = "limit", required = false) Integer limit,
             HttpServletRequest http) {
 
+        // Who is asking first, since ADR 0054, in the order the write above this method already uses.
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
         DomainError malformed = malformedGroupId(groupId);
 
         if (malformed != null) {
             return problem(malformed, http.getRequestURI());
         }
 
-        List<SettlementCycleResponse> cycles = readGroupCycles
-                .list(UUID.fromString(groupId), limit == null ? DEFAULT_LIMIT : limit)
+        Result<List<CycleReport>> cycles = readGroupCycles.list(
+                ((Result.Ok<SignedInUser>) caller).value().id(),
+                UUID.fromString(groupId),
+                limit == null ? DEFAULT_LIMIT : limit);
+
+        if (cycles instanceof Result.Failure<List<CycleReport>> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
+        return ResponseEntity.ok(((Result.Ok<List<CycleReport>>) cycles).value()
                 .stream()
                 .map(SettlementCycleResponse::of)
-                .toList();
-
-        return ResponseEntity.ok(cycles);
+                .toList());
     }
 
     /**

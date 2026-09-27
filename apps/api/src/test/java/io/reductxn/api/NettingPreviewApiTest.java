@@ -44,10 +44,16 @@ class NettingPreviewApiTest extends DatabaseTest {
 
     private static final String AS_OF = "2026-09-25T10:00:00Z";
 
+    /** A group with nothing open that the caller *is* in: the only kind whose empty plan is readable (ADR 0054). */
+    private static final UUID EMPTY_GROUP = new UUID(0L, 999L);
+
     @Autowired
     private WebApplicationContext context;
 
     private MockMvc mvc;
+
+    /** The caller: one of the members the fixture's obligations name, because a preview is the group's (ADR 0054). */
+    private String alice;
 
     /**
      * Built from the framework rather than annotated, because Spring Boot 4 no longer ships
@@ -58,6 +64,10 @@ class NettingPreviewApiTest extends DatabaseTest {
     @BeforeEach
     void buildMockMvc() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
+
+        // Alice reads and Alice owes, which is the ordinary case: the person asking about a plan is in it.
+        alice = signedIn("+919812345688", ALICE);
+        memberRow(GROUP, ALICE, "Alice");
     }
 
     @Test
@@ -161,7 +171,9 @@ class NettingPreviewApiTest extends DatabaseTest {
 
     @Test
     void aGroupWithNothingOpenPreviewsAnEmptyPlanRatherThanFailing() throws Exception {
-        preview(new UUID(0L, 999L))
+        memberRow(EMPTY_GROUP, ALICE, "Alice");
+
+        preview(EMPTY_GROUP)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.partitions", hasSize(0)))
                 .andExpect(jsonPath("$.bestCase.transfers", hasSize(0)))
@@ -173,12 +185,35 @@ class NettingPreviewApiTest extends DatabaseTest {
 
     @Test
     void frameworkErrorsAreProblemsToo() throws Exception {
-        // A group id that is not a UUID never reaches the controller. Without
-        // `spring.mvc.problemdetails.enabled` this is an empty body with a 400, which a client cannot
-        // branch on - so this asserts a configuration line, not a framework behaviour.
-        mvc.perform(get("/v1/groups/{groupId}/netting/preview", "not-a-uuid"))
+        // A group id that is not a UUID is refused by this controller rather than by Spring, since ADR 0054 - the
+        // caller is resolved first, so the session is what makes the malformed id answerable at all.
+        mvc.perform(get("/v1/groups/{groupId}/netting/preview", "not-a-uuid")
+                        .header("Authorization", "Bearer " + alice))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+    }
+
+    /**
+     * A preview is the group's plan, and since ADR 0054 that is a condition.
+     *
+     * <p>This endpoint and the balances read were the two the client's home screen reached directly: pasting a group id
+     * navigated to {@code /groups/{id}/netting}, so a stranger holding an id saw the plan the group was about to
+     * execute. The refusal is the same `404` a group that does not exist gives, and the box that used to take an id
+     * takes an invitation code now.
+     */
+    @Test
+    void thePreviewIsTheGroupMembersOnly() throws Exception {
+        mvc.perform(get("/v1/groups/{groupId}/netting/preview", GROUP).param("asOf", AS_OF))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("api.not_signed_in"));
+
+        String stranger = signedIn("+919812345689", new UUID(0L, 13L));
+
+        mvc.perform(get("/v1/groups/{groupId}/netting/preview", GROUP)
+                        .param("asOf", AS_OF)
+                        .header("Authorization", "Bearer " + stranger))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_group"));
     }
 
     @Test
@@ -208,6 +243,8 @@ class NettingPreviewApiTest extends DatabaseTest {
     }
 
     private ResultActions preview(UUID groupId, String asOf) throws Exception {
-        return mvc.perform(get("/v1/groups/{groupId}/netting/preview", groupId).param("asOf", asOf));
+        return mvc.perform(get("/v1/groups/{groupId}/netting/preview", groupId)
+                .param("asOf", asOf)
+                .header("Authorization", "Bearer " + alice));
     }
 }

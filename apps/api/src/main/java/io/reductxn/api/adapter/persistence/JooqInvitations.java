@@ -51,6 +51,34 @@ public class JooqInvitations implements Invitations {
     private static final Field<Integer> USES = DSL.field("uses", Integer.class);
 
     /**
+     * The two tables {@link #previewOf} reads beside {@code invitations}: the group's own row, and its memberships.
+     *
+     * <p><strong>Aliased and qualified, and this query is the reason it has to be.</strong> {@code invitations},
+     * {@code groups} and {@code group_members} are three tables in one statement, two of which have a {@code group_id} -
+     * and the count is a correlated subquery, so an unqualified {@code field("group_id")} inside it would be a bare name
+     * the database has to resolve between the membership's column and the invitation's. Every reference is therefore
+     * spelled with its table, and the outer one with the real name rather than an alias, because a correlated reference
+     * cannot see an alias the subquery's own scope does not declare.
+     */
+    private static final Table<Record> GROUPS = DSL.table("groups").as("g");
+    private static final Field<UUID> GROUP_ROW_ID = DSL.field(DSL.name("g", "id"), UUID.class);
+    private static final Field<String> GROUP_NAME = DSL.field(DSL.name("g", "name"), String.class);
+    private static final Field<UUID> INVITATION_GROUP_ID = DSL.field(DSL.name("invitations", "group_id"), UUID.class);
+
+    private static final Table<Record> MEMBERS = DSL.table("group_members").as("m");
+    private static final Field<UUID> MEMBER_GROUP_ID = DSL.field(DSL.name("m", "group_id"), UUID.class);
+
+    /**
+     * How many members the group has, as a correlated subquery rather than a second join.
+     *
+     * <p>The same shape {@code JooqGroups.MEMBER_COUNT} uses, and for the same reason: joining the memberships to count
+     * them would multiply the invitation's row by its group's size, so the count arrives as a subquery and the
+     * invitation stays one row.
+     */
+    private static final Field<Integer> MEMBER_COUNT = DSL.field(
+            DSL.select(DSL.count()).from(MEMBERS).where(MEMBER_GROUP_ID.eq(INVITATION_GROUP_ID)));
+
+    /**
      * The thirty-two symbols a code may use, which is `V105`'s CHECK constraint written out.
      *
      * <p>The order is the constraint's own ranges - `A-H`, `J-N`, `P-Z`, then `2-9` - so the two can be read against
@@ -107,6 +135,29 @@ public class JooqInvitations implements Invitations {
 
         return Optional.of(new Invitation(
                 row.get(GROUP_ID),
+                row.get(EXPIRES_AT).toInstant(),
+                row.get(MAX_USES),
+                row.get(USES)));
+    }
+
+    @Override
+    public Optional<Preview> previewOf(String code) {
+        Record row = dsl.select(GROUP_ID, GROUP_NAME, MEMBER_COUNT, EXPIRES_AT, MAX_USES, USES)
+                .from(INVITATIONS)
+                // A left join, because a group that exists only as rows has no `groups` row to find - and its
+                // invitations are real ones (ADR 0043). The name is then null and the count is still right.
+                .leftJoin(GROUPS).on(GROUP_ROW_ID.eq(INVITATION_GROUP_ID))
+                .where(CODE.eq(canonical(code)))
+                .fetchOne();
+
+        if (row == null) {
+            return Optional.empty();
+        }
+
+        return Optional.of(new Preview(
+                row.get(GROUP_ID),
+                row.get(GROUP_NAME),
+                row.get(MEMBER_COUNT),
                 row.get(EXPIRES_AT).toInstant(),
                 row.get(MAX_USES),
                 row.get(USES)));

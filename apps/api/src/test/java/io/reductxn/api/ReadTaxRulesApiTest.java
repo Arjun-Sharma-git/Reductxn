@@ -43,10 +43,20 @@ class ReadTaxRulesApiTest extends DatabaseTest {
 
     private MockMvc mvc;
 
+    /**
+     * A caller, because half of what this class asserts is the *settlement path* asking the same question as the rules
+     * read - and since ADR 0054 a preview requires a member of the group it plans. The rules read itself is unchanged
+     * and stays open: which rules are in force is the same answer for everybody.
+     */
+    private String alice;
+
     /** Built from the framework rather than annotated: Spring Boot 4 no longer ships {@code @AutoConfigureMockMvc}. */
     @BeforeEach
     void buildMockMvc() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
+
+        alice = signedIn("+919812345692", ALICE);
+        memberRow(GROUP, ALICE, "Alice");
     }
 
     @Test
@@ -108,7 +118,7 @@ class ReadTaxRulesApiTest extends DatabaseTest {
 
         obligate(GROUP, ALICE, BORIS, 10_000L, "INR", 2);
 
-        mvc.perform(get("/v1/groups/{groupId}/netting/preview", GROUP))
+        mvc.perform(get("/v1/groups/{groupId}/netting/preview", GROUP).header("Authorization", "Bearer " + alice))
                 .andExpect(status().isOk())
                 // The rate the rule list showed, charged by the plan: one transfer, so one flat charge of 50.
                 .andExpect(jsonPath("$.partitions[0].netTax.amountMinor").value(50))

@@ -1,5 +1,7 @@
 package io.reductxn.api.port.in;
 
+import io.reductxn.kernel.api.Result;
+
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -18,9 +20,13 @@ import java.util.UUID;
  * than a refusal, which is what the obligations list does with the same pair of parameters and what a report can
  * honestly answer.
  *
- * <p><strong>Nothing is a {@code Result}.</strong> Every narrowing can be answered and a group with no plans is an
- * empty report - the same sentence the runs, cycles, members and balances reads end with, because groups are not
- * tables in this build.
+ * <p><strong>A {@code Result} since ADR 0054.</strong> This port said "nothing is a {@code Result}: every narrowing can
+ * be answered and a group with no plans is an empty report - the same sentence the runs, cycles, members and balances
+ * reads end with, because groups are not tables in this build". Groups have been tables since ADR 0043 and the caller
+ * must be a member of the one being reported on, so the answer is the lines or
+ * {@link GroupRefusals.NoSuchGroup}. Worth naming because of how this read is addressed: its group arrives as a query
+ * parameter rather than a path segment, so it was the one the slice could only find by walking the operations rather
+ * than by reading the paths.
  */
 public interface ReadTaxReport {
 
@@ -30,5 +36,5 @@ public interface ReadTaxReport {
      * @param periodStart the first day counted, inclusive; null for unbounded
      * @param periodEnd   the last day counted, inclusive of the whole of that day; null for unbounded
      */
-    List<TaxReportLine> report(UUID groupId, LocalDate periodStart, LocalDate periodEnd);
+    Result<List<TaxReportLine>> report(UUID callerId, UUID groupId, LocalDate periodStart, LocalDate periodEnd);
 }

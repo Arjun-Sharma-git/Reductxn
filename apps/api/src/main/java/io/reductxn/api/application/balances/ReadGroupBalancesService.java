@@ -1,8 +1,11 @@
 package io.reductxn.api.application.balances;
 
+import io.reductxn.api.port.in.GroupRefusals;
 import io.reductxn.api.port.in.ReadGroupBalances;
+import io.reductxn.api.port.out.Groups;
 import io.reductxn.api.port.out.OpenObligations;
 import io.reductxn.api.port.out.TaxRuleCatalog;
+import io.reductxn.kernel.api.Result;
 import io.reductxn.netting.api.NetPosition;
 import io.reductxn.planning.api.SettlementPlan;
 import io.reductxn.planning.api.SettlementPlanner;
@@ -33,17 +36,25 @@ import java.util.UUID;
  * <p><strong>Nothing is sorted here.</strong> The plan is already ordered (partitions by currency, legs normalised
  * before the engine saw them), and an order invented at this layer would be a second ordering rule to keep in step
  * with the first. A screen that wants members in alphabetical order sorts its own rows.
+ *
+ * <p><strong>The membership check comes first, and it is the first statement in the method rather than a clause
+ * somewhere below</strong> (ADR 0054). Two things depend on that order and both are concrete: a stranger must not be
+ * able to read a position before being refused, and a stranger must not learn which currencies this deployment has tax
+ * rules for by comparing a `404` against a `422` - which is the ordering ADR 0049 established for recording an
+ * obligation, applied to the read that nets them.
  */
 @Service
 public class ReadGroupBalancesService implements ReadGroupBalances {
 
+    private final Groups groups;
     private final OpenObligations openObligations;
     private final TaxRuleCatalog taxRules;
     private final SettlementPlanner planner;
 
     public ReadGroupBalancesService(
-            OpenObligations openObligations, TaxRuleCatalog taxRules, SettlementPlanner planner) {
+            Groups groups, OpenObligations openObligations, TaxRuleCatalog taxRules, SettlementPlanner planner) {
 
+        this.groups = Objects.requireNonNull(groups, "groups");
         this.openObligations = Objects.requireNonNull(openObligations, "openObligations");
         this.taxRules = Objects.requireNonNull(taxRules, "taxRules");
         this.planner = Objects.requireNonNull(planner, "planner");
@@ -51,16 +62,23 @@ public class ReadGroupBalancesService implements ReadGroupBalances {
 
     @Override
     @Transactional(readOnly = true)
-    public List<NetPosition> balances(UUID groupId, Instant asOf) {
+    public Result<List<NetPosition>> balances(UUID callerId, UUID groupId, Instant asOf) {
+        Objects.requireNonNull(callerId, "callerId");
         Objects.requireNonNull(groupId, "groupId");
         Objects.requireNonNull(asOf, "asOf");
+
+        // Before the obligations and before the tax rules: a balance is the group's, and a refusal that came after the
+        // plan was computed would be a refusal that had already done the work it is refusing to show.
+        if (!groups.isMember(groupId, callerId)) {
+            return Result.fail(new GroupRefusals.NoSuchGroup(groupId));
+        }
 
         SettlementPlan plan = planner.plan(
                 openObligations.openFor(groupId, asOf),
                 currency -> taxRules.activeFor(currency, asOf));
 
-        return plan.partitions().stream()
+        return Result.ok(plan.partitions().stream()
                 .flatMap(partition -> partition.netting().positions().stream())
-                .toList();
+                .toList());
     }
 }

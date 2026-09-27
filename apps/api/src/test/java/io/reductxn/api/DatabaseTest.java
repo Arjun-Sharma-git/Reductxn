@@ -154,12 +154,27 @@ abstract class DatabaseTest {
      * @return the access token to send as {@code Authorization: Bearer <token>}
      */
     protected String signedIn(String phone) {
-        UUID user = UUID.randomUUID();
+        return signedIn(phone, UUID.randomUUID());
+    }
+
+    /**
+     * The same, with the person's id chosen by the test.
+     *
+     * <p><strong>It exists because a read test's fixture already has people in it.</strong> The group reads require a
+     * member of the group since ADR 0054, and a test whose rows name {@code ALICE} and {@code BORIS} has those two ids
+     * as constants - so the caller it signs in has to *be* one of them, or the membership it records and the ledger it
+     * asserts would be about two different people. Passing the id in is what keeps those tests readable: the fixture
+     * does not have to invent a third person to be the reader.
+     *
+     * <p>It is why the sentence above about a generated id is now the *default* rather than the rule. A session row is
+     * still what makes somebody real; this overload only lets a test say which somebody.
+     */
+    protected String signedIn(String phone, UUID userId) {
         String accessToken = SessionTokens.issue();
         Instant now = Instant.now();
 
         jdbc.update("INSERT INTO users (id, phone_number, display_name, created_at) VALUES (?, ?, ?, ?)",
-                user, phone, phone, now.atOffset(ZoneOffset.UTC));
+                userId, phone, phone, now.atOffset(ZoneOffset.UTC));
 
         jdbc.update("""
                 INSERT INTO sessions (access_token_hash, refresh_token_hash, user_id, device_id, created_at,
@@ -168,12 +183,12 @@ abstract class DatabaseTest {
                 """,
                 SessionTokens.hash(accessToken),
                 SessionTokens.hash(SessionTokens.issue()),
-                user,
+                userId,
                 now.atOffset(ZoneOffset.UTC),
                 now.plus(Duration.ofMinutes(30)).atOffset(ZoneOffset.UTC),
                 now.plus(Duration.ofDays(30)).atOffset(ZoneOffset.UTC));
 
-        signedInUsers.put(phone, user);
+        signedInUsers.put(phone, userId);
 
         return accessToken;
     }
@@ -181,6 +196,30 @@ abstract class DatabaseTest {
     /** The user id behind a number this test class signed in, or null when it never did. */
     protected UUID user(String phone) {
         return signedInUsers.get(phone);
+    }
+
+    /**
+     * Somebody as a member of a group, written as rows.
+     *
+     * <p><strong>Rows rather than the endpoint, and that is the pattern ADR 0048 established and ADR 0049 applied
+     * twice.</strong> The members write requires a member of the group - so a read test whose fixture went through it
+     * would have to join the group first, and the join would then appear in every list the test asserts. Writing the
+     * row directly is what the endpoint would write ({@code (group_id, user_id)} is the key, the role is a word the
+     * table's CHECK fixes), and it says what the test means: this person is in this group.
+     *
+     * <p><strong>Required by every group read since ADR 0054, which is why it is here rather than copied into six more
+     * classes.</strong> Six classes already had a private {@code memberOf} of their own - written for the writes ADR
+     * 0048 and 0049 made member-only - and the name here is deliberately not that one: the copies differ in the role
+     * and the display name each of them records, and a shared helper that collided with them would have been a fixture
+     * this slice broke rather than added. Hoisting those copies is a tidy-up with its own slice's worth of edits in
+     * classes this change is not about; it is recorded rather than done.
+     */
+    protected void memberRow(UUID group, UUID userId, String displayName) {
+        jdbc.update("""
+                INSERT INTO group_members (group_id, user_id, display_name, role, joined_at)
+                VALUES (?, ?, ?, 'member', TIMESTAMPTZ '2026-09-01 00:00:00+00')
+                ON CONFLICT (group_id, user_id) DO NOTHING
+                """, group, userId, displayName);
     }
 
     protected void taxRule(String jurisdiction, String currency, String kind, String paramsJson) {

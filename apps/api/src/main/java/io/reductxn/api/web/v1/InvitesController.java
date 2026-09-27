@@ -5,12 +5,15 @@ import io.reductxn.api.port.in.AcceptedInvitation;
 import io.reductxn.api.port.in.AddedMember;
 import io.reductxn.api.port.in.CreateInvite;
 import io.reductxn.api.port.in.CreatedInvite;
+import io.reductxn.api.port.in.InvitePreview;
 import io.reductxn.api.port.in.MemberRefusals;
 import io.reductxn.api.port.in.NewInvite;
+import io.reductxn.api.port.in.ReadInvite;
 import io.reductxn.api.port.in.RunRefusals;
 import io.reductxn.api.port.in.SignedInUser;
 import io.reductxn.api.web.CallerResolver;
 import io.reductxn.api.web.dto.AcceptInviteRequest;
+import io.reductxn.api.web.dto.InvitePreviewResponse;
 import io.reductxn.api.web.dto.InviteResponse;
 import io.reductxn.api.web.dto.MemberResponse;
 import io.reductxn.api.web.error.ExpectedFailures;
@@ -21,6 +24,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,39 +36,73 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * {@code POST /v1/groups/{groupId}/invites} and {@code POST /v1/invites/{code}/accept}: inviting somebody, and arriving.
+ * {@code POST /v1/groups/{groupId}/invites}, {@code GET /v1/invites/{code}} and {@code POST /v1/invites/{code}/accept}:
+ * inviting somebody, reading what the code is for, and arriving.
  *
- * <p>One controller for both because they are one flow with one subject - an invitation - and the two operations share
+ * <p>One controller for all three because they are one flow with one subject - an invitation - and the operations share
  * their validation, their clock and their problem helper. The class-level mapping is {@code /v1} rather than a resource
- * prefix, because the contract gives the two paths no common prefix: creation is addressed by the group and acceptance by
- * the code, which is the contract's own decision (the code carries the group, which is why it is globally unique).
+ * prefix, because the contract gives the paths no common prefix: creation is addressed by the group, and reading and
+ * acceptance are addressed by the code, which is the contract's own decision (the code carries the group, which is why
+ * it is globally unique).
  *
- * <p><strong>The acceptance is about the caller; the creation is still about nothing.</strong> Somebody handing in a code
- * joins *as themselves*, so this controller resolves the session and refuses a request without one - which is the
- * contract's promise kept, one slice after `GET /me` made it keepable (ADR 0042). Creating an invitation is the other
- * half and is still unauthorised: nothing stops a caller making a code for a group they are not in, which the contract
- * says where the operation is described and this class does not pretend otherwise. What the two now have in common is
- * only the flow; what they do about identity differs, which is why the difference is stated here rather than implied.
+ * <p><strong>Two of the three are about the caller, and the read is the one that is not.</strong> Somebody handing in a
+ * code joins *as themselves*, so the acceptance resolves the session and refuses a request without one; creating an
+ * invitation is a member's act since ADR 0048. The read is asked by the person the link was sent to, who has not signed
+ * in yet - so it resolves nobody, and the contract gives it `security: []` (ADR 0054). That is not a hole in the rule
+ * the rest of this slice enforces: the code is the capability, and it is the artifact a group chooses to hand out.
  *
  * <p><strong>A code is read in the case it was typed.</strong> The alphabet is uppercase and the table refuses anything
  * else, so a code typed in lowercase would be a {@code 404} whose cause is invisible in the request. The path variable
- * is therefore trimmed and uppercased here - one normalisation, at the boundary, where the wire becomes a use case - and
- * the code stored and returned is never rewritten.
+ * is therefore trimmed here - one normalisation, at the boundary, where the wire becomes a use case - and the code
+ * stored and returned is never rewritten.
  */
 @RestController
 @RequestMapping("/v1")
 public class InvitesController {
 
     private final CreateInvite createInvite;
+    private final ReadInvite readInvite;
     private final AcceptInvite acceptInvite;
     private final CallerResolver callers;
     private final Clock clock;
 
-    public InvitesController(CreateInvite createInvite, AcceptInvite acceptInvite, CallerResolver callers, Clock clock) {
+    public InvitesController(CreateInvite createInvite, ReadInvite readInvite, AcceptInvite acceptInvite,
+            CallerResolver callers, Clock clock) {
+
         this.createInvite = Objects.requireNonNull(createInvite, "createInvite");
+        this.readInvite = Objects.requireNonNull(readInvite, "readInvite");
         this.acceptInvite = Objects.requireNonNull(acceptInvite, "acceptInvite");
         this.callers = Objects.requireNonNull(callers, "callers");
         this.clock = Objects.requireNonNull(clock, "clock");
+    }
+
+    /**
+     * What a code is for, before anybody accepts it.
+     *
+     * <p><strong>No caller, deliberately, and it is the only read in this controller that resolves none.</strong> The
+     * person who asks is the person the link was sent to - usually not signed in yet - and the code is the capability
+     * they were given, which is why the contract declares no `401` for this operation and this handler does not resolve
+     * one. The clock is read here rather than in the use case for the reason every boundary here reads it: a code's
+     * answer changes at its window's edge, and a test that pins the clock can see which side it is on.
+     *
+     * <p>{@code 404} and {@code 410} are the same two answers the acceptance gives, from the same conditions, so a
+     * person who previews a stale code is told what is wrong with it rather than finding out after typing a name.
+     */
+    @GetMapping("/invites/{code}")
+    public ResponseEntity<Object> preview(@PathVariable String code, HttpServletRequest http) {
+        DomainError malformed = malformedCode(code);
+
+        if (malformed != null) {
+            return problem(malformed, http.getRequestURI());
+        }
+
+        Result<InvitePreview> preview = readInvite.preview(trimmed(code), clock.instant());
+
+        if (preview instanceof Result.Ok<InvitePreview> found) {
+            return ResponseEntity.ok(InvitePreviewResponse.of(found.value()));
+        }
+
+        return problem(((Result.Failure<InvitePreview>) preview).error(), http.getRequestURI());
     }
 
     /**
@@ -169,6 +207,22 @@ public class InvitesController {
         }
         if (request.displayName().length() > MemberRefusals.MAX_NAME_LENGTH) {
             return new MemberRefusals.NameTooLong(request.displayName().length(), MemberRefusals.MAX_NAME_LENGTH);
+        }
+
+        return null;
+    }
+
+    /**
+     * The code in the path, checked rather than taken on trust.
+     *
+     * <p>Only blank is refused here. A code that is well-formed but unknown is a `404` from the use case rather than a
+     * `400` from the boundary, because the boundary cannot know which codes exist - and a code with the wrong alphabet in
+     * it is exactly the case {@code NoSuchInvite}'s own message describes ("a mistyped one is a code for nothing rather
+     * than for the wrong group").
+     */
+    private static DomainError malformedCode(String code) {
+        if (code == null || code.isBlank()) {
+            return new RunRefusals.RequestIncomplete("code in the path, the invitation's code");
         }
 
         return null;

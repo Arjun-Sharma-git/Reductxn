@@ -1,5 +1,6 @@
 package io.reductxn.api.port.in;
 
+import io.reductxn.kernel.api.Result;
 import io.reductxn.planning.api.SettlementPlan;
 
 import java.time.Instant;
@@ -15,6 +16,11 @@ import java.util.UUID;
  * currency, since a group may hold more than one - and the shape the contract wants is a view of it.
  * Mapping inside the use case would put a wire format in the application layer, where it would then be
  * the thing that has to change when the contract does.
+ *
+ * <p><strong>A {@code Result} since ADR 0054.</strong> The caller travels beside the group and a group they are not
+ * in answers {@link GroupRefusals.NoSuchGroup} - a preview is the plan a group is about to execute, so it is not a
+ * read that could be public. This is the second of the two reads the client's paste box reached directly, which is
+ * why the box now takes a code rather than an id.
  */
 @FunctionalInterface
 public interface PreviewNetting {
@@ -25,7 +31,7 @@ public interface PreviewNetting {
      * @param groupId the group to preview
      * @param asOf    the instant to assess at; supplied rather than read from a clock, so a past preview
      *                stays reproducible
-     * @return one plan per currency present in the group's open obligations
+     * @return one plan per currency present in the group's open obligations, or the reason it could not be planned
      */
-    SettlementPlan preview(UUID groupId, Instant asOf);
+    Result<SettlementPlan> preview(UUID callerId, UUID groupId, Instant asOf);
 }

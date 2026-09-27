@@ -21,6 +21,14 @@ import java.util.UUID;
  * currency still has to arrive, are derived from that state and the rows, not from a second quorum implementation.
  *
  * <p>A {@link Result} like every other use case here: a run that does not exist is an expected failure, not a fault.
+ *
+ * <p><strong>Since ADR 0054 the caller is a member of the group the run settles, and the refusal is the same
+ * {@link RunRefusals.NoSuchRun} either way.</strong> That is deliberately one code for two conditions, and it is the
+ * mirror of the group reads' `no_such_group`: a run that exists in a group the caller is not in must answer exactly
+ * what a run id matching nothing answers, or this read tells a stranger which run ids are real. The difference from
+ * the nine reads that ask {@code Groups.isMember} is *where* the membership is asked: a run's group is only knowable
+ * from the run, so the store answers both questions in one statement ({@code SettlementRuns.findFor}) rather than the
+ * service reading rows it may not show and checking afterwards.
  */
 public interface ReadRun {
 
@@ -29,5 +37,5 @@ public interface ReadRun {
      *
      * @return the run as it now stands, or the reason it could not be read
      */
-    Result<RunReport> read(UUID runId);
+    Result<RunReport> read(UUID callerId, UUID runId);
 }

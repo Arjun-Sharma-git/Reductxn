@@ -115,7 +115,10 @@ class RequestExecutionApiTest extends DatabaseTest {
 
         execute(RUN, stranger)
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("api.no_such_group"));
+                // The run-scoped code rather than `api.no_such_group`, which this asserted until ADR 0054: the reader
+                // that authorises this request now narrows by membership, and the refusal it answers with names the id
+                // the caller sent rather than the group they were not supposed to learn about.
+                .andExpect(jsonPath("$.code").value("api.no_such_run"));
 
         assertThat(storedRequestedAt()).as("and nothing was asked for").isNull();
     }

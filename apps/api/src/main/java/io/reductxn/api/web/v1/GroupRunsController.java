@@ -2,10 +2,13 @@ package io.reductxn.api.web.v1;
 
 import io.reductxn.api.port.in.ReadGroupRuns;
 import io.reductxn.api.port.in.RunRefusals;
+import io.reductxn.api.port.in.RunReport;
+import io.reductxn.api.port.in.SignedInUser;
+import io.reductxn.api.web.CallerResolver;
 import io.reductxn.api.web.dto.RunMapper;
-import io.reductxn.api.web.dto.SettlementRunResponse;
 import io.reductxn.api.web.error.ExpectedFailures;
 import io.reductxn.kernel.api.DomainError;
+import io.reductxn.kernel.api.Result;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -51,9 +54,11 @@ public class GroupRunsController {
     private static final int DEFAULT_LIMIT = 20;
 
     private final ReadGroupRuns readGroupRuns;
+    private final CallerResolver callers;
 
-    public GroupRunsController(ReadGroupRuns readGroupRuns) {
+    public GroupRunsController(ReadGroupRuns readGroupRuns, CallerResolver callers) {
         this.readGroupRuns = Objects.requireNonNull(readGroupRuns, "readGroupRuns");
+        this.callers = Objects.requireNonNull(callers, "callers");
     }
 
     @GetMapping
@@ -62,19 +67,33 @@ public class GroupRunsController {
             @RequestParam(name = "limit", required = false) Integer limit,
             HttpServletRequest http) {
 
+        // Who is asking first, since ADR 0054: a group's runs are a page of its history, so a request with no session
+        // is refused as a 401 before the id is judged - the order the group writes have used since ADR 0043.
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
         DomainError malformed = malformedGroupId(groupId);
 
         if (malformed != null) {
             return problem(malformed, http.getRequestURI());
         }
 
-        List<SettlementRunResponse> runs = readGroupRuns
-                .list(UUID.fromString(groupId), limit == null ? DEFAULT_LIMIT : limit)
+        Result<List<RunReport>> runs = readGroupRuns.list(
+                ((Result.Ok<SignedInUser>) caller).value().id(),
+                UUID.fromString(groupId),
+                limit == null ? DEFAULT_LIMIT : limit);
+
+        if (runs instanceof Result.Failure<List<RunReport>> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
+        return ResponseEntity.ok(((Result.Ok<List<RunReport>>) runs).value()
                 .stream()
                 .map(RunMapper::toResponse)
-                .toList();
-
-        return ResponseEntity.ok(runs);
+                .toList());
     }
 
     private static DomainError malformedGroupId(String groupId) {

@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -35,6 +36,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * pretending the two situations were one status would be worse than admitting it: the list is ordered by when
  * cycles were *asked for*, so a cycle that waits for days is an anomaly a reader can see rather than a state the
  * server invented.
+ *
+ * <p><strong>The caller is a member, since ADR 0054</strong>, and this is the third read the slice closed that used to
+ * serve a bare uuid. It is also the one where the rule costs the least and buys the most: a cycle is the group's own
+ * claim about when its books closed, so a page of them says what a group decided and when - which is exactly the kind
+ * of thing an id should not be enough to read.
  */
 @SpringBootTest
 class ReadGroupCyclesApiTest extends DatabaseTest {
@@ -44,19 +50,33 @@ class ReadGroupCyclesApiTest extends DatabaseTest {
 
     private static final Instant AS_OF = Instant.parse("2026-09-30T23:59:59Z");
 
+    private static final String MEMBER_PHONE = "+919812345682";
+
     @Autowired
     private WebApplicationContext context;
 
     private MockMvc mvc;
 
+    /** The caller: a member of both groups, so "these cycles are one group's" is a question a reader can ask. */
+    private String member;
+
     @BeforeEach
     void buildMockMvc() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
+
+        member = signedIn(MEMBER_PHONE, new UUID(0L, 82L));
+        memberRow(GROUP, user(MEMBER_PHONE), "Reader");
+        memberRow(OTHER_GROUP, user(MEMBER_PHONE), "Reader");
+    }
+
+    /** The caller's request: every group read needs a session and a membership since ADR 0054. */
+    private MockHttpServletRequestBuilder read(String path, Object groupId) {
+        return get(path, groupId).header("Authorization", "Bearer " + member);
     }
 
     @Test
     void aGroupWithNoCyclesAnswersAnEmptyListRatherThanAnError() throws Exception {
-        mvc.perform(get("/v1/groups/{groupId}/cycles", GROUP))
+        mvc.perform(read("/v1/groups/{groupId}/cycles", GROUP))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$.length()").value(0));
@@ -66,7 +86,7 @@ class ReadGroupCyclesApiTest extends DatabaseTest {
     void aCycleIsListedWithTheInstantItClosedAndNoPlanYet() throws Exception {
         open(GROUP, AS_OF);
 
-        mvc.perform(get("/v1/groups/{groupId}/cycles", GROUP))
+        mvc.perform(read("/v1/groups/{groupId}/cycles", GROUP))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].groupId").value(GROUP.toString()))
@@ -82,7 +102,7 @@ class ReadGroupCyclesApiTest extends DatabaseTest {
         UUID cycleId = cycleOpenedAt(GROUP, AS_OF, AS_OF.plusSeconds(60));
         UUID runId = planOver(cycleId);
 
-        mvc.perform(get("/v1/groups/{groupId}/cycles", GROUP))
+        mvc.perform(read("/v1/groups/{groupId}/cycles", GROUP))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].id").value(cycleId.toString()))
@@ -98,7 +118,7 @@ class ReadGroupCyclesApiTest extends DatabaseTest {
         open(GROUP, AS_OF);
         open(GROUP, lastQuarter);
 
-        mvc.perform(get("/v1/groups/{groupId}/cycles", GROUP))
+        mvc.perform(read("/v1/groups/{groupId}/cycles", GROUP))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].asOf").value("2026-06-30T23:59:59Z"))
@@ -110,7 +130,7 @@ class ReadGroupCyclesApiTest extends DatabaseTest {
         open(GROUP, AS_OF);
         open(OTHER_GROUP, AS_OF);
 
-        mvc.perform(get("/v1/groups/{groupId}/cycles", GROUP))
+        mvc.perform(read("/v1/groups/{groupId}/cycles", GROUP))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].groupId").value(GROUP.toString()));
@@ -121,23 +141,50 @@ class ReadGroupCyclesApiTest extends DatabaseTest {
         open(GROUP, AS_OF);
         open(GROUP, AS_OF.plusSeconds(3600));
 
-        mvc.perform(get("/v1/groups/{groupId}/cycles", GROUP).param("limit", "1"))
+        mvc.perform(read("/v1/groups/{groupId}/cycles", GROUP).param("limit", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1));
 
         // A zero or negative limit is a caller's arithmetic rather than a reason to answer with an error: the read
         // clamps it, so the worst a client can do is ask for the smallest page.
-        mvc.perform(get("/v1/groups/{groupId}/cycles", GROUP).param("limit", "0"))
+        mvc.perform(read("/v1/groups/{groupId}/cycles", GROUP).param("limit", "0"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1));
     }
 
     @Test
     void aMalformedGroupIdIsRefusedWithACode() throws Exception {
-        mvc.perform(get("/v1/groups/{groupId}/cycles", "not-a-uuid"))
+        mvc.perform(read("/v1/groups/{groupId}/cycles", "not-a-uuid"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("api.request_incomplete"))
                 .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("groupId")));
+    }
+
+    /**
+     * The cycles are the group's, and since ADR 0054 that is a condition rather than an assumption.
+     *
+     * <p>A request with no session answers `401`; a session that is not a member of the group answers the same `404` a
+     * group that does not exist answers. The second is the one that changed: this endpoint served a group's settlement
+     * history to anybody who held its id.
+     */
+    @Test
+    void theCyclesAreTheGroupMembersOnly() throws Exception {
+        open(GROUP, AS_OF);
+
+        mvc.perform(get("/v1/groups/{groupId}/cycles", GROUP))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("api.not_signed_in"));
+
+        String stranger = signedIn("+919812345683", new UUID(0L, 83L));
+
+        mvc.perform(get("/v1/groups/{groupId}/cycles", GROUP).header("Authorization", "Bearer " + stranger))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_group"));
+
+        mvc.perform(get("/v1/groups/{groupId}/cycles", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + stranger))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_group"));
     }
 
     @Test
@@ -151,7 +198,7 @@ class ReadGroupCyclesApiTest extends DatabaseTest {
         assertThat(jdbc.queryForObject(
                 "SELECT count(*) FROM settlement_runs WHERE cycle_id = ?", Integer.class, cycleId)).isEqualTo(1);
 
-        mvc.perform(get("/v1/groups/{groupId}/cycles", GROUP))
+        mvc.perform(read("/v1/groups/{groupId}/cycles", GROUP))
                 .andExpect(jsonPath("$.length()").value(1));
     }
 

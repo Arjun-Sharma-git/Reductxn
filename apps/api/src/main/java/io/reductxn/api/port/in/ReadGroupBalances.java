@@ -1,5 +1,6 @@
 package io.reductxn.api.port.in;
 
+import io.reductxn.kernel.api.Result;
 import io.reductxn.netting.api.NetPosition;
 
 import java.time.Instant;
@@ -22,6 +23,11 @@ import java.util.UUID;
  * <p><strong>One entry per member per currency</strong>, and a member holding two currencies appears twice. That is
  * not this port's decision to make - it falls out of the plan, whose partitions are per currency because ADR 0012
  * refuses a cross-currency total - but it is the shape a caller will see, so it is stated here.
+ *
+ * <p><strong>A {@code Result} since ADR 0054.</strong> The caller travels beside the group, and the answer is the
+ * group's open positions or {@link GroupRefusals.NoSuchGroup}. This is the read that most needed it: a balance is
+ * every member, every amount and who owes whom, and it was the widest of the nine reads that served a bare uuid - the
+ * one the client's own home screen reached by pasting an id.
  */
 public interface ReadGroupBalances {
 
@@ -30,5 +36,5 @@ public interface ReadGroupBalances {
      *
      * @return the positions, ordered as the plan orders them: by currency, then as the engine emitted them
      */
-    List<NetPosition> balances(UUID groupId, Instant asOf);
+    Result<List<NetPosition>> balances(UUID callerId, UUID groupId, Instant asOf);
 }

@@ -304,7 +304,7 @@ class RecordObligationApiTest extends DatabaseTest {
 
         // The read path, reconstructing the obligation from its quote: a preview has to see the conversion,
         // not the debt side alone - which is what it would have seen before V103 and the quote's storage.
-        mvc.perform(get("/v1/groups/{groupId}/netting/preview", GROUP)
+        mvc.perform(get("/v1/groups/{groupId}/netting/preview", GROUP).header("Authorization", "Bearer " + caller)
                         .param("asOf", "2026-09-25T10:00:00Z"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.partitions", hasSize(2)))
@@ -415,7 +415,7 @@ class RecordObligationApiTest extends DatabaseTest {
         // The write path and the read path agreeing is not a formality: the preview reads the same table
         // through a different adapter, and a column either of them got wrong would show up here as a group
         // that appears to owe nothing.
-        mvc.perform(get("/v1/groups/{groupId}/netting/preview", GROUP)
+        mvc.perform(get("/v1/groups/{groupId}/netting/preview", GROUP).header("Authorization", "Bearer " + caller)
                         .param("asOf", "2026-09-25T10:00:00Z"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.currency").value("INR"))

@@ -29,12 +29,24 @@ import java.util.UUID;
 public interface SettlementRuns {
 
     /**
-     * The run and everything this module can honestly say about it, or empty when no such run exists.
+     * The run and everything this module can honestly say about it, **if the caller is a member of the group it
+     * settles** - and empty otherwise.
      *
      * <p>One call rather than four, so a reader gets one view of the rows instead of a run and its transfers read at
      * two instants - and so the adapter can decide how many queries that takes.
+     *
+     * <p><strong>The membership condition is here rather than in the use case, and it is the same doctrine
+     * {@link Groups} states for a group.</strong> A service that read the run and then checked membership would have to
+     * trust itself to remember to check, and would read rows it may not show to answer a question it has not asked yet.
+     * Narrowing inside the statement means a run in a group the caller is not in cannot be read at all - and it is what
+     * makes "no such run" and "not yours" one answer, because the query cannot tell them apart either (ADR 0054).
+     *
+     * <p><strong>Why this one asks the store and the nine group reads ask {@code Groups.isMember}:</strong> a run's
+     * group is only knowable *from* the run, so a check that came first would need a second query whose only purpose was
+     * to be asked first. This is the `ReadActivityService` argument in the other direction - there, the check is a
+     * separate statement because the three sources do not contain a group's members; here the join is one clause.
      */
-    Optional<RunReport> findById(UUID runId);
+    Optional<RunReport> findFor(UUID runId, UUID callerId);
 
     /**
      * A group's runs, newest first, at most {@code limit} of them.
@@ -52,10 +64,12 @@ public interface SettlementRuns {
      * could pick it. What that costs is a handful of queries per listed run in one transaction, which is what the
      * limit is for.
      *
-     * <p>Group ids are read, never verified: groups are not tables in this build (`RecordObligationService`'s
-     * party ids are unverified for the same reason), so a group nobody has heard of reads back as a group with no
-     * runs. The alternative - a {@code 404} for an unknown group - would require a group table to ask, and inventing
-     * an error for a case this module cannot distinguish is worse than an empty list that is true.
+     * <p><strong>Group ids are read, never verified here, and membership is the use case's condition.</strong> This
+     * method answers what a group's runs are; whether the caller may see them is asked before it is called
+     * ({@code Groups.isMember}, ADR 0054), because the group id is the caller's own argument and the check costs one
+     * statement rather than a join. The paragraph that used to be here said "groups are not tables in this build, so a
+     * group nobody has heard of reads back as a group with no runs" - true when it was written, false since ADR 0043,
+     * and the reason every one of these reads now refuses a group that is not the caller's.
      */
     List<RunReport> listByGroup(UUID groupId, int limit);
 }

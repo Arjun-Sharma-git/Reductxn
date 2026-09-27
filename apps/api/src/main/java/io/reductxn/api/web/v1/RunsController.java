@@ -167,12 +167,20 @@ public class RunsController {
      */
     @GetMapping("/{runId}")
     public ResponseEntity<Object> read(@PathVariable String runId, HttpServletRequest http) {
+        // Who is asking first, since ADR 0054: a run belongs to a group, so reading one is reading that group's books.
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
         DomainError malformed = malformedRunId(runId);
         if (malformed != null) {
             return problem(malformed, http.getRequestURI());
         }
 
-        Result<RunReport> result = readRun.read(UUID.fromString(runId));
+        Result<RunReport> result = readRun.read(
+                ((Result.Ok<SignedInUser>) caller).value().id(), UUID.fromString(runId));
 
         if (result instanceof Result.Ok<RunReport> run) {
             return ResponseEntity.ok(RunMapper.toResponse(run.value()));
@@ -185,16 +193,23 @@ public class RunsController {
      * {@code GET /v1/runs/{runId}/transfers}: the who-pays-whom instruction list.
      *
      * <p>Served from the same read as the run above, so the two endpoints cannot disagree about a plan that a group
-     * approved and a rail is executing.
+     * approved and a rail is executing - including about who may see it (ADR 0054).
      */
     @GetMapping("/{runId}/transfers")
     public ResponseEntity<Object> transfers(@PathVariable String runId, HttpServletRequest http) {
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
         DomainError malformed = malformedRunId(runId);
         if (malformed != null) {
             return problem(malformed, http.getRequestURI());
         }
 
-        Result<RunReport> result = readRun.read(UUID.fromString(runId));
+        Result<RunReport> result = readRun.read(
+                ((Result.Ok<SignedInUser>) caller).value().id(), UUID.fromString(runId));
 
         if (result instanceof Result.Ok<RunReport> run) {
             return ResponseEntity.ok(RunMapper.toInstructions(run.value()));

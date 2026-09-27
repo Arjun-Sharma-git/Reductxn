@@ -11,7 +11,6 @@ import io.reductxn.api.port.in.SignedInUser;
 import io.reductxn.api.port.in.VoidObligation;
 import io.reductxn.api.web.CallerResolver;
 import io.reductxn.api.web.dto.ObligationMapper;
-import io.reductxn.api.web.dto.ObligationResponse;
 import io.reductxn.api.web.dto.RecordObligationRequest;
 import io.reductxn.api.web.error.ExpectedFailures;
 import io.reductxn.kernel.api.DomainError;
@@ -91,25 +90,40 @@ public class ObligationsController {
             @RequestParam(name = "limit", required = false) String limit,
             HttpServletRequest http) {
 
+        // Who is asking first, since ADR 0054. The group arrives as a query parameter rather than a path segment, so
+        // this is the read a rule about paths could not have found - and the ordering is the one the write below uses:
+        // a request with no session is refused as a 401 before anything about its filter is judged.
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
         DomainError malformed = malformedQuery(groupId, status, memberId, from, to, sort, limit);
 
         if (malformed != null) {
             return problem(malformed, http.getRequestURI());
         }
 
-        List<ObligationResponse> obligations = readObligations.list(new ObligationFilter(
+        Result<List<RecordedObligation>> obligations = readObligations.list(
+                ((Result.Ok<SignedInUser>) caller).value().id(),
+                new ObligationFilter(
                         UUID.fromString(groupId),
                         status == null ? null : ObligationStatus.fromWire(status).orElseThrow(),
                         memberId == null ? null : UUID.fromString(memberId),
                         from == null ? null : LocalDate.parse(from),
                         to == null ? null : LocalDate.parse(to),
                         sort == null ? ObligationFilter.DEFAULT_SORT : ObligationFilter.Sort.fromWire(sort).orElseThrow(),
-                        limit == null ? ObligationFilter.DEFAULT_LIMIT : Integer.parseInt(limit)))
+                        limit == null ? ObligationFilter.DEFAULT_LIMIT : Integer.parseInt(limit)));
+
+        if (obligations instanceof Result.Failure<List<RecordedObligation>> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
+        return ResponseEntity.ok(((Result.Ok<List<RecordedObligation>>) obligations).value()
                 .stream()
                 .map(ObligationMapper::toResponse)
-                .toList();
-
-        return ResponseEntity.ok(obligations);
+                .toList());
     }
 
     /**

@@ -41,15 +41,29 @@ class ReadGroupBalancesApiTest extends DatabaseTest {
     private static final UUID BORIS = new UUID(0L, 11L);
     private static final UUID CAROL = new UUID(0L, 12L);
 
+    private static final String ALICE_PHONE = "+919812345670";
+
+    /** Another group with nothing in it, which is the one that answers an empty list (see the last test). */
+    private static final UUID EMPTY_GROUP = new UUID(0L, 999L);
+
     @Autowired
     private WebApplicationContext context;
 
     private MockMvc mvc;
 
+    /** The caller, and a member of both groups: reading a group's books requires being in it (ADR 0054). */
+    private String alice;
+
     /** Built from the framework rather than annotated: Spring Boot 4 no longer ships {@code @AutoConfigureMockMvc}. */
     @BeforeEach
     void buildMockMvc() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
+
+        // Alice is the reader *and* a party to the ledger, which is the point of the fixed id: the same person the
+        // obligations name is the one whose session asks for the balances.
+        alice = signedIn(ALICE_PHONE, ALICE);
+        memberRow(GROUP, ALICE, "Alice");
+        memberRow(EMPTY_GROUP, ALICE, "Alice");
     }
 
     @Test
@@ -87,7 +101,8 @@ class ReadGroupBalancesApiTest extends DatabaseTest {
         obligate(GROUP, BORIS, ALICE, 4_000L, "INR", 2);
         obligate(GROUP, CAROL, ALICE, 2_500L, "INR", 2);
 
-        String preview = mvc.perform(get("/v1/groups/{groupId}/netting/preview", GROUP))
+        String preview = mvc.perform(get("/v1/groups/{groupId}/netting/preview", GROUP)
+                        .header("Authorization", "Bearer " + alice))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
@@ -131,22 +146,61 @@ class ReadGroupBalancesApiTest extends DatabaseTest {
 
     @Test
     void aGroupWithNothingOpenHasNoBalancesRatherThanAnError() throws Exception {
-        balances(new UUID(0L, 999L))
+        balances(EMPTY_GROUP)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
     }
 
+    /**
+     * The read is the group's, and since ADR 0054 that is enforced rather than assumed.
+     *
+     * <p>Three answers, and each is the point of one of the three lines: a request with no session is a `401`; a group
+     * the caller is not in is a `404` with the same code a group that does not exist answers, so a guessed id cannot be
+     * tested by comparing two refusals; and a malformed id is a `400` - judged *after* the session, which is why the
+     * first line of this test no longer passes with no token at all.
+     *
+     * <p>The stranger's case is the one worth naming: before this slice the request in the second block answered the
+     * group's balances, and the endpoint was reachable from the client's own home screen by pasting an id.
+     */
+    @Test
+    void theBalancesAreTheGroupMembersOnly() throws Exception {
+        obligate(GROUP, ALICE, BORIS, 10_000L, "INR", 2);
+
+        mvc.perform(get("/v1/groups/{groupId}/balances", GROUP))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("api.not_signed_in"));
+
+        // Boris is in no group: his session is real, and the group is not his.
+        String boris = signedIn("+919812345671", BORIS);
+
+        mvc.perform(get("/v1/groups/{groupId}/balances", GROUP).header("Authorization", "Bearer " + boris))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_group"));
+
+        // A stranger's group id and an id that matches nothing are one answer, so neither line says whether the group
+        // exists.
+        mvc.perform(get("/v1/groups/{groupId}/balances", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + boris))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_group"));
+
+        mvc.perform(get("/v1/groups/{groupId}/balances", "not-a-uuid").header("Authorization", "Bearer " + alice))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("api.request_incomplete"));
+    }
+
     @Test
     void frameworkErrorsAreProblemsToo() throws Exception {
-        // A group id that is not a UUID never reaches the controller, and the contract says so: `400` with a problem
-        // body, so a client can branch on it rather than on an empty response.
-        mvc.perform(get("/v1/groups/{groupId}/balances", "not-a-uuid"))
+        // A group id that is not a UUID is refused by this controller rather than by Spring, since ADR 0054, so the
+        // body carries a code a client can branch on instead of an empty response.
+        mvc.perform(get("/v1/groups/{groupId}/balances", "not-a-uuid").header("Authorization", "Bearer " + alice))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
     }
 
     private ResultActions balances(UUID groupId) throws Exception {
-        return mvc.perform(get("/v1/groups/{groupId}/balances", groupId));
+        return mvc.perform(get("/v1/groups/{groupId}/balances", groupId)
+                .header("Authorization", "Bearer " + alice));
     }
 
     /**
