@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as GroupsGroupIdRouteRouteImport } from './routes/groups/$groupId/route'
 import { Route as InvitesCodeRouteImport } from './routes/invites/$code'
+import { Route as GroupsGroupIdActivityRouteImport } from './routes/groups/$groupId/activity'
 import { Route as GroupsGroupIdBalancesRouteImport } from './routes/groups/$groupId/balances'
 import { Route as GroupsGroupIdMembersRouteImport } from './routes/groups/$groupId/members'
 import { Route as GroupsGroupIdNettingRouteImport } from './routes/groups/$groupId/netting'
@@ -40,6 +41,11 @@ const InvitesCodeRoute = InvitesCodeRouteImport.update({
   id: '/invites/$code',
   path: '/invites/$code',
   getParentRoute: () => rootRouteImport,
+} as any)
+const GroupsGroupIdActivityRoute = GroupsGroupIdActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
+  getParentRoute: () => GroupsGroupIdRouteRoute,
 } as any)
 const GroupsGroupIdBalancesRoute = GroupsGroupIdBalancesRouteImport.update({
   id: '/balances',
@@ -85,6 +91,7 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
   '/invites/$code': typeof InvitesCodeRoute
+  '/groups/$groupId/activity': typeof GroupsGroupIdActivityRoute
   '/groups/$groupId/balances': typeof GroupsGroupIdBalancesRoute
   '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
@@ -98,6 +105,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
   '/invites/$code': typeof InvitesCodeRoute
+  '/groups/$groupId/activity': typeof GroupsGroupIdActivityRoute
   '/groups/$groupId/balances': typeof GroupsGroupIdBalancesRoute
   '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
@@ -112,6 +120,7 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
   '/invites/$code': typeof InvitesCodeRoute
+  '/groups/$groupId/activity': typeof GroupsGroupIdActivityRoute
   '/groups/$groupId/balances': typeof GroupsGroupIdBalancesRoute
   '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
@@ -127,6 +136,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/groups/$groupId'
     | '/invites/$code'
+    | '/groups/$groupId/activity'
     | '/groups/$groupId/balances'
     | '/groups/$groupId/members'
     | '/groups/$groupId/netting'
@@ -140,6 +150,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/groups/$groupId'
     | '/invites/$code'
+    | '/groups/$groupId/activity'
     | '/groups/$groupId/balances'
     | '/groups/$groupId/members'
     | '/groups/$groupId/netting'
@@ -153,6 +164,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/groups/$groupId'
     | '/invites/$code'
+    | '/groups/$groupId/activity'
     | '/groups/$groupId/balances'
     | '/groups/$groupId/members'
     | '/groups/$groupId/netting'
@@ -198,6 +210,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/invites/$code'
       preLoaderRoute: typeof InvitesCodeRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/groups/$groupId/activity': {
+      id: '/groups/$groupId/activity'
+      path: '/activity'
+      fullPath: '/groups/$groupId/activity'
+      preLoaderRoute: typeof GroupsGroupIdActivityRouteImport
+      parentRoute: typeof GroupsGroupIdRouteRoute
     }
     '/groups/$groupId/balances': {
       id: '/groups/$groupId/balances'
@@ -252,6 +271,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface GroupsGroupIdRouteRouteChildren {
+  GroupsGroupIdActivityRoute: typeof GroupsGroupIdActivityRoute
   GroupsGroupIdBalancesRoute: typeof GroupsGroupIdBalancesRoute
   GroupsGroupIdMembersRoute: typeof GroupsGroupIdMembersRoute
   GroupsGroupIdNettingRoute: typeof GroupsGroupIdNettingRoute
@@ -262,6 +282,7 @@ interface GroupsGroupIdRouteRouteChildren {
 }
 
 const GroupsGroupIdRouteRouteChildren: GroupsGroupIdRouteRouteChildren = {
+  GroupsGroupIdActivityRoute: GroupsGroupIdActivityRoute,
   GroupsGroupIdBalancesRoute: GroupsGroupIdBalancesRoute,
   GroupsGroupIdMembersRoute: GroupsGroupIdMembersRoute,
   GroupsGroupIdNettingRoute: GroupsGroupIdNettingRoute,

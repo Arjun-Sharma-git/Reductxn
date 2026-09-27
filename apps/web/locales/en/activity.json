@@ -1,0 +1,18 @@
+{
+  "title": "Activity",
+  "description": "What has happened in this group, newest first: who joined, who answered a settlement run, and what was invited. There is no separate history table behind this - each row is read from the record it came from, so the feed cannot drift from the thing it describes.",
+  "empty": "Nothing has happened yet. Every membership, answer and invitation in this group will appear here.",
+  "somebody": "Somebody",
+  "memberJoined": "{name} joined, as a {role}.",
+  "decisionRecorded": "A member answered a settlement run: {decision}. The record says which member and not what the group calls them, so this line names nobody.",
+  "invitationCreated": "An invitation code was created - spent {uses} of {max} times.",
+  "invitationCreatedUnbounded": "An invitation code was created, with no limit on how often it can be spent - spent {uses} time(s) so far.",
+  "roles": {
+    "admin": "admin",
+    "member": "member"
+  },
+  "decisions": {
+    "approve": "approved",
+    "reject": "rejected"
+  }
+}
