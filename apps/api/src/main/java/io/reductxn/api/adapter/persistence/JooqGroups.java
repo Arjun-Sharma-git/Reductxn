@@ -89,6 +89,11 @@ public class JooqGroups implements Groups {
     private static final Field<OffsetDateTime> MY_JOINED_AT =
             DSL.field(DSL.name("mine", "joined_at"), OffsetDateTime.class);
 
+    // The membership existence check's own columns: unqualified and on the bare table, because that query joins nothing.
+    private static final Table<Record> MEMBERS = DSL.table("group_members");
+    private static final Field<UUID> MEMBERS_GROUP_ID = DSL.field("group_id", UUID.class);
+    private static final Field<UUID> MEMBERS_USER_ID = DSL.field("user_id", UUID.class);
+
     private static final Field<UUID> THEIR_GROUP = DSL.field(DSL.name("everyone", "group_id"), UUID.class);
     /**
      * How many members a group has, as a correlated subquery rather than a second join.
@@ -190,6 +195,24 @@ public class JooqGroups implements Groups {
                 .where(GROUP_ID.eq(groupId))
                 .and(MY_USER.eq(userId))
                 .fetchOptional(JooqGroups::toStored);
+    }
+
+    /**
+     * Whether this person is a member, asked of the memberships alone.
+     *
+     * <p>No group row and no join: this is the question "does a membership exist", and answering it through
+     * {@link #forMember} would make the group row a requirement for every read that asks it - which is exactly the bug the
+     * activity feed's first version had (ADR 0044).
+     */
+    @Override
+    public boolean isMember(UUID groupId, UUID userId) {
+        Objects.requireNonNull(groupId, "groupId");
+        Objects.requireNonNull(userId, "userId");
+
+        return dsl.fetchExists(dsl.selectOne()
+                .from(MEMBERS)
+                .where(MEMBERS_GROUP_ID.eq(groupId))
+                .and(MEMBERS_USER_ID.eq(userId)));
     }
 
     /**

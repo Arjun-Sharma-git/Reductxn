@@ -2,15 +2,19 @@ package io.reductxn.api.web.v1;
 
 import io.reductxn.api.port.in.CreateGroup;
 import io.reductxn.api.port.in.CreatedGroup;
+import io.reductxn.api.port.in.ActivityEvent;
 import io.reductxn.api.port.in.GroupView;
 import io.reductxn.api.port.in.NewGroup;
+import io.reductxn.api.port.in.ReadActivity;
 import io.reductxn.api.port.in.ReadGroup;
 import io.reductxn.api.port.in.ReadGroups;
 import io.reductxn.api.port.in.RunRefusals;
 import io.reductxn.api.port.in.SignedInUser;
 import io.reductxn.api.web.CallerResolver;
+import io.reductxn.api.web.dto.ActivityEventResponse;
 import io.reductxn.api.web.dto.GroupResponse;
 import io.reductxn.api.web.dto.NewGroupBody;
+import io.reductxn.api.application.groups.ReadActivityService;
 import io.reductxn.api.web.error.ExpectedFailures;
 import io.reductxn.kernel.api.DomainError;
 import io.reductxn.kernel.api.Result;
@@ -25,6 +29,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Clock;
@@ -53,14 +58,16 @@ public class GroupsController {
     private final CreateGroup createGroup;
     private final ReadGroups readGroups;
     private final ReadGroup readGroup;
+    private final ReadActivity readActivity;
     private final CallerResolver callers;
     private final Clock clock;
 
-    public GroupsController(CreateGroup createGroup, ReadGroups readGroups, ReadGroup readGroup, CallerResolver callers,
-            Clock clock) {
+    public GroupsController(CreateGroup createGroup, ReadGroups readGroups, ReadGroup readGroup,
+            ReadActivity readActivity, CallerResolver callers, Clock clock) {
         this.createGroup = Objects.requireNonNull(createGroup, "createGroup");
         this.readGroups = Objects.requireNonNull(readGroups, "readGroups");
         this.readGroup = Objects.requireNonNull(readGroup, "readGroup");
+        this.readActivity = Objects.requireNonNull(readActivity, "readActivity");
         this.callers = Objects.requireNonNull(callers, "callers");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
@@ -160,6 +167,58 @@ public class GroupsController {
 
     private static UUID caller(SignedInUser user) {
         return user.id();
+    }
+
+    /**
+     * The group's history.
+     *
+     * <p>{@code limit} arrives as a string and is parsed here rather than as an {@code Integer} parameter: a `limit=abc` is a
+     * request that cannot be answered, and the module's vocabulary for that is {@code api.request_incomplete} with the field
+     * named - not a Spring conversion error that answers a shape no client has seen. A limit outside the contract's bounds is
+     * the service's business, not the boundary's: it clamps rather than refuses, because the schema declares a maximum and no
+     * minimum (ADR 0044).
+     */
+    @GetMapping("/{groupId}/activity")
+    public ResponseEntity<Object> activity(@PathVariable("groupId") String groupId,
+            @RequestParam(name = "limit", required = false) String limit, HttpServletRequest http) {
+
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
+        DomainError malformed = uuid(groupId);
+
+        if (malformed == null && limit != null) {
+            malformed = number(limit);
+        }
+
+        if (malformed != null) {
+            return problem(malformed, http.getRequestURI());
+        }
+
+        Result<List<ActivityEvent>> events = readActivity.of(
+                UUID.fromString(groupId),
+                caller(((Result.Ok<SignedInUser>) caller).value()),
+                limit == null ? ReadActivityService.DEFAULT_LIMIT : Integer.parseInt(limit));
+
+        if (events instanceof Result.Ok<List<ActivityEvent>> page) {
+            return ResponseEntity.ok(page.value().stream().map(ActivityEventResponse::of).toList());
+        }
+
+        return problem(((Result.Failure<List<ActivityEvent>>) events).error(), http.getRequestURI());
+    }
+
+    /** A page size that is not a number, answered with the same code and the same field a missing one gets. */
+    private static DomainError number(String limit) {
+        try {
+            Integer.parseInt(limit);
+
+            return null;
+        } catch (NumberFormatException notANumber) {
+            return new RunRefusals.RequestIncomplete("limit");
+        }
     }
 
     /**
