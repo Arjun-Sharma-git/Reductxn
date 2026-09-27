@@ -144,16 +144,21 @@ test('a refusal is recorded as a refusal, not as a failure', async ({ page }) =>
   expect(api.answers[0]!.memberId).toBe(ME.id);
 });
 
-test('refuses an answer from nobody, and says what to do about it', async ({ page }) => {
-  await stubSettlementApi(page);
+/**
+ * A plan nobody can read without a session, which is the read's answer since ADR 0054.
+ *
+ * <p><strong>This test asserted the opposite one slice ago and the sentence it was written on is the one this slice
+ * corrected.</strong> It said: "a member looking at a plan without a session, which the read allows and the answer does
+ * not (ADR 0053)". The read allowed it - `GET /runs/{runId}` served a bare run uuid - and that was the hole: a plan's
+ * figures, its amounts and its answers were readable by anybody holding an id. The read is a member's now, so a session
+ * that has ended is told so *at the read* rather than at the answer, and there is no form to offer.
+ */
+test('a plan cannot be read without a session, and the read says so', async ({ page }) => {
+  await stubSettlementApi(page, { signedIn: false });
   await page.goto(RUN);
 
-  // No sign-in and no identity stub: a member looking at a plan without a session, which the read allows and the
-  // answer does not (ADR 0053). The form is offered, the server refuses, and the refusal is what the member sees -
-  // in the catalog's wording for `api.not_signed_in` rather than in anything this screen invented.
-  await page.getByRole('button', { name: 'Approve this plan' }).click();
-
   await expect(page.getByText('You are not signed in, or your session has ended.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Approve this plan' })).toHaveCount(0);
   await expect(page.getByRole('cell', { name: 'Approved' })).toHaveCount(0);
 });
 

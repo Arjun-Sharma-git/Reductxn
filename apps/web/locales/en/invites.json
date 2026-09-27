@@ -1,6 +1,14 @@
 {
   "title": "Join this group",
-  "lede": "Somebody sent you a code that lets you join their group. Enter the name they will know you by - that is all this asks for.",
+  "lede": "Somebody sent you a code that lets you join their group. This page says which group it is for, and then asks for the name the group will know you by.",
+  "preview": {
+    "title": "What this code is for",
+    "withName": "You are joining {group}.",
+    "withoutName": "You are joining a group that has no name yet - its identifier is {groupId}.",
+    "members": "{count} members",
+    "expires": "Usable until {when}",
+    "noLimit": "No limit on how many times it can be used, so the same code joins anybody you send it to until it expires."
+  },
   "form": {
     "title": "Who is joining",
     "description": "The group will use this name wherever it names you: on a commitment, in a settlement plan, and beside your share of it. Nothing here checks the name - who is joining is decided by the account you signed in with.",
@@ -13,6 +21,7 @@
     "title": "You are in",
     "description": "The group has you as a member now. This is the whole of what accepting the code did.",
     "name": "{name} is a member of this group.",
-    "idNote": "That identifier is the account you joined with, which is the same one every other screen shows beside your name."
+    "idNote": "That identifier is the account you joined with, which is the same one every other screen shows beside your name.",
+    "goToTheGroup": "Go to the group"
   }
 }

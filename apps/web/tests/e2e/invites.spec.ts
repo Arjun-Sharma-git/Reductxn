@@ -51,6 +51,12 @@ test('accepting a code joins the group as the account that is signed in', async 
   // The code is on the screen, so somebody who followed a link can check it is the one they were sent.
   await expect(page.getByTestId('invite-code')).toHaveText(CODE);
 
+  // And so is the group it is for, which is the read ADR 0054 added: before it, this page asked for a name before it
+  // could say what the name was for.
+  await expect(page.getByText('You are joining Flat 3B.')).toBeVisible();
+  await expect(page.getByText('4 members')).toBeVisible();
+  await expect(page.getByText(/Usable until/)).toBeVisible();
+
   const join = page.getByRole('button', { name: 'Join the group' });
   await expect(join).toBeDisabled();
 
@@ -65,6 +71,36 @@ test('accepting a code joins the group as the account that is signed in', async 
   await expect(page.getByTestId('member-id')).toHaveText(ME.id);
   expect(api.acceptances).toHaveLength(1);
   expect(api.acceptances[0]).toBe('{"displayName":"Alice Rao"}');
+
+  // And a way back to what was joined, which the acceptance alone could not provide: its response is a member, and a
+  // member carries no group. The group id comes from the preview.
+  await page.getByRole('link', { name: 'Go to the group' }).click();
+  await expect(page).toHaveURL(new RegExp(`/groups/${GROUP}/netting$`));
+});
+
+test('a code for a group that has no name yet still says which group it is', async ({ page }) => {
+  // A group that exists only as rows: `group_members` and `invitations` write a bare uuid, so its codes are real and the
+  // preview's `name` is absent rather than empty (ADR 0043, 0054).
+  await stubInvitesApi(page, { group: { id: GROUP, name: null, memberCount: 2 } });
+  await stubIdentityApi(page);
+
+  await page.goto(`/invites/${CODE}`);
+
+  await expect(page.getByText(/no name yet/)).toBeVisible();
+  await expect(page.getByText(GROUP)).toBeVisible();
+  await expect(page.getByText('2 members')).toBeVisible();
+});
+
+test('a code reads without a session, which is what the operation is for', async ({ page }) => {
+  // No identity stub and no sign-in at all: the preview is the one operation a person who has not signed in can read,
+  // because they are the person a link is sent to. The stub does not check for a token either, so this test would fail
+  // against a stub that demanded one - which is the point of asserting it here rather than in the API's own tests.
+  await stubInvitesApi(page);
+
+  await page.goto(`/invites/${CODE}`);
+
+  await expect(page.getByText('You are joining Flat 3B.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Join the group' })).toBeVisible();
 });
 
 test('an acceptance with no session is refused rather than joined', async ({ page }) => {
@@ -81,18 +117,24 @@ test('an acceptance with no session is refused rather than joined', async ({ pag
   await expect(page.getByRole('button', { name: 'Join the group' })).toBeVisible();
 });
 
-test('an expired invitation says it ran out of time', async ({ page }) => {
+/**
+ * A code that has run out is refused **before anybody types a name**, and the two ways it can run out are told apart.
+ *
+ * <p>These two tests used to submit the form and assert the refusal beside it, which is what the screen could do when the
+ * only operation behind a code was the acceptance. The preview answers the same three conditions one step earlier (ADR
+ * 0054), so the form is not rendered at all - and that is the improvement rather than a detail: a stale link should tell
+ * somebody to ask for a new one, not collect their name and then tell them.
+ */
+test('an expired invitation says it ran out of time, before the form appears', async ({ page }) => {
   await stubInvitesApi(page, { refusal: { status: 410, code: 'api.invite_expired' } });
   await stubIdentityApi(page);
   await signIn(page);
 
   await page.goto(`/invites/${CODE}`);
-  await page.getByLabel(/Your name/).fill('Alice Rao');
-  await page.getByRole('button', { name: 'Join the group' }).click();
 
   await expect(page.getByText(/That invitation has expired/)).toBeVisible();
-  // Not joined, so the form is still there rather than a card claiming a membership that does not exist.
-  await expect(page.getByRole('button', { name: 'Join the group' })).toBeVisible();
+  // Nothing to fill in: there is no membership to claim and no name worth asking for.
+  await expect(page.getByRole('button', { name: 'Join the group' })).toBeHidden();
 });
 
 test('a code nobody holds says the code is wrong rather than that it ran out', async ({ page }) => {
@@ -101,9 +143,8 @@ test('a code nobody holds says the code is wrong rather than that it ran out', a
   await signIn(page);
 
   await page.goto('/invites/ZZZZ9999');
-  await page.getByLabel(/Your name/).fill('Alice Rao');
-  await page.getByRole('button', { name: 'Join the group' }).click();
 
   await expect(page.getByText(/That invite code does not exist/)).toBeVisible();
   await expect(page.getByText(/has expired/)).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Join the group' })).toBeHidden();
 });

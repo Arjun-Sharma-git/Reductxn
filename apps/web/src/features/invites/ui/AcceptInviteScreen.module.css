@@ -40,6 +40,17 @@
   font-size: var(--rn-text-lg);
 }
 
+/* The group a code joins, and the code's own terms: the facts the preview adds above the form (ADR 0054). */
+.members {
+  font-size: var(--rn-text-lg);
+  margin-block-end: var(--rn-space-2);
+}
+
+.caption {
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-sm);
+}
+
 .identifier {
   font-family: var(--rn-font-amount);
   font-size: var(--rn-text-xs);
