@@ -53,3 +53,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0045 | Voiding is a transition, a refusal that names nothing, and idempotence by state | accepted |
 | 0046 | A quote is locked by recording it, so the second door is removed | accepted |
 | 0047 | The joiner is the caller, and the contract's own promise is what closed it | accepted |
+| 0048 | A member, not a stranger, is who may add somebody to a group | accepted |
