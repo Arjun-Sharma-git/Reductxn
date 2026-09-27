@@ -57,3 +57,4 @@ Any change to a **RULE**, the module graph, the stack, or a principle P1-P13 req
 | 0049 | A member is who may write to a group's books | accepted |
 | 0050 | A request to execute travels as a row, and the worker spends it | accepted |
 | 0051 | A rail's callback is recorded, and the driver prefers it to a poll | accepted |
+| 0052 | A deferral is checked against every enforcement, not only this JVM's | accepted |
