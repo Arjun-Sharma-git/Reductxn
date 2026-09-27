@@ -16,7 +16,7 @@ import type { paths } from '@/shared/api/client';
 /** A code that lets somebody join a group: the code, when it stops working, and its limit if it has one. */
 export type Invite = paths['/groups/{groupId}/invites']['post']['responses']['201']['content']['application/json'];
 
-/** Who is accepting: an assertion rather than a verified fact, because this build has no sign-in (ADR 0041). */
+/** Who is accepting: what the group will call them, and nobody else - the joiner is the caller (ADR 0042, 0047). */
 export type AcceptInvite = NonNullable<
   paths['/invites/{code}/accept']['post']['requestBody']
 >['content']['application/json'];

@@ -50,16 +50,11 @@ class ActivityApiTest extends DatabaseTest {
     private String owner;
     private String other;
 
-    /** The users this class signed in, by number, so a test can name the caller it means. */
-    private final java.util.Map<String, UUID> users = new java.util.HashMap<>();
-
     /** The group every test in this class is about, made through the endpoint that makes groups. */
     private UUID groupId;
 
     @BeforeEach
     void buildMockMvc() throws Exception {
-        users.clear();
-
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
 
         owner = signedIn(OWNER);
@@ -82,36 +77,6 @@ class ActivityApiTest extends DatabaseTest {
                 .andReturn().getResponse().getContentAsString();
 
         return UUID.fromString(JsonPath.read(body, "$.id"));
-    }
-
-    private String signedIn(String phone) {
-        UUID user = UUID.randomUUID();
-        String accessToken = SessionTokens.issue();
-        Instant now = Instant.now();
-
-        jdbc.update("INSERT INTO users (id, phone_number, display_name, created_at) VALUES (?, ?, ?, ?)",
-                user, phone, phone, now.atOffset(ZoneOffset.UTC));
-
-        jdbc.update("""
-                INSERT INTO sessions (access_token_hash, refresh_token_hash, user_id, device_id, created_at,
-                                      access_expires_at, refresh_expires_at)
-                VALUES (?, ?, ?, 'test', ?, ?, ?)
-                """,
-                SessionTokens.hash(accessToken),
-                SessionTokens.hash(SessionTokens.issue()),
-                user,
-                now.atOffset(ZoneOffset.UTC),
-                now.plus(Duration.ofMinutes(30)).atOffset(ZoneOffset.UTC),
-                now.plus(Duration.ofDays(30)).atOffset(ZoneOffset.UTC));
-
-        users.put(phone, user);
-
-        return accessToken;
-    }
-
-    /** The user id behind a number this class signed in. */
-    private UUID user(String phone) {
-        return users.get(phone);
     }
 
     /**

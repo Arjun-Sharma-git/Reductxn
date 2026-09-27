@@ -1,5 +1,7 @@
 package io.reductxn.api;
 
+import io.reductxn.api.application.identity.SessionTokens;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -8,8 +10,11 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -72,8 +77,15 @@ abstract class DatabaseTest {
     @Autowired
     protected JdbcTemplate jdbc;
 
+    /** The users a test class signed in, by number, so a test can name the caller it means. */
+    private final Map<String, UUID> signedInUsers = new HashMap<>();
+
     @BeforeEach
     void resetSchema() {
+        // A credential is per-test state, like everything else this fixture clears: a user id is generated per sign-in,
+        // and the rows it points at are gone by the next test, so a remembered id would be an id for nobody.
+        signedInUsers.clear();
+
         // Postings before entries, because a posting references its entry. The order is not a formality: a
         // truncate in the other order fails on the foreign key, which is the constraint doing its job on the
         // fixture rather than on the code.
@@ -122,6 +134,51 @@ abstract class DatabaseTest {
         // heavier tax - which is the point of assessing it per currency.
         taxRule("IN", "INR", "flat", "{\"perTransferMinor\": 50}");
         taxRule("IN", "JPY", "flat", "{\"perTransferMinor\": 50}");
+    }
+
+    /**
+     * A signed-in person, with a session row in the table and a token in hand.
+     *
+     * <p><strong>It lives here because four test classes now need a caller, and a credential is the one thing a test must
+     * not invent differently each time.</strong> The session is written the way the verify operation writes one - the same
+     * hashing, the same windows, through the production {@code SessionTokens} - because the token is what the boundary
+     * under test is <em>for</em>: a test that hashed with something else would be arranging a credential the API does not
+     * accept, and would prove nothing about the operation it is testing.
+     *
+     * <p>The user id is generated rather than passed in, because a session row is what makes somebody real: a test that
+     * wants to name the person it signed in asks {@link #user(String)}.
+     *
+     * @param phone the number this person signs in with, so a test can name the caller it means
+     * @return the access token to send as {@code Authorization: Bearer <token>}
+     */
+    protected String signedIn(String phone) {
+        UUID user = UUID.randomUUID();
+        String accessToken = SessionTokens.issue();
+        Instant now = Instant.now();
+
+        jdbc.update("INSERT INTO users (id, phone_number, display_name, created_at) VALUES (?, ?, ?, ?)",
+                user, phone, phone, now.atOffset(ZoneOffset.UTC));
+
+        jdbc.update("""
+                INSERT INTO sessions (access_token_hash, refresh_token_hash, user_id, device_id, created_at,
+                                      access_expires_at, refresh_expires_at)
+                VALUES (?, ?, ?, 'test', ?, ?, ?)
+                """,
+                SessionTokens.hash(accessToken),
+                SessionTokens.hash(SessionTokens.issue()),
+                user,
+                now.atOffset(ZoneOffset.UTC),
+                now.plus(Duration.ofMinutes(30)).atOffset(ZoneOffset.UTC),
+                now.plus(Duration.ofDays(30)).atOffset(ZoneOffset.UTC));
+
+        signedInUsers.put(phone, user);
+
+        return accessToken;
+    }
+
+    /** The user id behind a number this test class signed in, or null when it never did. */
+    protected UUID user(String phone) {
+        return signedInUsers.get(phone);
     }
 
     protected void taxRule(String jurisdiction, String currency, String kind, String paramsJson) {

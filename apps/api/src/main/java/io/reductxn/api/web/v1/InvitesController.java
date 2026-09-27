@@ -8,6 +8,8 @@ import io.reductxn.api.port.in.CreatedInvite;
 import io.reductxn.api.port.in.MemberRefusals;
 import io.reductxn.api.port.in.NewInvite;
 import io.reductxn.api.port.in.RunRefusals;
+import io.reductxn.api.port.in.SignedInUser;
+import io.reductxn.api.web.CallerResolver;
 import io.reductxn.api.web.dto.AcceptInviteRequest;
 import io.reductxn.api.web.dto.InviteResponse;
 import io.reductxn.api.web.dto.MemberResponse;
@@ -37,10 +39,12 @@ import java.util.UUID;
  * prefix, because the contract gives the two paths no common prefix: creation is addressed by the group and acceptance by
  * the code, which is the contract's own decision (the code carries the group, which is why it is globally unique).
  *
- * <p><strong>Both writes are unauthorised, and the contract says so rather than the summary pretending otherwise.</strong>
- * There is no identity in this build, so nothing stops any caller creating an invitation to any group, and an acceptance
- * is whoever the body says. The identity gap is recorded (ADR 0020, 0035, 0041); what this class must not do is imply a
- * check it cannot make.
+ * <p><strong>The acceptance is about the caller; the creation is still about nothing.</strong> Somebody handing in a code
+ * joins *as themselves*, so this controller resolves the session and refuses a request without one - which is the
+ * contract's promise kept, one slice after `GET /me` made it keepable (ADR 0042). Creating an invitation is the other
+ * half and is still unauthorised: nothing stops a caller making a code for a group they are not in, which the contract
+ * says where the operation is described and this class does not pretend otherwise. What the two now have in common is
+ * only the flow; what they do about identity differs, which is why the difference is stated here rather than implied.
  *
  * <p><strong>A code is read in the case it was typed.</strong> The alphabet is uppercase and the table refuses anything
  * else, so a code typed in lowercase would be a {@code 404} whose cause is invisible in the request. The path variable
@@ -53,11 +57,13 @@ public class InvitesController {
 
     private final CreateInvite createInvite;
     private final AcceptInvite acceptInvite;
+    private final CallerResolver callers;
     private final Clock clock;
 
-    public InvitesController(CreateInvite createInvite, AcceptInvite acceptInvite, Clock clock) {
+    public InvitesController(CreateInvite createInvite, AcceptInvite acceptInvite, CallerResolver callers, Clock clock) {
         this.createInvite = Objects.requireNonNull(createInvite, "createInvite");
         this.acceptInvite = Objects.requireNonNull(acceptInvite, "acceptInvite");
+        this.callers = Objects.requireNonNull(callers, "callers");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -99,6 +105,15 @@ public class InvitesController {
             @RequestBody(required = false) AcceptInviteRequest request,
             HttpServletRequest http) {
 
+        // Before the body, and that order is the contract's: who is asking is the question, and a request with no
+        // session is refused as such rather than as a malformed one. The three group operations and the void resolve
+        // their caller first for the same reason (ADR 0043, 0045).
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
         DomainError malformed = malformedAcceptance(code, request);
 
         if (malformed != null) {
@@ -107,7 +122,7 @@ public class InvitesController {
 
         AcceptedInvitation accepted = new AcceptedInvitation(
                 trimmed(code),
-                UUID.fromString(request.userId()),
+                ((Result.Ok<SignedInUser>) caller).value().id(),
                 request.displayName(),
                 clock.instant());
 
@@ -132,9 +147,9 @@ public class InvitesController {
         if (request == null) {
             return new RunRefusals.RequestIncomplete("body");
         }
-        if (request.userId() == null || !isUuid(request.userId())) {
-            return new RunRefusals.RequestIncomplete("userId, the person joining, as a uuid");
-        }
+        // No `userId` branch: the field is not in the contract, so there is nothing here to validate - the person
+        // joining came from the session. An unknown property in the body is ignored rather than refused, which is
+        // Spring's default and the behaviour the contract's schema description states.
         if (request.displayName() == null || request.displayName().isBlank()) {
             return new RunRefusals.RequestIncomplete("displayName, what the group will call them");
         }

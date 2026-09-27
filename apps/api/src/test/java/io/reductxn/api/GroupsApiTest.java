@@ -14,11 +14,6 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.time.ZoneOffset;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -55,57 +50,15 @@ class GroupsApiTest extends DatabaseTest {
 
     private MockMvc mvc;
 
-    /** The users this class signed in, by number, so a test can name the caller it means. */
-    private final Map<String, UUID> users = new HashMap<>();
-
     private String owner;
     private String other;
 
     @BeforeEach
     void buildMockMvc() {
-        users.clear();
-
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
 
         owner = signedIn(OWNER);
         other = signedIn(OTHER);
-    }
-
-    /**
-     * A signed-in person, with a session in the table and a token in hand.
-     *
-     * <p>The session is written the way the verify operation writes one - same hashing, same windows - because the token is
-     * what these reads are *for*. A test that hashed with something else would be arranging a credential the API does not
-     * accept, and would prove nothing about the read it is testing.
-     */
-    private String signedIn(String phone) {
-        UUID user = UUID.randomUUID();
-        String accessToken = SessionTokens.issue();
-        Instant now = Instant.now();
-
-        jdbc.update("INSERT INTO users (id, phone_number, display_name, created_at) VALUES (?, ?, ?, ?)",
-                user, phone, phone, now.atOffset(ZoneOffset.UTC));
-
-        jdbc.update("""
-                INSERT INTO sessions (access_token_hash, refresh_token_hash, user_id, device_id, created_at,
-                                      access_expires_at, refresh_expires_at)
-                VALUES (?, ?, ?, 'test', ?, ?, ?)
-                """,
-                SessionTokens.hash(accessToken),
-                SessionTokens.hash(SessionTokens.issue()),
-                user,
-                now.atOffset(ZoneOffset.UTC),
-                now.plus(Duration.ofMinutes(30)).atOffset(ZoneOffset.UTC),
-                now.plus(Duration.ofDays(30)).atOffset(ZoneOffset.UTC));
-
-        users.put(phone, user);
-
-        return accessToken;
-    }
-
-    /** The user id behind a number this class signed in. */
-    private UUID user(String phone) {
-        return users.get(phone);
     }
 
     /**

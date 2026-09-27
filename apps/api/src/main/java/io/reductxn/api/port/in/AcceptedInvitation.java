@@ -5,14 +5,14 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Somebody handing in a code and saying who they are.
+ * Somebody handing in a code, and the person the session says they are.
  *
- * <p><strong>The body is the identity, and that is the recorded gap rather than a design.</strong> There is no `GET /me`
- * and no authentication in this build, so the server cannot know who is holding the code - the same absence the
- * decision endpoint works with, where "the member is whoever the body says" (ADR 0020), and the same one the members
- * write works with. The alternative was to derive the member from something the request already carries, which would
- * mean inventing an identity and then trusting it; naming who is joining at least makes the trust explicit, and the gap
- * is recorded until sign-in exists (ADR 0041).
+ * <p><strong>The identity gap this record documented is closed at the boundary, and the use case did not change.</strong>
+ * Its `userId` used to be supplied by the request body, with a note explaining that there was no `GET /me` to derive one
+ * from - and the contract promised that "when sign-in exists, this body disappears and the acceptance becomes about the
+ * caller". Sign-in exists (ADR 0042), so the boundary resolves the session and hands the id down: the field now records
+ * a fact about the request rather than an assertion inside it, and `AcceptInviteService` is byte-for-byte what it was,
+ * which is what it looks like when the gap was one layer out.
  *
  * <p>{@code displayName} is what the group will call them, so accepting a code is a way of *becoming a member* and
  * refuses a name by the rule the members write uses ({@link MemberRefusals.NameTooLong}) rather than a second rule of its
@@ -20,7 +20,7 @@ import java.util.UUID;
  * that conferred `admin` would be a privilege handed out by a default.
  *
  * @param code        the code from the invitation
- * @param userId      who is joining, as the body says (see the identity gap above)
+ * @param userId      who is joining, resolved from the caller's session at the boundary (ADR 0047)
  * @param displayName what the group will call them
  * @param acceptedAt  when they handed it in, from the boundary's clock
  */

@@ -3,8 +3,8 @@
   "lede": "Somebody sent you a code that lets you join their group. Enter the name they will know you by - that is all this asks for.",
   "form": {
     "title": "Who is joining",
-    "description": "The group will use this name wherever it names you: on a commitment, in a settlement plan, and beside your share of it. Nothing here checks it, and nothing about the code says who you are.",
-    "identity": "This build has no sign-in yet, so this page makes an identity for you and shows it once you have joined. Keep it: it is what other screens will show beside your name until signing in exists.",
+    "description": "The group will use this name wherever it names you: on a commitment, in a settlement plan, and beside your share of it. Nothing here checks the name - who is joining is decided by the account you signed in with.",
+    "identity": "You are joining as yourself. The group is told who joined by the account you signed in with, so nothing on this page can name somebody else.",
     "name": "Your name, as the group will know you",
     "join": "Join the group",
     "joining": "Joining…"
@@ -13,6 +13,6 @@
     "title": "You are in",
     "description": "The group has you as a member now. This is the whole of what accepting the code did.",
     "name": "{name} is a member of this group.",
-    "idNote": "That identifier is you in this group. There is no sign-in to recover it from, so keep it somewhere you will find it."
+    "idNote": "That identifier is the account you joined with, which is the same one every other screen shows beside your name."
   }
 }
