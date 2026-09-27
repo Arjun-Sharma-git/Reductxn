@@ -3,6 +3,7 @@ package io.reductxn.api.web.error;
 import io.reductxn.api.port.in.DecisionRefusals;
 import io.reductxn.api.port.in.GroupRefusals;
 import io.reductxn.api.port.in.InviteRefusals;
+import io.reductxn.api.port.in.ScheduleRefusals;
 import io.reductxn.api.port.in.MemberRefusals;
 import io.reductxn.api.port.in.SignInRefusals;
 import io.reductxn.api.port.in.RailCallbackRefusals;
@@ -89,6 +90,7 @@ public final class ExpectedFailures {
             // A code nobody holds. 404 rather than the 410 below, and the difference is what a client does next: a
             // mistyped code is a code for nothing, while an invitation that ran out is one that existed and is spent.
             Map.entry(InviteRefusals.NoSuchInvite.CODE, HttpStatus.NOT_FOUND),
+            Map.entry(ScheduleRefusals.NoSuchSchedule.CODE, HttpStatus.NOT_FOUND),
 
             // Gone, which is what the contract has said for "invite expired or exhausted" since the path was added.
             // Two codes under one status because the conditions differ and the remedy does not - ask the group for a
@@ -101,6 +103,12 @@ public final class ExpectedFailures {
             // asking again with the same code changes nothing - the reading `ObligationRefusals.SameParty` carries.
             Map.entry(InviteRefusals.NotAMembership.CODE, HttpStatus.UNPROCESSABLE_CONTENT),
             Map.entry(InviteRefusals.NotAShare.CODE, HttpStatus.UNPROCESSABLE_CONTENT),
+
+            // The schedule's two conditions and its request-shape refusal (ADR 0057). The range is a 400 because the
+            // contract declares it - the shape `api.member_name_too_long` has - and the past instant is a 422 because
+            // the request is well formed, understood and refused on its state rather than its shape.
+            Map.entry(ScheduleRefusals.EveryDaysOutOfRange.CODE, HttpStatus.BAD_REQUEST),
+            Map.entry(ScheduleRefusals.DueInThePast.CODE, HttpStatus.UNPROCESSABLE_CONTENT),
 
             // A conflict with what is already on the record: this member has answered this run, and an answer is
             // final. 409 rather than 422, because the request is well-formed and could have succeeded earlier - the

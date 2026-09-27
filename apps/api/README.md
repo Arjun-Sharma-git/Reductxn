@@ -116,7 +116,16 @@ same `security: []` the invitation preview has, for the same reason: the person 
 It answers the group's positions with the names the group recorded, and nothing else: no memos, no activity, no
 invitations, and nothing that can change anything. The two reads of a group's positions share one composition
 (`GroupPositions`) and differ only in who may ask - a membership, or a code - which is the split that keeps ADR 0039's
-"one computation" rule while adding a second reader. **Who may hand a code out is decided rather than open (ADR 0056)**: any member, because a role is a word a member may mint - `POST /groups/{groupId}/members` adds anybody with any role in the vocabulary, including a new identity of the caller's own - so an admin-only check would be one the restricted party grants themselves, and a group that has members and no admin could make no code at all. What is still open in the same list: revocation (a link stops when its window closes and there is no way to stop one earlier), a window a caller chooses, and nothing still decides when a cycle is due - a group has no schedule.
+"one computation" rule while adding a second reader. **Who may hand a code out is decided rather than open (ADR 0056)**: any member, because a role is a word a member may mint - `POST /groups/{groupId}/members` adds anybody with any role in the vocabulary, including a new identity of the caller's own - so an admin-only check would be one the restricted party grants themselves, and a group that has members and no admin could make no code at all. What is still open in the same list: revocation (a link stops when its window closes and there is no way to stop one earlier), a window a caller chooses, a third grant, and calendar-anchored schedules.
+
+**And a group's books close by themselves once it states a cadence (ADR 0057).** `PUT /groups/{groupId}/schedule` states
+an interval in whole days and the instant the next cycle is due; `GET` reads it, `DELETE` stops it, and a member is who
+may do all three. The settlement worker gained the front of the pipeline it already had: `ScheduledCycleOpener` opens a
+cycle at exactly the instant the group stated, `ScheduledRunComputer` computes a run for it, and `ScheduledRunDriver`
+settles it - three ticks with three settings, because one pass would let a rail having a bad minute stop cycles being
+opened at all. `OpenCycle`'s own sentence ("nothing here decides that a cycle has come due ... there is no group
+schedule in this build") is what this answers, and what is deliberately not here is a calendar anchor: "the first of the
+month" needs a time zone and a rule for month lengths, and both are decisions nobody has made.
 
 The sentence this paragraph used to carry - that a cross-currency obligation could not be stored because
 `obligations` had no quote columns - outlived the columns by several slices. Recorded here rather than quietly

@@ -22,6 +22,7 @@
     "obligations": "Commitments",
     "balances": "Balances",
     "netting": "Netting preview",
+    "schedule": "Schedule",
     "settlement": "Plans",
     "tax": "Tax"
   }

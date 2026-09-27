@@ -9,6 +9,10 @@ import { expect, type Page, type Route } from '@playwright/test';
  */
 import type { paths } from '../../src/shared/api/client';
 
+/** The schedule schema, spelled here as the contract declares it rather than imported from a feature (RULE F1). */
+type CycleSchedule =
+  paths['/groups/{groupId}/schedule']['get']['responses']['200']['content']['application/json'];
+
 export type NettingPreview =
   paths['/groups/{groupId}/netting/preview']['get']['responses']['200']['content']['application/json'];
 
@@ -1095,6 +1099,93 @@ export async function stubInvitesApi(
   });
 
   return { acceptances };
+}
+
+// --- Schedules -----------------------------------------------------------------------------------------
+
+export type ScheduleRecorder = {
+  /** Every body the screen sent, so a test can assert what a form produced rather than only that it worked. */
+  readonly written: readonly string[];
+  /** Every clear, counted rather than listed: the request has no body to look at. */
+  cleared(): number;
+};
+
+/** A schedule a member stated: a period every thirty days, and when the next one is due. */
+export const SCHEDULE: CycleSchedule = {
+  everyDays: 30,
+  nextDueAt: '2026-10-27T09:00:00Z',
+  setAt: '2026-09-27T09:00:00Z',
+};
+
+/**
+ * The schedule API: read it, state it, stop it (ADR 0057).
+ *
+ * <p><strong>Every verb refuses without a session</strong>, because every one of them is a member's act - the read
+ * included, since when a group closes its books is a fact about its books (ADR 0054). A spec that wants the absence
+ * instead passes {@code withheld: true}, which answers the {@code 404} a group with no cadence gets: that is a state the
+ * screen renders as a sentence rather than as a fault, and a stub that could not produce it would make the distinction
+ * untestable.
+ */
+export async function stubScheduleApi(
+  page: Page,
+  options: { readonly withheld?: boolean } = {},
+): Promise<ScheduleRecorder> {
+  const written: string[] = [];
+  let cleared = 0;
+
+  // The state a real deployment has: a write changes what the next read answers. Without this the stub would answer the
+  // same 404 after a successful write, and a screen that invalidates its read - which this one must, because the worker
+  // moves the row between one read and the next - would look broken for no reason.
+  let present: CycleSchedule | null = options.withheld === true ? null : SCHEDULE;
+
+  const absent = {
+    status: 404,
+    contentType: 'application/problem+json',
+    body: JSON.stringify({
+      type: 'about:blank',
+      title: 'Not Found',
+      status: 404,
+      detail: 'stubbed refusal',
+      code: 'api.no_such_schedule',
+    }),
+  };
+
+  await page.route('**/v1/groups/*/schedule', async (route) => {
+    if (!isSignedIn(route)) {
+      return route.fulfill(NOT_SIGNED_IN);
+    }
+
+    const method = route.request().method();
+
+    if (method === 'PUT') {
+      const body = (JSON.parse(route.request().postData() ?? '{}') ?? {}) as {
+        readonly everyDays: number;
+        readonly nextDueAt: string;
+      };
+
+      written.push(route.request().postData() ?? '');
+      present = { everyDays: body.everyDays, nextDueAt: body.nextDueAt, setAt: SCHEDULE.setAt };
+
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(present) });
+    }
+
+    if (method === 'DELETE') {
+      cleared += 1;
+      present = null;
+
+      return route.fulfill({ status: 204, body: '' });
+    }
+
+    return route.fulfill(
+      present === null
+        ? absent
+        : { status: 200, contentType: 'application/json', body: JSON.stringify(present) },
+    );
+  });
+
+  await signedInReader(page);
+
+  return { written, cleared: () => cleared };
 }
 
 // --- Share links ---------------------------------------------------------------------------------------
