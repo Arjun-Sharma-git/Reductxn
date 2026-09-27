@@ -172,12 +172,13 @@ named rather than implied. And **`bearerFormat: JWT` is gone**: the token is opa
 the row - both tokens, in one conditional update, without moving the session's end, so a replayed refresh token finds
 nothing and the old access token dies with it.
 
-The one thing that slice deliberately did not do is require a token anywhere except `/me`. Four slices later, the
-boundaries that read a caller are `GET /me`, the three group operations, the void, the activity feed, the acceptance of an
-invitation, and the two group-management writes (ADR 0043, 0045, 0047, 0048) - the last of which require a **member of
-the group**, asked of `Groups.isMember` in the use case rather than in the controller. The obligation recording, the cycle
-opening and the decision endpoint still take their actor from the body, and each one says so where it is described.
-Enforcing those is a slice of its own, because it refuses every existing caller of them at once.
+The one thing that slice deliberately did not do is require a token anywhere except `/me`. Five slices later, the
+boundaries that read a caller are `GET /me`, the three group operations, the void, the activity feed, the acceptance of
+an invitation, the two group-management writes and the two writes to a group's books (ADR 0043, 0045, 0047, 0048, 0049)
+- the last four require a **member of the group**, asked of `Groups.isMember` in the use case rather than in the
+controller. Recording an obligation also attributes it: the caller travels to the ledger as the entry's `createdBy`,
+which the entry hash covers. The decision endpoint still takes its actor from the body, and that is a decision rather
+than an omission: a stranger's answer is inert by the quorum's arithmetic (ADR 0016).
 
 `GET /v1/groups`, `POST /v1/groups` and `GET /v1/groups/{groupId}` are the group itself, and they are **the first
 operations in this build that need a caller** (ADR 0043). All three read the bearer token, because a group list is a
