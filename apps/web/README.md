@@ -13,11 +13,11 @@ every read of a group's books needs a member of it and an id was never a credent
 which group a code is for, how many members are in it and when the code stops working, before it asks for a name.
 **ADR 0055 added the fourth screen outside the group's tree**: `/shared/$code`, what a share link shows - the group's
 positions with the names the group recorded, read by somebody who is not a member and usually has no session at all. Its
-code is made on the members screen, beside the invitation, because both are the same act for a different audience. The
-route tree's remaining screens are groups of one kind or another - the group's policy and its settlement
-schedule - and each needs a read the contract does not serve: a group's `nettingPolicy` exists in the schema as an unserved
-field, and a schedule has no operation at all, which is the gap the plan calls "nothing decides when a cycle is due". Each
-arrives the same way: screen by screen, feeding on a read that the server had to be made to answer.
+code is made on the members screen, beside the invitation, because both are the same act for a different audience.
+**ADR 0057 added the fifth route inside the group** - `/groups/$groupId/schedule`, where a member states when the books
+close by themselves - and the group's nav gained its fifth entry with it. The remaining screen the route tree still wants
+is the group's own policy, which needs a read the contract does not serve: `nettingPolicy` exists in the schema as an
+unserved field. Each arrives the same way: screen by screen, feeding on a read the server had to be made to answer.
 
 **Public surface:** the app itself; consumed by browsers only.
 

@@ -59,7 +59,7 @@ export function problemOf(fault: unknown): Problem {
   return { code: 'client.unknown_fault', status: 0, params: {}, title: 'Unknown failure' };
 }
 
-type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export type RequestOptions = {
   readonly method?: Method;

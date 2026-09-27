@@ -108,6 +108,12 @@ abstract class WorkerDatabaseTest {
         // covered without a database, in `ScheduledRunComputerTest`.
         registry.add("reductxn.settlement.compute.enabled", () -> "false");
 
+        // The schedule opener's cadence, off, for the reason the other two are - and with one specific to this
+        // slice: a tick that opened a cycle from a schedule mid-test would turn "a due schedule was opened once"
+        // into a race against the test's own pass over the same rows. Its seam is covered without a database, in
+        // `ScheduledCycleOpenerTest`.
+        registry.add("reductxn.settlement.schedules.enabled", () -> "false");
+
         // The worker's own migrations, plus the API's. The two deployables share one schema and each jar brings
         // only its own migrations (RULE B17), so `V101__obligations.sql` is not on this module's classpath - and
         // may not be, because the worker may not depend on apps/api (RULE B6). Pointing Flyway at the file

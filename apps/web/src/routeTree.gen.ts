@@ -19,6 +19,7 @@ import { Route as GroupsGroupIdBalancesRouteImport } from './routes/groups/$grou
 import { Route as GroupsGroupIdMembersRouteImport } from './routes/groups/$groupId/members'
 import { Route as GroupsGroupIdNettingRouteImport } from './routes/groups/$groupId/netting'
 import { Route as GroupsGroupIdObligationsRouteImport } from './routes/groups/$groupId/obligations'
+import { Route as GroupsGroupIdScheduleRouteImport } from './routes/groups/$groupId/schedule'
 import { Route as GroupsGroupIdTaxRouteImport } from './routes/groups/$groupId/tax'
 import { Route as GroupsGroupIdSettlementIndexRouteImport } from './routes/groups/$groupId/settlement/index'
 import { Route as GroupsGroupIdSettlementRunIdRouteImport } from './routes/groups/$groupId/settlement/$runId'
@@ -74,6 +75,11 @@ const GroupsGroupIdObligationsRoute =
     path: '/obligations',
     getParentRoute: () => GroupsGroupIdRouteRoute,
   } as any)
+const GroupsGroupIdScheduleRoute = GroupsGroupIdScheduleRouteImport.update({
+  id: '/schedule',
+  path: '/schedule',
+  getParentRoute: () => GroupsGroupIdRouteRoute,
+} as any)
 const GroupsGroupIdTaxRoute = GroupsGroupIdTaxRouteImport.update({
   id: '/tax',
   path: '/tax',
@@ -103,6 +109,7 @@ export interface FileRoutesByFullPath {
   '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
   '/groups/$groupId/obligations': typeof GroupsGroupIdObligationsRoute
+  '/groups/$groupId/schedule': typeof GroupsGroupIdScheduleRoute
   '/groups/$groupId/tax': typeof GroupsGroupIdTaxRoute
   '/groups/$groupId/settlement/$runId': typeof GroupsGroupIdSettlementRunIdRoute
   '/groups/$groupId/settlement/': typeof GroupsGroupIdSettlementIndexRoute
@@ -118,6 +125,7 @@ export interface FileRoutesByTo {
   '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
   '/groups/$groupId/obligations': typeof GroupsGroupIdObligationsRoute
+  '/groups/$groupId/schedule': typeof GroupsGroupIdScheduleRoute
   '/groups/$groupId/tax': typeof GroupsGroupIdTaxRoute
   '/groups/$groupId/settlement/$runId': typeof GroupsGroupIdSettlementRunIdRoute
   '/groups/$groupId/settlement': typeof GroupsGroupIdSettlementIndexRoute
@@ -134,6 +142,7 @@ export interface FileRoutesById {
   '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
   '/groups/$groupId/netting': typeof GroupsGroupIdNettingRoute
   '/groups/$groupId/obligations': typeof GroupsGroupIdObligationsRoute
+  '/groups/$groupId/schedule': typeof GroupsGroupIdScheduleRoute
   '/groups/$groupId/tax': typeof GroupsGroupIdTaxRoute
   '/groups/$groupId/settlement/$runId': typeof GroupsGroupIdSettlementRunIdRoute
   '/groups/$groupId/settlement/': typeof GroupsGroupIdSettlementIndexRoute
@@ -151,6 +160,7 @@ export interface FileRouteTypes {
     | '/groups/$groupId/members'
     | '/groups/$groupId/netting'
     | '/groups/$groupId/obligations'
+    | '/groups/$groupId/schedule'
     | '/groups/$groupId/tax'
     | '/groups/$groupId/settlement/$runId'
     | '/groups/$groupId/settlement/'
@@ -166,6 +176,7 @@ export interface FileRouteTypes {
     | '/groups/$groupId/members'
     | '/groups/$groupId/netting'
     | '/groups/$groupId/obligations'
+    | '/groups/$groupId/schedule'
     | '/groups/$groupId/tax'
     | '/groups/$groupId/settlement/$runId'
     | '/groups/$groupId/settlement'
@@ -181,6 +192,7 @@ export interface FileRouteTypes {
     | '/groups/$groupId/members'
     | '/groups/$groupId/netting'
     | '/groups/$groupId/obligations'
+    | '/groups/$groupId/schedule'
     | '/groups/$groupId/tax'
     | '/groups/$groupId/settlement/$runId'
     | '/groups/$groupId/settlement/'
@@ -266,6 +278,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GroupsGroupIdObligationsRouteImport
       parentRoute: typeof GroupsGroupIdRouteRoute
     }
+    '/groups/$groupId/schedule': {
+      id: '/groups/$groupId/schedule'
+      path: '/schedule'
+      fullPath: '/groups/$groupId/schedule'
+      preLoaderRoute: typeof GroupsGroupIdScheduleRouteImport
+      parentRoute: typeof GroupsGroupIdRouteRoute
+    }
     '/groups/$groupId/tax': {
       id: '/groups/$groupId/tax'
       path: '/tax'
@@ -296,6 +315,7 @@ interface GroupsGroupIdRouteRouteChildren {
   GroupsGroupIdMembersRoute: typeof GroupsGroupIdMembersRoute
   GroupsGroupIdNettingRoute: typeof GroupsGroupIdNettingRoute
   GroupsGroupIdObligationsRoute: typeof GroupsGroupIdObligationsRoute
+  GroupsGroupIdScheduleRoute: typeof GroupsGroupIdScheduleRoute
   GroupsGroupIdTaxRoute: typeof GroupsGroupIdTaxRoute
   GroupsGroupIdSettlementRunIdRoute: typeof GroupsGroupIdSettlementRunIdRoute
   GroupsGroupIdSettlementIndexRoute: typeof GroupsGroupIdSettlementIndexRoute
@@ -307,6 +327,7 @@ const GroupsGroupIdRouteRouteChildren: GroupsGroupIdRouteRouteChildren = {
   GroupsGroupIdMembersRoute: GroupsGroupIdMembersRoute,
   GroupsGroupIdNettingRoute: GroupsGroupIdNettingRoute,
   GroupsGroupIdObligationsRoute: GroupsGroupIdObligationsRoute,
+  GroupsGroupIdScheduleRoute: GroupsGroupIdScheduleRoute,
   GroupsGroupIdTaxRoute: GroupsGroupIdTaxRoute,
   GroupsGroupIdSettlementRunIdRoute: GroupsGroupIdSettlementRunIdRoute,
   GroupsGroupIdSettlementIndexRoute: GroupsGroupIdSettlementIndexRoute,

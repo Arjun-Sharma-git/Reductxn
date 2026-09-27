@@ -131,6 +131,11 @@ abstract class DatabaseTest {
         jdbc.execute("DELETE FROM settlement_runs");
         jdbc.execute("DELETE FROM settlement_cycles");
 
+        // The schedule a group states, which the worker reads (ADR 0057). Deleted here rather than by the one test class
+        // that writes it: a row left behind would make every later test in this JVM see a group whose books close by
+        // themselves - the same reason every other table is in this list.
+        jdbc.execute("DELETE FROM group_schedules");
+
         // A flat charge per transfer, in both currencies these tests use. Deliberately the same amount in
         // each: it is a per-transfer charge, not a value, so the same number in a coarser currency is a
         // heavier tax - which is the point of assessing it per currency.

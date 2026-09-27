@@ -951,6 +951,153 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/groups/{groupId}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                groupId: components["parameters"]["GroupId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * When the group's books close next
+         * @description The group's schedule as it stands: the interval, the instant the next cycle is due, and when it was last set.
+         *
+         *     **`nextDueAt` is read from the row rather than computed from `setAt` and `everyDays`.** They mean different
+         *     things - the row is what the worker will act on, and the interval is what it will add afterwards - and a client
+         *     that derived the due instant from the other two would be a second place that knows the cadence's arithmetic.
+         *
+         *     **No schedule is a `404`, not a group with an empty one.** "This group has not said when its books close" is a
+         *     state a screen has to distinguish from "they close every thirty days", and an answer with a null instant would
+         *     put that distinction in a field a client could misread.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    groupId: components["parameters"]["GroupId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The group's schedule */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CycleSchedule"];
+                    };
+                };
+                400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
+            };
+        };
+        /**
+         * State when the group's books close, and how often after that
+         * @description Sets the group's schedule: the instant its next cycle is due, and the interval between one closure and the next.
+         *     The settlement worker opens a cycle at that instant and advances the schedule by the interval, so a group that
+         *     states one stops having to remember.
+         *
+         *     **A group has one schedule, so this is a put rather than a post.** Two schedules for one group would be two
+         *     answers to "when are your books closed", and the reads that answer one would have to pick between them; changing
+         *     a schedule is therefore the same operation as setting it. Clearing it is the `DELETE` below.
+         *
+         *     **The instant is the group's, not the worker's.** The cycle is opened at exactly the `nextDueAt` given rather
+         *     than at the moment the worker noticed, because a group's periods are something it states: a worker that was down
+         *     when one fell due opens it late but dated correctly, and the run computed for it resolves the obligations at that
+         *     instant anyway (ADR 0032's rule that the instant is the whole request).
+         *
+         *     **`everyDays` is a whole number of days, between 1 and 366.** A cadence is something a group says in days, and
+         *     zero is refused rather than looped on: a schedule of every zero days is not a cadence but a bus, and it would open
+         *     a cycle on every pass of the worker. Days rather than a calendar anchor - "every 30 days" rather than "the first
+         *     of the month" - because a calendar anchor needs a time zone and a rule for month lengths, which is a decision
+         *     nobody has made; the plan records it as the next thing a group would ask for.
+         *
+         *     **A due instant in the past, or now, is refused.** `nextDueAt` must be in the future, so that setting a schedule
+         *     cannot be a way of closing the books immediately: that is what `POST /groups/{groupId}/cycles` is for, and a
+         *     schedule whose first closure is already due would make the two operations mean the same thing once. The refusal
+         *     is `422 api.schedule_due_in_the_past`.
+         *
+         *     **A member of the group may set one** (ADR 0048's rule, unchanged, and ADR 0056 is where the question about the
+         *     role word is answered): closing a group's books is an act within the group, and a schedule is a standing
+         *     instruction to do it.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    groupId: components["parameters"]["GroupId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CycleScheduleRequest"];
+                };
+            };
+            responses: {
+                /** @description The schedule as it now stands */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CycleSchedule"];
+                    };
+                };
+                400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
+                422: components["responses"]["Problem"];
+            };
+        };
+        post?: never;
+        /**
+         * Stop the cadence, so nothing closes the books by itself
+         * @description Removes the group's schedule. The worker then opens no cycle for it: closing the books goes back to being
+         *     something a member asks for with `POST /groups/{groupId}/cycles`.
+         *
+         *     **Nothing else changes.** A cycle the worker has already opened stays open, and the run computed for it is
+         *     unaffected - a schedule decides when a closure happens, never what it contains. A group that clears its schedule
+         *     while its books are closed at an instant settles exactly as it would have.
+         *
+         *     **`404` when there is no schedule**, which is the same refusal the read gives, and for the same reason: there is
+         *     nothing to clear, and answering `204` to both would tell a client its request removed something it did not.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    groupId: components["parameters"]["GroupId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The schedule is gone */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/groups/{groupId}/balances": {
         parameters: {
             query?: never;
@@ -2717,6 +2864,50 @@ export interface components {
             /** @enum {string} */
             direction: "pay" | "receive" | "flat";
             net: components["schemas"]["Money"];
+        };
+        /**
+         * @description When a group's books close by themselves: the interval between one closure and the next, the instant the next one
+         *     is due, and when the group last said so.
+         *
+         *     It is a standing instruction to close a period, so it belongs to the group rather than to any run: the worker
+         *     reads it, opens a cycle at `nextDueAt`, and advances the row by `everyDays`. Nothing about a cycle's content is
+         *     here - what is recorded before an instant is what that cycle settles (ADR 0038).
+         */
+        CycleSchedule: {
+            /**
+             * @description The interval between closures, in whole days. A year is the ceiling because a longer one is not a cadence
+             *     anybody means, and one is the floor because zero would close the books on every pass of the worker.
+             */
+            everyDays: number;
+            /**
+             * Format: date-time
+             * @description The instant the next cycle is due. The worker opens a cycle at exactly this instant, so a period a group
+             *     stated is the period it gets even if the worker noticed late.
+             */
+            nextDueAt: string;
+            /**
+             * Format: date-time
+             * @description When the schedule was last set or changed, so a reader can tell whether the row is current.
+             */
+            setAt: string;
+        };
+        /**
+         * @description A group stating when its books close. The same two fields the schedule answers with, minus `setAt`, which is the
+         *     server's clock rather than the caller's.
+         *
+         *     Both are required, and there is deliberately no field for "when this starts" as distinct from "when the next one
+         *     is due": they are the same instant, and a schedule that could start on one date and be due on another would need
+         *     a rule for what happens in between.
+         */
+        CycleScheduleRequest: {
+            /** @description The interval between closures, in whole days. */
+            everyDays: number;
+            /**
+             * Format: date-time
+             * @description When the next cycle is due. Must be in the future: a schedule whose first closure is already due would make
+             *     this operation a way of closing the books immediately, which is what `POST /groups/{groupId}/cycles` does.
+             */
+            nextDueAt: string;
         };
         /**
          * @description What somebody joining supplies, which is now only what the group will call them.

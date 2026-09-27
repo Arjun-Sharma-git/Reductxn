@@ -1,0 +1,26 @@
+{
+  "title": "Schedule",
+  "lede": "When this group's books close by themselves, and how often after that. The settlement worker opens a cycle at the moment you state, computes a plan for it, and then moves the schedule on - so the group stops having to remember.",
+  "loading": "Reading the schedule…",
+  "none": "Nothing closes this group's books by itself. Every period so far was closed because a member asked for one.",
+  "stopping": "Stopping it…",
+  "stop": "Stop closing them by themselves",
+  "now": {
+    "cardTitle": "What happens next",
+    "cardDescription": "The instant below is the group's own, not the moment the worker noticed: a period that falls due while the worker is down is closed late, dated correctly.",
+    "closes": "This group's books close every {everyDays} days.",
+    "next": "Next closure: {when}.",
+    "set": "Stated {when}."
+  },
+  "statement": {
+    "cardTitle": "State a cadence",
+    "cardDescription": "Setting one replaces whatever the group had: a group has one schedule, so this both starts it and changes it.",
+    "everyDays": "Every how many days",
+    "everyDaysHint": "Between 1 and 366. One is the shortest interval there is; zero would close the books on every pass of the worker, which is why it is refused rather than looped on.",
+    "nextDueAt": "Next closure",
+    "nextDueAtHint": "Your browser's time is used, and the instant is what the server stores. It has to be in the future: closing the books now is a plan you ask for, not a schedule that has already fallen due.",
+    "save": "State this cadence",
+    "saving": "Stating it…",
+    "intervalNote": "A cadence is a number of days rather than a date in the month - \"every 30 days\" rather than \"the 1st\" - because a date in the month needs a time zone and a rule for months of different lengths, and this build has decided neither."
+  }
+}
