@@ -1,6 +1,7 @@
 package io.reductxn.api.web.error;
 
 import io.reductxn.api.port.in.DecisionRefusals;
+import io.reductxn.api.port.in.GroupRefusals;
 import io.reductxn.api.port.in.InviteRefusals;
 import io.reductxn.api.port.in.MemberRefusals;
 import io.reductxn.api.port.in.SignInRefusals;
@@ -96,7 +97,15 @@ public final class ExpectedFailures {
 
             // The one refusal the contract declared before anything served it: an endpoint that sends a message on every
             // request is a way to spend somebody else's money, so asking too often is refused rather than ignored.
-            Map.entry(SignInRefusals.TooManyCodes.CODE, HttpStatus.TOO_MANY_REQUESTS));
+            Map.entry(SignInRefusals.TooManyCodes.CODE, HttpStatus.TOO_MANY_REQUESTS),
+
+            // Groups. The two 400s are refusals the contract's own schema asked for - a name longer than the `maxLength`
+            // it promises, and a timezone no calendar can resolve - and they are 400s rather than 422s because they are
+            // statements about the request's shape. The 404 is one answer for "no such group" and "not a group you are in",
+            // which is deliberate: the difference would tell anybody holding a guess which ids are real.
+            Map.entry(GroupRefusals.NameTooLong.CODE, HttpStatus.BAD_REQUEST),
+            Map.entry(GroupRefusals.UnknownTimezone.CODE, HttpStatus.BAD_REQUEST),
+            Map.entry(GroupRefusals.NoSuchGroup.CODE, HttpStatus.NOT_FOUND));
 
     private ExpectedFailures() {
     }

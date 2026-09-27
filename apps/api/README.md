@@ -176,6 +176,24 @@ The one thing this slice deliberately did not do is require a token anywhere exc
 write, the invitation acceptance and the decision endpoint is a slice of its own: it would break every existing caller at
 once, and doing it here would hide all of that behind identity's arrival.
 
+`GET /v1/groups`, `POST /v1/groups` and `GET /v1/groups/{groupId}` are the group itself, and they are **the first
+operations in this build that need a caller** (ADR 0043). All three read the bearer token, because a group list is a
+question about a person and a group's own screen decides membership - and the older boundaries keep taking whoever the
+body says until a slice that owns that change. `CallerResolver` is the one place a token becomes a person; `GET /me` uses
+it too.
+
+**The `groups` table is additive, and that is the decision this slice turns on.** Every `group_id` in this database is a
+bare uuid that nothing constrains: development data has obligations whose group was never created. A foreign key would
+have made those rows unrecordable, so a group's row is what gives it a name and a settlement currency, and a group without
+one still works. Two consequences are visible in the code: `GET /groups/{groupId}` answers `404` for a group that exists
+only as commitments, and the client's group layout falls back to showing the identifier.
+
+Creating a group **makes its creator an `admin` member in the same transaction** - a group its creator cannot see is not a
+group - and it is idempotent on `(creator, key)`, so a retry answers `200` with the group the first attempt made. The
+settlement zone is nullable rather than defaulted, because a default would decide which cycle a commitment falls in for a
+household somewhere else; `maxMembers` is recorded and nothing consults it yet; and `nettingPolicy` is not served at all,
+because the sentence it would carry summarises a configuration this build does not have.
+
 `POST /v1/groups/{groupId}/invites` and `POST /v1/invites/{code}/accept` are the last two operations of section 6's
 route tree, and serving them closes the route tree's screens (ADR 0041). The slice also created the table, and the shape
 of the data followed from the wire: acceptance is addressed by the code alone, so **the code is the primary key** and is

@@ -194,17 +194,66 @@ paths:
     get:
       tags: [groups]
       summary: List groups the caller belongs to
+      description: |
+        The groups this person is a member of, most recently joined first.
+
+        **This operation cannot be answered without a caller**, and it is the first one in this document that says so. "The
+        groups you belong to" is a question about a person; the alternative was a query parameter naming one, which is the
+        shape every earlier boundary in this build takes - a decision's `memberId`, an obligation's `debtorId`, an
+        invitation's `userId` are all "whoever the request says". A new operation has no callers to break, so it takes the
+        caller from the token instead (ADR 0043), and a request with no usable session is a `401`.
+
+        **The order is the memberships'.** A group somebody just created is the first thing they see. Name order would put a
+        group they have not opened in months above the one they are using, which is why it is not the order.
+
+        **An empty array is the honest answer for somebody in no group**, not a refusal: a person who has just signed in
+        belongs to nothing, and a client that showed an error for that would be shouting at the ordinary first page.
+
+        `memberCount` is counted from the memberships on every read, so it cannot drift from the rows that are the fact.
       responses:
         '200':
-          description: Groups
+          description: Groups, most recently joined first
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Group' }
+        '401': { $ref: '#/components/responses/Problem' }
     post:
       tags: [groups]
       summary: Create a group
+      description: |
+        Create a group, which makes its creator a member.
+
+        **The caller comes from the token, and the body has no field for one.** Every earlier write in this document takes
+        the person from the body, because identity did not exist when they were written; this operation has a token to read
+        and no callers to break, so it does not accept a uuid for the caller at all (ADR 0043).
+
+        **Creating a group makes its creator an `admin` member, in the same transaction.** Not a flourish: `GET /groups`
+        answers with the groups somebody belongs to, so a group whose creator was not a member would be invisible to the only
+        person who could have asked for it. The role is recorded and not enforced, like every role in this build.
+
+        **Idempotent on this creator and this key.** The key is a required header and there is no group in the path to scope
+        it by, so the pair is the scope: a retry answers `200` with the group the first attempt created, and a first attempt
+        answers `201`. The same status pair the obligation, member and invitation writes use (P8) - a retry is not an error,
+        and a client told `201` twice for one group would believe two exist.
+
+        **Everything a request can name is resolved or refused, never stored on trust.** A currency becomes an exponent
+        through this deployment's own catalogue, so a currency it does not hold is a `422 api.obligation_unknown_currency` -
+        the same code the recording path answers, because it is the same condition (ADR 0037). `settlementTimezone` is parsed
+        as an IANA zone: `"IST"` is an abbreviation three countries share and is refused, because a zone no calendar can
+        resolve is worse than no zone at all. A name longer than the schema's own `maxLength` is a `400`.
+
+        **Three things this response does not promise, stated rather than implied.** `maxMembers` is stored and nothing
+        consults it yet, exactly as a member's `role` is recorded and unread. `settlementTimezone` is omitted when the request
+        did not name one - the schema makes it optional and a default would decide which cycle an obligation falls in for a
+        household somewhere else (ADR 0014, point 6). And there is no `nettingPolicy`: the field exists in the schema and the
+        sentence it would carry summarises a configuration this build does not have.
+
+        **This operation used to declare `409 Group already exists`, and it no longer does.** That line was a promise with no
+        condition behind it: a group's name is not unique - two households really can be called "Flat 3B" - and the only
+        "already" this build can decide is a replayed idempotency key, which is answered `200` with the record rather than as
+        a conflict (ADR 0043).
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -231,12 +280,19 @@ paths:
                   example: Asia/Kolkata
                 maxMembers: { type: integer, default: 200, maximum: 200 }
       responses:
+        '200':
+          description: The group this key already created - a retry, answered with the record rather than a second group
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
         '201':
           description: Created
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Group' }
-        '409': { description: Group already exists }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
 
   /groups/{groupId}:
     parameters:
@@ -244,12 +300,27 @@ paths:
     get:
       tags: [groups]
       summary: Group detail
+      description: |
+        One group's own screen: its name, what it settles in, and how many members it has.
+
+        **Membership is the read's condition, not a check after it**, so a group the caller is not in is answered exactly as
+        a group that does not exist - one code, `api.no_such_group`, one `404`. The sameness is deliberate: telling the two
+        apart would let anybody holding a guess learn which ids are real, which is the same reasoning that makes an unknown
+        phone number and a wrong code one answer on the sign-in path (ADR 0042). An id that is not a uuid is a `400`
+        instead, because a typo is not a permission question.
+
+        **This is the read the group's own screens wanted, and it is not a precondition for the other group reads.** Those
+        serve every group id in this database, including ids with commitments and no group row - the state this build's
+        development data is in, and the reason `groups` arrived as an additive table rather than a foreign key everything
+        else had to satisfy (ADR 0043).
       responses:
         '200':
           description: Group
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Group' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
 
   /groups/{groupId}/members:
@@ -1325,6 +1396,26 @@ components:
 
     Group:
       type: object
+      description: |
+        A group: what it is called, what it settles in, and how many members it has.
+
+        `memberCount` is counted from the memberships on every read rather than stored, so it cannot drift from the rows
+        that are the fact.
+
+        `settlementTimezone` is absent until the group chooses one: a default would decide which cycle an obligation falls
+        in for a household somewhere else (ADR 0014, point 6), and "not chosen yet" is a state a client can act on - it is
+        why the field is optional here.
+
+        `maxMembers` is stored and **nothing consults it yet**: the members write serves every group id in this database,
+        including the ones whose group has no row, so a cap it enforced would be a rule that applied to some groups and not
+        others. It is recorded, like a member's `role`.
+
+        `nettingPolicy` is not served. It exists in this schema and the sentence it would carry summarises a netting and
+        default policy configuration this build does not have; a string composed from nothing would read as a decision
+        somebody made (ADR 0043).
+
+        The two currencies are ISO codes rather than objects: the exponent is reference data (`GET /currencies`), and
+        `reportingCurrency` is presentational - it is what totals spanning currencies are stated in (ADR 0013).
       required: [id, name, currency, memberCount, createdAt]
       properties:
         id: { type: string, format: uuid }

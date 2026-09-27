@@ -23,12 +23,5 @@
     "netting": "Netting preview",
     "settlement": "Plans",
     "tax": "Tax"
-  },
-  "openGroup": {
-    "title": "Open a group",
-    "description": "Reductxn has no sign-in yet and no group list, so a group is opened by its identifier - the one from the link somebody sent you.",
-    "groupId": "Group identifier",
-    "invalid": "That is not a group identifier. It should look like 3f7c1c1e-0d2a-4a5e-9a6f-6c1d2f4b8e10.",
-    "submit": "Open"
   }
 }

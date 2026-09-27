@@ -3,11 +3,13 @@
 React SPA - recording obligations, reading balances, the netting preview, settlement reports, tax. Six group screens
 exist today and each arrived with the slice that served it: the netting preview (ADR 0028), the members list (ADR 0035),
 the obligations list and its recording form (ADR 0029, 0036), the settlement reports and the open-a-cycle form (ADR
-0033, 0034), the balances screen (ADR 0039) and the tax screen (ADR 0040). Two more screens sit outside the group's tree
+0033, 0034), the balances screen (ADR 0039) and the tax screen (ADR 0040). Three screens sit outside the group's tree
 entirely: `/invites/$code`, where somebody with a code joins (ADR 0041) - it cannot be under a group, because the person
-arriving is usually not a member yet and the code is what says which group it is for - and `/sign-in`, which is the only
-way to become somebody this deployment knows (ADR 0042). The rest of the plan's route tree arrives the same way - screen
-by screen, feeding on a read that the server had to be made to answer.
+arriving is usually not a member yet and the code is what says which group it is for - `/sign-in`, which is the only way to
+become somebody this deployment knows (ADR 0042), and `/` itself, which is now the list of groups you are in rather than
+the group-id box it was (ADR 0043). The route tree's remaining screens are groups of one kind or another - activity, and
+the policy and schedule screens - and each arrives the same way: screen by screen, feeding on a read that the server had to
+be made to answer.
 
 **Public surface:** the app itself; consumed by browsers only.
 

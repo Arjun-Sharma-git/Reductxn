@@ -841,3 +841,119 @@ export async function stubIdentityApi(
 
   return { verified, requested: () => requested };
 }
+
+// --- Groups --------------------------------------------------------------------------------------------
+
+export type GroupSummary = {
+  readonly id: string;
+  readonly name: string;
+  readonly currency: string;
+  readonly reportingCurrency: string;
+  readonly memberCount: number;
+  readonly maxMembers: number;
+  readonly createdAt: string;
+};
+
+export type GroupsRecorder = {
+  /** The bodies the screen posted, so a test can see what was sent and which key it carried. */
+  readonly created: readonly { readonly body: unknown; readonly key: string | undefined }[];
+};
+
+/** A group as the API serves one. */
+export function group(id: string, name: string, currency = 'INR', memberCount = 1): GroupSummary {
+  return {
+    id,
+    name,
+    currency,
+    reportingCurrency: currency,
+    memberCount,
+    maxMembers: 200,
+    createdAt: '2026-09-01T00:00:00Z',
+  };
+}
+
+/**
+ * The group API: the list, creating one, and the currency catalogue the create form chooses from.
+ *
+ * The catalogue is stubbed here rather than reused from another spec's helper because this screen needs exactly one thing
+ * from it - the codes a `<select>` offers - and a stub that answered everything another screen needs would be a stub whose
+ * failures point at the wrong test.
+ *
+ * `/v1/groups/:new` answers with the group the *request* named, which is what makes the create test able to assert that
+ * what appears in the list is what was sent rather than what the stub felt like saying.
+ */
+export async function stubGroupsApi(
+  page: Page,
+  groups: readonly GroupSummary[] = [],
+): Promise<GroupsRecorder> {
+  const created: { body: unknown; key: string | undefined }[] = [];
+  const current = [...groups];
+
+  await page.route('**/v1/currencies', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        { code: 'INR', minorUnitExponent: 2 },
+        { code: 'USD', minorUnitExponent: 2 },
+      ]),
+    }),
+  );
+
+  // A single group by id, which the group's layout asks for to put a name above the nav.
+  await page.route('**/v1/groups/*', (route) => {
+    const id = route.request().url().split('/').pop() ?? '';
+    const found = current.find((group) => group.id === id);
+
+    return route.fulfill(
+      found === undefined
+        ? {
+            status: 404,
+            contentType: 'application/problem+json',
+            body: JSON.stringify({
+              type: 'about:blank',
+              title: 'Not Found',
+              status: 404,
+              detail: 'stubbed refusal',
+              code: 'api.no_such_group',
+            }),
+          }
+        : { status: 200, contentType: 'application/json', body: JSON.stringify(found) },
+    );
+  });
+
+  await page.route('**/v1/groups', (route) => {
+    if (route.request().method() === 'GET') {
+      // The session is required, and the stub enforces it. A stub that listed groups for anybody would make "the screen
+      // sends the token" untestable - and the signed-out case, which is the ordinary first visit, unrepresentable.
+      if (route.request().headers()['authorization'] !== `Bearer ${TOKEN_PAIR.accessToken}`) {
+        return route.fulfill({
+          status: 401,
+          contentType: 'application/problem+json',
+          body: JSON.stringify({
+            type: 'about:blank',
+            title: 'Unauthorized',
+            status: 401,
+            detail: 'stubbed refusal',
+            code: 'api.not_signed_in',
+          }),
+        });
+      }
+
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(current) });
+    }
+
+    const body = (route.request().postDataJSON() ?? {}) as { name?: string; currency?: string };
+    const key = route.request().headers()['idempotency-key'];
+
+    created.push({ body, key });
+
+    const made = group(crypto.randomUUID(), String(body.name), String(body.currency));
+
+    current.push(made);
+
+    return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(made) });
+  });
+
+  return { created };
+}

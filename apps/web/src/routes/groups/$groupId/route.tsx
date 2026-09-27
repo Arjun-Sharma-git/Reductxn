@@ -1,6 +1,8 @@
 import { createFileRoute, Link, Outlet } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 
+import { groupQuery } from '@/entities/group';
 import { useTranslations } from '@/shared/i18n';
 
 import styles from './route.module.css';
@@ -23,6 +25,26 @@ export const Route = createFileRoute('/groups/$groupId')({
   component: GroupLayout,
 });
 
+/**
+ * What this group is called, when the API knows.
+ *
+ * **The failure is silent, and it has to be.** `GET /groups/{groupId}` answers `404` for a group id that has commitments
+ * but no `groups` row - a state this build's development data is in, because the table arrived additively rather than as a
+ * foreign key every row had to satisfy (ADR 0043). A layout that rendered a problem notice for that would break screens
+ * that work today, and would be telling a member their group does not exist while they are reading its commitments. So the
+ * heading is the group's name when there is one, and the identifier when there is not - which is what this screen showed
+ * before this slice.
+ *
+ * The `404` is also what a signed-out visitor gets, for the same reason it is what a stranger gets: this read answers one
+ * code for "no such group" and "not a group you are in", so that nobody can use it to find out which ids are real.
+ */
+function GroupHeading() {
+  const { groupId } = Route.useParams();
+  const group = useQuery(groupQuery(groupId));
+
+  return <h1 className={styles.heading}>{group.data?.name ?? groupId}</h1>;
+}
+
 function GroupLayout() {
   const { t } = useTranslations();
   const { groupId } = Route.useParams();
@@ -33,6 +55,8 @@ function GroupLayout() {
 
   return (
     <>
+      <GroupHeading />
+
       <nav className={styles.nav} aria-label={t('common.groupNav.label')}>
         <Link
           className={styles.link}

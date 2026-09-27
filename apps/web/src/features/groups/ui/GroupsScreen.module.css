@@ -1,0 +1,57 @@
+/* The way in: a list of groups, a form to make one, and the id box that was the whole screen before this slice. */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-5);
+  max-inline-size: 60ch;
+  margin-inline: auto;
+  padding-block: var(--rn-space-8);
+}
+
+.lede {
+  color: var(--rn-text-muted);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rn-space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  padding-block: var(--rn-space-2);
+  border-block-end: 1px solid var(--rn-border);
+}
+
+.name {
+  font-weight: 600;
+}
+
+.meta {
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-sm);
+}
+
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rn-space-3);
+  align-items: end;
+  margin-block-start: var(--rn-space-4);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-1);
+  font-size: var(--rn-text-sm);
+}
