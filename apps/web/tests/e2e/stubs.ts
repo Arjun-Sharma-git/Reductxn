@@ -280,6 +280,19 @@ export async function stubObligationsApi(
     readonly behaviour?: RecordBehaviour;
     readonly delayMs?: number;
     readonly rate?: { base: string; quote: string; rateScaled: number; rateScale: number };
+    /**
+     * How the void answers. The refusal is a parameter rather than a route of its own, so the test about a plan
+     * holding a commitment asks for the same request and gets the answer it is about.
+     */
+    readonly voidBehaviour?: RecordBehaviour;
+    /**
+     * A caller-owned list this stub appends the voided ids to.
+     *
+     * The alternative was to widen this helper's return type, which fifteen tests destructure as a plain array of
+     * recorded requests. A recorder passed in is smaller than a breaking change to a stub nobody else's test needs
+     * and keeps the assertion - "the client asked to void *this* row and no other" - available where it matters.
+     */
+    readonly voids?: string[];
   } = {},
 ): Promise<readonly PostedRequest[]> {
   const posted: PostedRequest[] = [];
@@ -290,6 +303,10 @@ export async function stubObligationsApi(
    * somewhere, and this made sure it was not the client's.
    */
   const recorded: Obligation[] = [];
+
+  /* Rows this stub has voided. A stub that answered the void and then served the old list would let the client's
+     refetch erase the change it had just made - the failure this file's own comment records for the record path. */
+  const voided = new Set<string>();
 
   await page.route('**/v1/currencies', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CURRENCIES) }),
@@ -320,7 +337,11 @@ export async function stubObligationsApi(
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify([...recorded, ...(options.list ?? [OBLIGATION])]),
+        body: JSON.stringify(
+          [...recorded, ...(options.list ?? [OBLIGATION])].map((obligation) =>
+            voided.has(obligation.id) ? { ...obligation, status: 'voided' as const } : obligation,
+          ),
+        ),
       });
 
       return;
@@ -376,6 +397,63 @@ export async function stubObligationsApi(
       status: 201,
       contentType: 'application/json',
       body: JSON.stringify(accepted),
+    });
+  });
+
+  /*
+   * The void, registered after the list route on purpose: Playwright runs the handlers that match in the reverse
+   * order they were registered, so the last one added wins - and `**\/v1/obligations*` would otherwise answer this
+   * path as a list read, which is a `200` with an array where the operation promises the obligation.
+   */
+  await page.route('**/v1/obligations/*/void', async (route) => {
+    const id = new URL(route.request().url()).pathname.split('/').slice(-2)[0] ?? '';
+
+    options.voids?.push(id);
+
+    const behaviour = options.voidBehaviour ?? { kind: 'accept' };
+
+    if (behaviour.kind === 'refuse') {
+      await route.fulfill({
+        status: behaviour.status,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: `https://reductxn.io/problems/${behaviour.code}`,
+          title: behaviour.code,
+          status: behaviour.status,
+          code: behaviour.code,
+          params: {},
+        }),
+      });
+
+      return;
+    }
+
+    const row = [...recorded, ...(options.list ?? [OBLIGATION])].find((obligation) => obligation.id === id);
+
+    if (row === undefined) {
+      // The server's answer for an id nobody has: the same `404` a stranger's group gets (ADR 0045), so a test that
+      // voids a row the stub does not serve sees the real refusal rather than a `200` invented here.
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'https://reductxn.io/problems/api.no_such_obligation',
+          title: 'api.no_such_obligation',
+          status: 404,
+          code: 'api.no_such_obligation',
+          params: {},
+        }),
+      });
+
+      return;
+    }
+
+    voided.add(id);
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ...row, status: 'voided' as const }),
     });
   });
 

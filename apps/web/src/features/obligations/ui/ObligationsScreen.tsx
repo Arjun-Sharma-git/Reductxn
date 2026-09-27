@@ -129,7 +129,12 @@ export function ObligationsScreen({
         {obligations.isSuccess && rows.length === 0 ? <Notice>{t('obligations.empty')}</Notice> : null}
 
         {rows.length > 0 ? (
-          <ObligationRows rows={rows} members={members.data ?? []} catalog={catalog} />
+          <ObligationRows
+            groupId={groupId}
+            rows={rows}
+            members={members.data ?? []}
+            catalog={catalog}
+          />
         ) : null}
       </Card>
 

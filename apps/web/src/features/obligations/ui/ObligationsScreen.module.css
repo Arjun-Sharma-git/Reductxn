@@ -96,6 +96,44 @@
   font-style: italic;
 }
 
+/* The void: a button on the rows the server would accept one for, and a sentence on the rows it would not.
+   The button itself is the application's `.rn-button` (global.css), so it is 44px tall and focus-visible like every
+   other button in this app; what this module adds is where the question and the two answers sit. */
+.actions {
+  white-space: nowrap;
+}
+
+.noAction {
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-sm);
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-2);
+  max-inline-size: 22rem;
+}
+
+.question {
+  margin: 0;
+  font-size: var(--rn-text-sm);
+  color: var(--rn-text-muted);
+}
+
+.confirmButtons {
+  display: flex;
+  gap: var(--rn-space-2);
+  flex-wrap: wrap;
+}
+
+/* The way out is quieter than the way on: undoing a question is not a decision, so it should not read like one. */
+.keep {
+  background: var(--rn-surface-muted);
+  color: var(--rn-text);
+  border-color: var(--rn-border-strong);
+}
+
 .status {
   min-block-size: 3rem;
   color: var(--rn-text-muted);
