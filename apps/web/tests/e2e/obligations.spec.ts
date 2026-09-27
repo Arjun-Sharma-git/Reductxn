@@ -132,6 +132,56 @@ test('states the cost of settling in another currency before it is chosen', asyn
   await expect(page.getByText(/fixed when you record this/)).toBeVisible();
 });
 
+test('voids a commitment after a second press, and keeps it on the record', async ({ page }) => {
+  const voids: string[] = [];
+  await stubObligationsApi(page, { voids });
+  await page.goto(URL);
+
+  const row = page.getByRole('row', { name: /Bhavesh Rao/ });
+
+  // One press asks, and asks without sending anything: a void cannot be undone, so the question comes first.
+  await row.getByRole('button', { name: 'Void' }).click();
+  await expect(row.getByText(/it cannot be undone/)).toBeVisible();
+  expect(voids).toHaveLength(0);
+
+  await row.getByRole('button', { name: 'Void it' }).click();
+
+  // The row stays and says Voided: a transition rather than a delete (ADR 0004), and the refetch that follows the
+  // write says the same thing - a stub that served the old list would make this assertion catch the client's own
+  // invalidation erasing the change.
+  await expect(row.getByRole('cell', { name: 'Voided' })).toBeVisible();
+  await expect(page.getByRole('rowheader', { name: 'Bhavesh Rao' })).toBeVisible();
+
+  // The id in the path is the row that was clicked, and only one request left the page. The header assertion is
+  // absent on purpose: the contract declares no Idempotency-Key for this operation, so the request carries none.
+  expect(voids).toHaveLength(1);
+  expect(voids[0]).toMatch(/^[0-9a-f-]{36}$/);
+
+  // And the offer is gone, because the server would now answer 200 with the same row - nothing left to void.
+  await expect(row.getByRole('button', { name: 'Void' })).toHaveCount(0);
+});
+
+test('puts the row back when a settlement plan holds the commitment', async ({ page }) => {
+  const voids: string[] = [];
+  await stubObligationsApi(page, {
+    voids,
+    voidBehaviour: { kind: 'refuse', code: 'api.obligation_not_open', status: 409 },
+  });
+  await page.goto(URL);
+
+  const row = page.getByRole('row', { name: /Bhavesh Rao/ });
+  await row.getByRole('button', { name: 'Void' }).click();
+  await row.getByRole('button', { name: 'Void it' }).click();
+
+  // The refusal is shown as the server worded it, in the row that was asked about.
+  await expect(page.getByText(/in a settlement plan or has already been settled/)).toBeVisible();
+
+  // And the optimistic status is rolled back: a row that stayed Voided after the server refused would be this screen
+  // inventing a correction that never happened.
+  await expect(row.getByRole('cell', { name: 'Open' })).toBeVisible();
+  expect(voids).toHaveLength(1);
+});
+
 test('a filter is a URL, so a narrowed view can be sent to somebody', async ({ page }) => {
   await stubObligationsApi(page);
   await page.goto(URL);

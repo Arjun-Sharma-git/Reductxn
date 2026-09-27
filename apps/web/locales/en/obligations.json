@@ -25,7 +25,15 @@
     "occurredAt": "Happened",
     "settlementSame": "The same currency",
     "settlementDifferent": "Settles in {currency}",
-    "recording": "Recording…"
+    "recording": "Recording…",
+    "actions": "Actions",
+    "nothingToDo": "Nothing to do",
+    "void": "Void",
+    "voidConfirm": "Void it",
+    "voidCancel": "Keep it",
+    "voidSending": "Voiding…",
+    "voidQuestion": "Void this commitment? It stays on the record as voided, and it cannot be undone.",
+    "voidRefused": "That commitment was not voided."
   },
   "status": {
     "open": "Open",

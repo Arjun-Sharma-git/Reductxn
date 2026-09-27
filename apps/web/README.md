@@ -97,3 +97,13 @@ instead: one answer per member, never overwritten, and answering twice is a `409
 response becomes a correct state after one more press (the `409` says the answer is already on the record, and the
 screen stops offering the buttons). And nothing is written optimistically, because what a member is waiting to see is
 the run's *status* - which is the worker's judgement over the answers, not a row this client inserted. See ADR 0030.
+
+**A void is the third shape, and it is the one where the screen can be wrong in both directions.** Voiding a commitment
+(`features/obligations/mutations.ts`, ADR 0045) carries no idempotency key either, but for the opposite reason to a
+decision: the *server* is idempotent by state, because `voided_at` already answers whether the row was voided, so the
+contract removed the header rather than this client remembering not to send one. The action is offered only on `open`
+rows - a `netted` or `settled` commitment is held by a settlement run, and a button that exists to collect a `409` is
+the screen wasting a member's press - and it takes two presses, because a void cannot be undone. The row changes status
+before the answer arrives and is **rolled back if the server refuses**, which is the assertion that matters: the
+recording path's optimistic row is a commitment the group might not have; this one would be a *correction* that never
+happened, which is worse, because the member is looking at the list to find out what the record says.

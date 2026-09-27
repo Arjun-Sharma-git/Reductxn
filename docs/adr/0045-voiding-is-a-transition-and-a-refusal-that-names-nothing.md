@@ -64,9 +64,17 @@ reason for this path to be the one that loses it.
   `JooqObligationStore` already writes, including the quote fetched by id. A shared helper would be a third class with two
   callers, and the two answer different questions. The *decision* - which status a row has - is not duplicated: both call
   `ObligationStatuses`, so a replayer and a voider cannot disagree about whether a commitment is still owed (ADR 0036).
-- **No screen calls it yet, and that is this slice's open item.** The API is served and tested end to end; the obligations
-  list displays the `voided` status the transition produces, and the button that produces it is the next client change. It
-  is named here rather than implied, because an operation with no caller is the state this slice exists to leave.
+- **The screen followed in the same slice, and the catalog gate found something.** The obligations list grew an actions
+  column that offers the void on exactly the rows the server would accept one for (`open`, and never a row still in
+  flight), behind a **second press** - the row stays marked `voided` and cannot be undone, so one press asking is the
+  difference between a correction and an accident. The mutation carries no `Idempotency-Key` because the contract
+  removed it, patches every view of the list (a void changes a row that is already in all of them, unlike a new record),
+  and rolls the row back on a refusal. That last part has a test: `api.obligation_not_open` must leave the row `Open`,
+  because a screen that kept the optimistic `voided` would be inventing a correction the server refused.
+  Writing it also produced a finding from `tools/check-catalogs.mjs`, which is worth recording: the first draft added a
+  hint key that nothing rendered, and `I2` failed the build on it. The key was deleted rather than wired to a tooltip -
+  the status column already says `Settled` or `In a plan` beside the words "Nothing to do", and a tooltip is
+  unreachable without a mouse.
 - **The other boundaries still take the caller from the body** - members, invitations, decisions, obligation recording -
   which is what ADR 0042/0043 deferred and this slice begins to undo.
 

@@ -129,3 +129,69 @@ export function useRecordObligation(groupId: string, filters: ObligationFilters)
 export function nextAttemptKey(): string {
   return newIdempotencyKey();
 }
+
+/**
+ * Voiding an obligation: recording that a commitment should never have been written.
+ *
+ * **No idempotency key, and that is the server's decision rather than an omission here** (ADR 0045). The header is
+ * gone from the contract because `voided_at` already answers whether the row was voided: the server's update is
+ * guarded by `voided_at IS NULL`, so a retry - including the one `worthRetrying` allows - is a retry of an attempt
+ * that either happened or did not, and never a second claim about when it happened. Adding a key here would make
+ * the client send a header the contract no longer declares.
+ *
+ * **The row changes status before the answer arrives, and every view of the list is patched.** The recording path
+ * could name exactly one cache entry because a new row only matches the filters it was recorded under; a void
+ * changes a row that is already in every view it appears in, so a partial-key update reaches all of them at once -
+ * a member looking at `?status=open` and a member looking at `?status=voided` are looking at the same commitment.
+ *
+ * **A refusal puts the row back.** A `409` (`api.obligation_not_open`) means a settlement run holds the commitment,
+ * and a row that stayed `voided` after that would be the screen inventing a correction the server refused - the
+ * failure mode the recording path's rollback exists to prevent, in the other direction.
+ */
+export function useVoidObligation(groupId: string) {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: (obligationId: string) =>
+      // The id is the whole request: the contract declares no body for this operation, so there is nothing to send.
+      request<Obligation>(`/obligations/${obligationId}/void`, { method: 'POST' }),
+
+    retry: (attempt, fault) => attempt < 1 && worthRetrying(fault),
+
+    onMutate: async (obligationId) => {
+      await client.cancelQueries({ queryKey: listKey(groupId) });
+
+      const previous = client.getQueriesData<Obligation[]>({ queryKey: listKey(groupId) });
+
+      client.setQueriesData<Obligation[]>({ queryKey: listKey(groupId) }, (rows) =>
+        rows?.map((obligation) =>
+          obligation.id === obligationId ? { ...obligation, status: 'voided' as const } : obligation,
+        ),
+      );
+
+      return { previous };
+    },
+
+    onError: (_fault, _obligationId, context) => {
+      for (const [key, rows] of context?.previous ?? []) {
+        client.setQueryData(key, rows);
+      }
+    },
+
+    onSuccess: (voided) => {
+      // The server's row replaces the optimistic one, so a status the client guessed is corrected by the one the
+      // server decided - and anything else holding this obligation (the netting preview, the balances) refetches.
+      client.setQueriesData<Obligation[]>({ queryKey: listKey(groupId) }, (rows) =>
+        rows?.map((obligation) => (obligation.id === voided.id ? voided : obligation)),
+      );
+
+      void client.invalidateQueries({ queryKey: listKey(groupId) });
+      // The keys are the ones the readers actually use, read from their own query files rather than guessed: the
+      // preview is `['netting', 'preview', groupId, asOf]` and the balances are `['groups', groupId, 'balances']`.
+      // A prefix reaches every instant a preview was computed for, because a voided commitment is voided in all of
+      // them (ADR 0036's derivation excludes it from open ones), not only in the view that was on screen.
+      void client.invalidateQueries({ queryKey: ['netting', 'preview', groupId] });
+      void client.invalidateQueries({ queryKey: ['groups', groupId, 'balances'] });
+    },
+  });
+}
