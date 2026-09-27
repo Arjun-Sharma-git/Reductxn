@@ -102,6 +102,64 @@ public final class ObligationRefusals {
     }
 
     /**
+     * No obligation with that id, or none the caller is a member of.
+     *
+     * <p>One code for both, exactly as the group reads and the activity feed do it (ADR 0043, 0044): telling "no such
+     * obligation" apart from "not your group's obligation" would let anybody holding a guess learn which ids are real. It is
+     * also why the membership is checked before the status below - a non-member learns nothing about a commitment, not even
+     * whether it is still open.
+     */
+    public record NoSuchObligation(UUID obligationId) implements DomainError {
+
+        public static final String CODE = "api.no_such_obligation";
+
+        public NoSuchObligation {
+            DomainCodes.requireWellFormed(CODE);
+        }
+
+        @Override
+        public String code() {
+            return CODE;
+        }
+
+        @Override
+        public String message() {
+            return "there is no obligation " + obligationId + " that you are a member of the group of. "
+                    + "An obligation you cannot see is answered as one that does not exist, so that a guess cannot "
+                    + "tell you which ids are real";
+        }
+    }
+
+    /**
+     * The obligation is not open, so there is nothing to void.
+     *
+     * <p>A settlement run holds it (`netted`) or has taken it (`settled`). `409` rather than `422`, because the request is
+     * well-formed and would have succeeded earlier: the world is what refuses it, and the remedy is a cycle rather than a
+     * retry (the same distinction {@code DecisionRefusals.AlreadyAnswered} makes). An already-*voided* obligation is not this
+     * refusal - it is a `200` with the row, which is what makes the operation idempotent by state rather than by key.
+     */
+    public record NotOpen(UUID obligationId, String status) implements DomainError {
+
+        public static final String CODE = "api.obligation_not_open";
+
+        public NotOpen {
+            DomainCodes.requireWellFormed(CODE);
+        }
+
+        @Override
+        public String code() {
+            return CODE;
+        }
+
+        @Override
+        public String message() {
+            return "obligation " + obligationId + " is " + status + ", so there is nothing to void. A run holds it or "
+                    + "has already taken it, and a commitment that left a plan's books would make the plan wrong about "
+                    + "money that may already have moved";
+        }
+    }
+
+    /**
      * A field the contract requires is missing or blank.
      *
      * <p>The field is named in the message rather than in a code of its own: a code per field would multiply

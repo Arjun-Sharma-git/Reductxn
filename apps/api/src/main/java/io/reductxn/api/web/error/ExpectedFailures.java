@@ -59,6 +59,17 @@ public final class ExpectedFailures {
             Map.entry(StaleRateException.CODE, HttpStatus.UNPROCESSABLE_CONTENT),
             Map.entry(AmountTooSmallToConvertException.CODE, HttpStatus.UNPROCESSABLE_CONTENT),
 
+            // Nothing to void, and one code for "no such obligation" and "not your group's" - which is also why the
+            // membership is checked before the obligation's status: a non-member learns nothing from the answer, not
+            // even whether the commitment is still open (ADR 0045).
+            Map.entry(ObligationRefusals.NoSuchObligation.CODE, HttpStatus.NOT_FOUND),
+
+            // A conflict with what is already on the record, like an answer that has already been given: the request is
+            // well-formed and would have succeeded earlier, and it is a settlement run rather than the request that
+            // refuses it. The obligation is held by a run or has already been settled, so voiding it would make that
+            // run wrong about money that may have moved.
+            Map.entry(ObligationRefusals.NotOpen.CODE, HttpStatus.CONFLICT),
+
             // The run's own rows refused the answer. 422 rather than 409: the request conflicts with nothing that
             // exists, it asks for something the run cannot hold - and a client that retried it would get the same
             // answer, which is what separates it from the conflict below.

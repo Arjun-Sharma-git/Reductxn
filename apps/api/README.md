@@ -203,6 +203,8 @@ into the settlement worker's tables and writes nothing there. Membership is the 
 the first version asked it through the group read, which silently required a `groups` row and would have answered `404` for
 every group with commitments and no row.
 
+`POST /v1/obligations/{obligationId}/void` is the first write narrowed by membership (ADR 0045): the caller comes from the token and must be a member of the obligation's group, and **the membership is checked before the status** - a stranger gets `api.no_such_obligation` however the commitment stands, so the endpoint cannot be used to read a group's state one refusal at a time. The `200` body is the obligation, because the contract's `200` was described only as "Voided"; the `Idempotency-Key` is gone, because `voided_at` already answers whether the row was voided; and `409` is kept for a commitment a settlement run holds or has already taken.
+
 `POST /v1/groups/{groupId}/invites` and `POST /v1/invites/{code}/accept` are the last two operations of section 6's
 route tree, and serving them closes the route tree's screens (ADR 0041). The slice also created the table, and the shape
 of the data followed from the wire: acceptance is addressed by the code alone, so **the code is the primary key** and is

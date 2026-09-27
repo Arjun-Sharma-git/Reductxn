@@ -7,6 +7,9 @@ import io.reductxn.api.port.in.ObligationStatus;
 import io.reductxn.api.port.in.ReadObligations;
 import io.reductxn.api.port.in.RecordObligation;
 import io.reductxn.api.port.in.RecordedObligation;
+import io.reductxn.api.port.in.SignedInUser;
+import io.reductxn.api.port.in.VoidObligation;
+import io.reductxn.api.web.CallerResolver;
 import io.reductxn.api.web.dto.ObligationMapper;
 import io.reductxn.api.web.dto.ObligationResponse;
 import io.reductxn.api.web.dto.RecordObligationRequest;
@@ -20,6 +23,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -63,11 +67,16 @@ public class ObligationsController {
 
     private final RecordObligation recordObligation;
     private final ReadObligations readObligations;
+    private final VoidObligation voidObligation;
+    private final CallerResolver callers;
     private final Clock clock;
 
-    public ObligationsController(RecordObligation recordObligation, ReadObligations readObligations, Clock clock) {
+    public ObligationsController(RecordObligation recordObligation, ReadObligations readObligations,
+            VoidObligation voidObligation, CallerResolver callers, Clock clock) {
         this.recordObligation = Objects.requireNonNull(recordObligation, "recordObligation");
         this.readObligations = Objects.requireNonNull(readObligations, "readObligations");
+        this.voidObligation = Objects.requireNonNull(voidObligation, "voidObligation");
+        this.callers = Objects.requireNonNull(callers, "callers");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -194,6 +203,38 @@ public class ObligationsController {
         }
 
         return problem(((Result.Failure<RecordedObligation>) result).error(), http.getRequestURI());
+    }
+
+    /**
+     * The void.
+     *
+     * <p>The path's id arrives as a string and is parsed here, so a malformed one is this module's own refusal
+     * ({@code api.obligation_request_incomplete}) rather than a Spring conversion error - the same choice the group
+     * controller makes for the same reason: a client should never see a shape the contract does not describe.
+     */
+    @PostMapping("/{obligationId}/void")
+    public ResponseEntity<Object> voidOne(@PathVariable("obligationId") String obligationId, HttpServletRequest http) {
+
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
+        if (!isUuid(obligationId)) {
+            return problem(new ObligationRefusals.RequestIncomplete("obligationId"), http.getRequestURI());
+        }
+
+        Result<RecordedObligation> voided = voidObligation.voidOne(
+                UUID.fromString(obligationId),
+                ((Result.Ok<SignedInUser>) caller).value().id(),
+                clock.instant());
+
+        if (voided instanceof Result.Ok<RecordedObligation> row) {
+            return ResponseEntity.ok(ObligationMapper.toResponse(row.value()));
+        }
+
+        return problem(((Result.Failure<RecordedObligation>) voided).error(), http.getRequestURI());
     }
 
     /** A refusal as the response the contract describes, with the status its code carries. */
