@@ -1,5 +1,6 @@
 package io.reductxn.api.application.obligations;
 
+import io.reductxn.api.port.in.GroupRefusals;
 import io.reductxn.api.port.in.NewObligation;
 import io.reductxn.api.port.in.ObligationRefusals;
 import io.reductxn.api.port.in.ObligationStatus;
@@ -8,6 +9,7 @@ import io.reductxn.api.port.in.RecordedObligation;
 import io.reductxn.api.port.out.ChainHeads;
 import io.reductxn.api.port.out.CurrencyCatalog;
 import io.reductxn.api.port.out.FxQuotes;
+import io.reductxn.api.port.out.Groups;
 import io.reductxn.api.port.out.JournalEntries;
 import io.reductxn.api.port.out.ObligationStore;
 import io.reductxn.api.port.out.ObligationToRecord;
@@ -70,6 +72,7 @@ public class RecordObligationService implements RecordObligation {
     private final CurrencyCatalog currencies;
     private final FxRateProvider rates;
     private final FxQuotes quotes;
+    private final Groups groups;
 
     public RecordObligationService(
             ObligationStore obligations,
@@ -77,7 +80,8 @@ public class RecordObligationService implements RecordObligation {
             ChainHeads chainHeads,
             CurrencyCatalog currencies,
             FxRateProvider rates,
-            FxQuotes quotes) {
+            FxQuotes quotes,
+            Groups groups) {
 
         this.obligations = Objects.requireNonNull(obligations, "obligations");
         this.entries = Objects.requireNonNull(entries, "entries");
@@ -85,12 +89,22 @@ public class RecordObligationService implements RecordObligation {
         this.currencies = Objects.requireNonNull(currencies, "currencies");
         this.rates = Objects.requireNonNull(rates, "rates");
         this.quotes = Objects.requireNonNull(quotes, "quotes");
+        this.groups = Objects.requireNonNull(groups, "groups");
     }
 
     @Override
     @Transactional
-    public Result<RecordedObligation> record(NewObligation request) {
+    public Result<RecordedObligation> record(UUID callerId, NewObligation request) {
+        Objects.requireNonNull(callerId, "callerId");
         Objects.requireNonNull(request, "request");
+
+        // First, and before anything is read or written: recording a commitment is an act within a group, so a caller
+        // who is not in it is refused with the one code that does not say which of the two facts it was - the reading
+        // this operation's own void has used since ADR 0045 (ADR 0049). It is checked before the currencies so that a
+        // stranger cannot learn which currencies this deployment knows by comparing refusals.
+        if (!groups.isMember(request.groupId(), callerId)) {
+            return Result.fail(new GroupRefusals.NoSuchGroup(request.groupId()));
+        }
 
         // The two refusals that are about the request being coherent, before anything is read or written.
         // Checked here rather than left to the domain types, whose guards throw: from their side a member
@@ -122,9 +136,12 @@ public class RecordObligationService implements RecordObligation {
         UUID obligationId = UUID.randomUUID();
         Commitment commitment = new Commitment(
                 obligationId, request.groupId(), request.occurredAt(), request.idempotencyKey(),
-                // No identity module yet, so nothing can say who submitted it. Null means "system-generated"
-                // on the entry; a made-up id would be a claim about a member who does not exist.
-                null);
+                // The caller, since ADR 0049. This was null with the comment "no identity module yet, so nothing can
+                // say who submitted it" - and identity arrived in ADR 0042, so the comment became a claim about a
+                // deployment that no longer exists. The entry it produces now names the member who caused it, and
+                // `createdBy` is part of the entry's hash (L4), so the attribution is covered by the chain rather
+                // than stored beside it.
+                callerId);
 
         // Everything below uses `commitment.occurredAt()` rather than the request's instant. The commitment
         // truncates it to what the ledger can store, so the row, the entry and the response all carry the

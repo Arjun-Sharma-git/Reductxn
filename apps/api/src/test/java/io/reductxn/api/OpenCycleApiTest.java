@@ -34,10 +34,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * with the same SQL and checks that the cadence turns them into a plan. Between them, a change to that table fails a
  * test rather than a deployment.
  *
- * <p><strong>What it does not assert is a refusal, because there is not one.</strong> A cycle may be opened for an
- * instant with nothing recorded at or before it, and the worker is what refuses to plan it - which is the right
- * moment, because a commitment recorded tomorrow can carry an instant inside this cycle. A test here that expected a
- * {@code 422} would be asserting a rule that must not exist, so the absence is asserted positively instead.
+ * <p><strong>What it does not assert is a refusal about the cycle, because there is not one.</strong> A cycle may be
+ * opened for an instant with nothing recorded at or before it, and the worker is what refuses to plan it - which is the
+ * right moment, because a commitment recorded tomorrow can carry an instant inside this cycle. A test here that expected a
+ * {@code 422} would be asserting a rule that must not exist, so the absence is asserted positively instead - and **the
+ * refusals it does assert are about the caller** (ADR 0049), which is the half the port's own argument had missed.
  */
 @SpringBootTest
 class OpenCycleApiTest extends DatabaseTest {
@@ -47,14 +48,43 @@ class OpenCycleApiTest extends DatabaseTest {
 
     private static final Instant AS_OF = Instant.parse("2026-09-30T23:59:59Z");
 
+    private static final String CALLER_PHONE = "+919812345678";
+
     @Autowired
     private WebApplicationContext context;
 
     private MockMvc mvc;
 
+    private String caller;
+    private UUID callerId;
+
+
     @BeforeEach
     void buildMockMvc() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
+    }
+
+    /**
+     * A signed-in member of the group, because a member of the group is who may write to its books (ADR 0049).
+     *
+     * <p>The membership is written as a row: it is a precondition of the requests these tests make rather than their
+     * subject, and the tests that assert the rule itself belong to the classes that own each write.
+     */
+    @BeforeEach
+    void signInACaller() {
+        caller = signedIn(CALLER_PHONE);
+        callerId = user(CALLER_PHONE);
+        memberOf(GROUP);
+        memberOf(OTHER_GROUP);
+    }
+
+    /** A membership as a row, because {@code groups.isMember} reads exactly this. */
+    private void memberOf(UUID group) {
+        jdbc.update("""
+                INSERT INTO group_members (group_id, user_id, display_name, role, joined_at)
+                VALUES (?, ?, 'Caller', 'admin', TIMESTAMPTZ '2026-09-01 00:00:00+00')
+                ON CONFLICT DO NOTHING
+                """, group, callerId);
     }
 
     @Test
@@ -150,6 +180,7 @@ class OpenCycleApiTest extends DatabaseTest {
     @Test
     void aRequestWithoutAnInstantIsRefusedWithACode() throws Exception {
         mvc.perform(post("/v1/groups/{groupId}/cycles", GROUP)
+                        .header("Authorization", "Bearer " + caller)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest())
@@ -163,6 +194,7 @@ class OpenCycleApiTest extends DatabaseTest {
     @Test
     void aMalformedGroupIdIsRefusedWithTheSameCode() throws Exception {
         mvc.perform(post("/v1/groups/{groupId}/cycles", "not-a-uuid")
+                        .header("Authorization", "Bearer " + caller)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"asOf\":\"2026-09-30T23:59:59Z\"}"))
                 .andExpect(status().isBadRequest())
@@ -193,8 +225,41 @@ class OpenCycleApiTest extends DatabaseTest {
                 .andExpect(jsonPath("$.runId").value(runId.toString()));
     }
 
+    /**
+     * The rule this slice added: closing a group's books is a member's act (ADR 0049).
+     *
+     * <p>This class's own javadoc said it asserts no refusal, "because there is not one". That was true of the cycle and
+     * false of the caller, which is what the port's argument had missed - it reasoned about the row being refusable or
+     * not, and never about who was asking.
+     */
+    @Test
+    void aStrangerCannotCloseAGroupsBooks() throws Exception {
+        String stranger = signedIn("+919899999999");
+
+        mvc.perform(post("/v1/groups/{groupId}/cycles", GROUP)
+                        .header("Authorization", "Bearer " + stranger)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"asOf\":\"" + AS_OF + "\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_group"));
+
+        assertThat(countIn("settlement_cycles")).isZero();
+    }
+
+    @Test
+    void anOpeningWithNoSessionIsRefusedWith401() throws Exception {
+        mvc.perform(post("/v1/groups/{groupId}/cycles", GROUP)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"asOf\":\"" + AS_OF + "\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("api.not_signed_in"));
+
+        assertThat(countIn("settlement_cycles")).isZero();
+    }
+
     private ResultActions open(UUID groupId, Instant asOf) throws Exception {
         return mvc.perform(post("/v1/groups/{groupId}/cycles", groupId)
+                .header("Authorization", "Bearer " + caller)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"asOf\":\"" + asOf.toString() + "\"}"));
     }

@@ -70,14 +70,42 @@ class RecordObligationApiTest extends DatabaseTest {
     private static final Instant EXPIRES_AT = Instant.parse("2026-09-24T10:01:00Z");
     private static final Instant OCCURRED_AT = Instant.parse("2026-09-24T10:00:30Z");
 
+    private static final String CALLER_PHONE = "+919812345678";
+
     @Autowired
     private WebApplicationContext context;
 
     private MockMvc mvc;
 
+    private String caller;
+    private UUID callerId;
+
+
     @BeforeEach
     void buildMockMvc() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
+    }
+
+    /**
+     * A signed-in member of the group, because a member of the group is who may write to its books (ADR 0049).
+     *
+     * <p>The membership is written as a row: it is a precondition of the requests these tests make rather than their
+     * subject, and the tests that assert the rule itself belong to the classes that own each write.
+     */
+    @BeforeEach
+    void signInACaller() {
+        caller = signedIn(CALLER_PHONE);
+        callerId = user(CALLER_PHONE);
+        memberOf(GROUP);
+    }
+
+    /** A membership as a row, because {@code groups.isMember} reads exactly this. */
+    private void memberOf(UUID group) {
+        jdbc.update("""
+                INSERT INTO group_members (group_id, user_id, display_name, role, joined_at)
+                VALUES (?, ?, 'Caller', 'admin', TIMESTAMPTZ '2026-09-01 00:00:00+00')
+                ON CONFLICT DO NOTHING
+                """, group, callerId);
     }
 
     @Test
@@ -172,6 +200,9 @@ class RecordObligationApiTest extends DatabaseTest {
     @Test
     void aDifferentGroupRecordingTheSameKeyIsADifferentObligation() throws Exception {
         UUID otherGroup = new UUID(0L, 3L);
+
+        // The caller is in that group too: recording is a member's act in whichever group the commitment names (ADR 0049).
+        memberOf(otherGroup);
 
         record(GROUP, ALICE, BORIS, 12_500L, "INR", "batch-7").andExpect(status().isCreated());
         record(otherGroup, ALICE, BORIS, 12_500L, "INR", "batch-7").andExpect(status().isCreated());
@@ -338,6 +369,7 @@ class RecordObligationApiTest extends DatabaseTest {
     @Test
     void refusesAMissingIdempotencyKey() throws Exception {
         mvc.perform(post("/v1/obligations")
+                        .header("Authorization", "Bearer " + caller)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(GROUP, ALICE, BORIS, 12_500L, "INR", "lunch")))
                 .andExpect(status().isBadRequest())
@@ -350,6 +382,7 @@ class RecordObligationApiTest extends DatabaseTest {
     void refusesAMemoLongerThanTheContractAllows() throws Exception {
         mvc.perform(post("/v1/obligations")
                         .header("Idempotency-Key", "key-long-memo")
+                        .header("Authorization", "Bearer " + caller)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(GROUP, ALICE, BORIS, 12_500L, "INR", "x".repeat(281))))
                 .andExpect(status().isBadRequest())
@@ -364,6 +397,7 @@ class RecordObligationApiTest extends DatabaseTest {
         // on the clock would be asserting against whatever second it ran in.
         mvc.perform(post("/v1/obligations")
                         .header("Idempotency-Key", "key-preview")
+                        .header("Authorization", "Bearer " + caller)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -391,12 +425,67 @@ class RecordObligationApiTest extends DatabaseTest {
     }
 
 
+    /**
+     * The attribution this slice added, asserted on the ledger's own row rather than on the response.
+     *
+     * <p>{@code Commitment.createdBy} was {@code null} for every recorded obligation, with the comment "no identity
+     * module yet, so nothing can say who submitted it". Identity arrived in ADR 0042, so the comment described a
+     * deployment that no longer existed - and since {@code createdBy} is part of the entry's hash (L4), what this test
+     * reads back is what the chain commits to, not a column stored beside it.
+     */
+    @Test
+    void theEntryNamesTheMemberWhoRecordedIt() throws Exception {
+        record(GROUP, ALICE, BORIS, 12_500L, "INR", "attributed-1").andExpect(status().isCreated());
+
+        UUID createdBy = jdbc.queryForObject(
+                "SELECT created_by FROM journal_entries WHERE group_id = ?", UUID.class, GROUP);
+
+        assertThat(createdBy).isEqualTo(callerId);
+    }
+
+    /**
+     * The rule itself, from both sides: somebody signed in who is not in the group, and somebody not signed in at all.
+     *
+     * <p>{@code 404} rather than {@code 403}, which is what this operation's own void has answered since ADR 0045: one
+     * answer for "no such group" and "not yours", so a guessed id cannot be tested by comparing refusals.
+     */
+    @Test
+    void aStrangerCannotRecordIntoAGroup() throws Exception {
+        String stranger = signedIn("+919899999999");
+
+        mvc.perform(post("/v1/obligations")
+                        .header("Idempotency-Key", "stranger-1")
+                        .header("Authorization", "Bearer " + stranger)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(GROUP, ALICE, BORIS, 12_500L, "INR", "lunch")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_group"));
+
+        // Refused before anything is read or written: no obligation row, and nothing booked - which is the half a
+        // refusal could not undo if it happened later.
+        assertThat(obligationCount()).isZero();
+        assertThat(chainInOrder(GROUP, "INR")).as("and booked nothing").isEmpty();
+    }
+
+    @Test
+    void aRecordingWithNoSessionIsRefusedWith401() throws Exception {
+        mvc.perform(post("/v1/obligations")
+                        .header("Idempotency-Key", "anonymous-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(GROUP, ALICE, BORIS, 12_500L, "INR", "lunch")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("api.not_signed_in"));
+
+        assertThat(obligationCount()).isZero();
+    }
+
     private ResultActions record(
             UUID group, UUID debtor, UUID creditor, long amountMinor, String currency, String key)
             throws Exception {
 
         return mvc.perform(post("/v1/obligations")
                 .header("Idempotency-Key", key)
+                .header("Authorization", "Bearer " + caller)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body(group, debtor, creditor, amountMinor, currency, "lunch")));
     }
@@ -407,6 +496,7 @@ class RecordObligationApiTest extends DatabaseTest {
 
         return mvc.perform(post("/v1/obligations")
                 .header("Idempotency-Key", key)
+                .header("Authorization", "Bearer " + caller)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {

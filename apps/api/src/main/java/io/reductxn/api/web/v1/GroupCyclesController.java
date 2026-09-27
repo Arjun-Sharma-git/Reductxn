@@ -5,10 +5,13 @@ import io.reductxn.api.port.in.OpenCycle;
 import io.reductxn.api.port.in.OpenedCycle;
 import io.reductxn.api.port.in.ReadGroupCycles;
 import io.reductxn.api.port.in.RunRefusals;
+import io.reductxn.api.port.in.SignedInUser;
+import io.reductxn.api.web.CallerResolver;
 import io.reductxn.api.web.dto.CycleRequest;
 import io.reductxn.api.web.dto.SettlementCycleResponse;
 import io.reductxn.api.web.error.ExpectedFailures;
 import io.reductxn.kernel.api.DomainError;
+import io.reductxn.kernel.api.Result;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -39,12 +42,17 @@ import java.util.UUID;
  * documents and for the same reason: the member's surface is here, the run is there, and the two deployables do not
  * depend on each other.
  *
- * <p><strong>It computes nothing and judges nothing.</strong> There is no call to the planner, no check that the
- * group exists, and no refusal for "nothing to settle". The last of those is the one worth explaining: the group's
- * commitments are this module's rows, so the question is answerable here, and answering it here would be wrong - a
- * commitment recorded tomorrow can carry an instant inside this cycle, so the request that looks empty today is the
- * ordinary way to settle a backdated bill. The worker refuses an empty cycle when it computes it, which is the
- * moment the question has an answer.
+ * <p><strong>It computes nothing and judges nothing about the cycle.</strong> There is no call to the planner and no
+ * refusal for "nothing to settle". That absence is the one worth explaining: the group's commitments are this module's
+ * rows, so the question is answerable here, and answering it here would be wrong - a commitment recorded tomorrow can
+ * carry an instant inside this cycle, so the request that looks empty today is the ordinary way to settle a backdated
+ * bill. The worker refuses an empty cycle when it computes it, which is the moment the question has an answer.
+ *
+ * <p><strong>What it does judge, since ADR 0049, is who is asking.</strong> This doc used to say there was no check
+ * that the group exists, on the grounds that groups were not tables - true when it was written and false since
+ * ADR 0043, and the contract's own paragraph about it is rewritten with this slice rather than left to contradict the
+ * code. The caller is resolved first and the use case requires them to be a member of the group they are closing the
+ * books of: a stranger holding an id gets the {@code 404} every other group write answers with.
  *
  * <p><strong>{@code 201} when this request opened the cycle, {@code 200} when it was already open.</strong> The
  * distinction is the store's answer rather than a second question asked before the write - check-then-insert is the
@@ -64,11 +72,14 @@ public class GroupCyclesController {
 
     private final OpenCycle openCycle;
     private final ReadGroupCycles readGroupCycles;
+    private final CallerResolver callers;
     private final Clock clock;
 
-    public GroupCyclesController(OpenCycle openCycle, ReadGroupCycles readGroupCycles, Clock clock) {
+    public GroupCyclesController(OpenCycle openCycle, ReadGroupCycles readGroupCycles, CallerResolver callers,
+            Clock clock) {
         this.openCycle = Objects.requireNonNull(openCycle, "openCycle");
         this.readGroupCycles = Objects.requireNonNull(readGroupCycles, "readGroupCycles");
+        this.callers = Objects.requireNonNull(callers, "callers");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -78,20 +89,34 @@ public class GroupCyclesController {
             @RequestBody(required = false) CycleRequest request,
             HttpServletRequest http) {
 
+        // Who is asking first, before the path or the body is judged: a request with no session is refused as such.
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
         DomainError malformed = malformed(groupId, request);
 
         if (malformed != null) {
             return problem(malformed, http.getRequestURI());
         }
 
-        OpenedCycle opened = openCycle.open(
+        Result<OpenedCycle> opened = openCycle.open(
+                ((Result.Ok<SignedInUser>) caller).value().id(),
                 new NewCycle(UUID.fromString(groupId), request.asOf(), clock.instant()));
 
-        ResponseEntity.BodyBuilder response = opened.created()
+        if (opened instanceof Result.Failure<OpenedCycle> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
+        OpenedCycle cycle = ((Result.Ok<OpenedCycle>) opened).value();
+
+        ResponseEntity.BodyBuilder response = cycle.created()
                 ? ResponseEntity.status(HttpStatus.CREATED)
                 : ResponseEntity.ok();
 
-        return response.body(SettlementCycleResponse.of(opened.cycle()));
+        return response.body(SettlementCycleResponse.of(cycle.cycle()));
     }
 
     /**

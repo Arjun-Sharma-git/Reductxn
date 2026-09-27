@@ -186,13 +186,22 @@ public class ObligationsController {
             @RequestBody(required = false) RecordObligationRequest request,
             HttpServletRequest http) {
 
+        // Who is asking first, as at every boundary that needs a caller (ADR 0043, 0045, 0047, 0048, 0049): a request
+        // with no session is refused as such rather than as a malformed one.
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
         DomainError malformed = malformedRequest(request, idempotencyKey);
         if (malformed != null) {
             return problem(malformed, http.getRequestURI());
         }
 
         NewObligation command = ObligationMapper.toCommand(request, clock.instant(), idempotencyKey);
-        Result<RecordedObligation> result = recordObligation.record(command);
+        Result<RecordedObligation> result = recordObligation.record(
+                ((Result.Ok<SignedInUser>) caller).value().id(), command);
 
         if (result instanceof Result.Ok<RecordedObligation> recorded) {
             // 201 for a replayed request too. The contract says "Recorded", and the obligation was recorded -
