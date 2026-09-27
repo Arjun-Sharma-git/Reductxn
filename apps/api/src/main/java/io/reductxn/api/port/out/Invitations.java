@@ -4,6 +4,7 @@ import io.reductxn.api.port.in.CreatedInvite;
 import io.reductxn.api.port.in.Invitation;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -81,8 +82,8 @@ public interface Invitations {
     record Preview(UUID groupId, String groupName, int memberCount, Instant expiresAt, Integer maxUses, int uses) {
 
         public Preview {
-            java.util.Objects.requireNonNull(groupId, "groupId");
-            java.util.Objects.requireNonNull(expiresAt, "expiresAt");
+            Objects.requireNonNull(groupId, "groupId");
+            Objects.requireNonNull(expiresAt, "expiresAt");
         }
     }
 }

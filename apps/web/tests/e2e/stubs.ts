@@ -366,7 +366,9 @@ export async function stubObligationsApi(
   );
 
   await page.route('**/v1/groups/*/members', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MEMBERS) }),
+    route.fulfill(isSignedIn(route)
+      ? { status: 200, contentType: 'application/json', body: JSON.stringify(MEMBERS) }
+      : NOT_SIGNED_IN),
   );
 
   await page.route('**/v1/fx/rates*', (route) =>
@@ -1221,8 +1223,15 @@ export async function stubGroupsApi(
     }),
   );
 
-  // A single group by id, which the group's layout asks for to put a name above the nav.
+  // A single group by id, which the group's layout asks for to put a name above the nav. It requires a member since
+  // ADR 0043 - this is the read that has been guarded the longest and the stub that was least consistent about it: it
+  // answered everybody, so a signed-out page showed a group's name it had no right to. The layout falls back to the
+  // identifier on any refusal, which is what a signed-out or stranger's page shows.
   await page.route('**/v1/groups/*', (route) => {
+    if (!isSignedIn(route)) {
+      return route.fulfill(NOT_SIGNED_IN);
+    }
+
     const id = route.request().url().split('/').pop() ?? '';
     const found = current.find((group) => group.id === id);
 

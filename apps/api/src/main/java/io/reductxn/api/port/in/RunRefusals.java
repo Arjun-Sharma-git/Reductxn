@@ -46,7 +46,20 @@ public final class RunRefusals {
         }
     }
 
-    /** There is no run with this id. */
+    /**
+     * There is no run with this id **that this caller may read**.
+     *
+     * <p><strong>One code for two conditions, since ADR 0054.</strong> A run that does not exist and a run in a group the
+     * caller is not in answer identically, because telling them apart would make every run-scoped route an oracle for
+     * which run ids are real - and a run id names a plan, its amounts and its answers. The same sameness the group reads
+     * carry as {@link GroupRefusals.NoSuchGroup}, from the other direction: there the code is the group's, and here it is
+     * the run's, because that is the id the caller sent.
+     *
+     * <p>The javadoc used to say only "there is no run with this id" and the message named only that condition, which was
+     * true when this code could only mean one thing. The contract's paragraph for both run reads now states the wider
+     * meaning, so the message does too: a refusal whose prose under-describes its own condition is the kind of gap this
+     * repository keeps finding in the other direction.
+     */
     public record NoSuchRun(UUID runId) implements DomainError {
 
         public static final String CODE = "api.no_such_run";
@@ -62,8 +75,9 @@ public final class RunRefusals {
 
         @Override
         public String message() {
-            return "no settlement run has the id " + runId + ". A run is opened for a cycle before it can be read "
-                    + "or approved, and the id has to be that run's";
+            return "there is no settlement run " + runId + " that this caller may read. Either no run has that id, or "
+                    + "the run belongs to a group the caller is not a member of - a run is read by the members of the "
+                    + "group it settles, and the id has to be that run's";
         }
     }
 

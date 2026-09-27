@@ -1602,7 +1602,10 @@ export interface paths {
          *     operation whose *acting* member arrived in the body, and the boundary is now closed the same way
          *     the group writes closed theirs (ADRs 0043, 0047-0049). A request with no session is a `401`
          *     rather than an answer by nobody, and a caller who is not a member of the group whose books this
-         *     run settles gets the `404` every other group write answers with. Nobody answers on another
+         *     run settles gets a `404` - `api.no_such_run` rather than `api.no_such_group`, since ADR 0054, because this
+         *     route is addressed by a run and the refusal names only the id the caller sent: the wider code's own prose
+         *     names the group it could not find, so an unauthenticated request holding a run uuid was told which group
+         *     that run belonged to. Nobody answers on another
          *     member's behalf - there is no capability for it, so there is no field for it.
          *
          *     It was deliberately last, and why it could wait is worth keeping: a stranger's answer was already
@@ -1673,7 +1676,9 @@ export interface paths {
          *     `Idempotency-Key` here, and its absence is deliberate - a key is a second identity for one intent.
          *
          *     **Who may ask, and what is refused.** A member of the run's group, and only them: a caller who is not gets the
-         *     `404` below, which is one answer for "no such run" and "not yours" (ADR 0049). A run that cannot move is
+         *     `404` below, which is one answer for "no such run" and "not yours" (ADR 0049) - `api.no_such_run`, since
+         *     ADR 0054, because the reader that authorises this request narrows by membership and a run-scoped route answers a
+         *     run-scoped code. A run that cannot move is
          *     answered `409` - already `executing`, finished (`done`, `failed`, `rejected`), still being opened, or waiting
          *     on a group that has not approved enough of it. A run waiting on *currency* is **not** refused: the driver
          *     honours the request the moment the group brings the currency in, so the intent is worth recording rather than
