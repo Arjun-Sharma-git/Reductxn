@@ -1189,36 +1189,16 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
 
-  /fx/quotes:
-    post:
-      tags: [fx]
-      summary: Lock a rate against an amount, for a cross-currency obligation
-      description: |
-        Returns an immutable quote. The quote id is stored on the obligation, so reading history never
-        requires re-deriving a rate (ADR 0013). Fails closed when no fresh rate is available: the API
-        refuses rather than guessing, with code `fx.rate_stale` or `fx.rate_unavailable`.
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [base, quote, amount]
-              properties:
-                base: { $ref: '#/components/schemas/Currency' }
-                quote: { $ref: '#/components/schemas/Currency' }
-                amount: { $ref: '#/components/schemas/Money' }
-      responses:
-        '201':
-          description: Quote locked
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/FxQuote' }
-        '422': { $ref: '#/components/responses/Problem' }
-        '503': { $ref: '#/components/responses/Problem' }
-
+  # There is no `POST /fx/quotes` here, and its absence is the decision rather than an accident (ADR 0046).
+  #
+  # A locked quote is created *by recording the commitment that needs it* - `POST /obligations` carries
+  # `settleInCurrency` and locks the rate at that moment, returning the quote on the obligation it wrote - so a
+  # standalone quote operation was a second, unserved door onto a capability that already existed in the one place
+  # where the rate has meaning. What it promised: a rate that could be locked against an amount before anything was
+  # recorded against it. What that would need: a quote lifecycle with expiry, binding and release, which this
+  # deployment has nowhere to put - an unused locked quote is a rate risk with no owner (ADR 0013, point 5).
+  #
+  # The `FxQuote` schema stays, because the obligation still carries its quote; what has gone is the entry point.
   /webhooks/rails/{provider}:
     post:
       tags: [webhooks]
@@ -1346,6 +1326,12 @@ components:
       description: |
         An immutable, locked conversion of one amount. Immutability is the point: the settlement rate
         is contractual and is never restated (ADR 0013, point 5).
+
+        **Reachable only through the obligation that needs it.** There is no standalone quote operation,
+        and that is deliberate (ADR 0046): a quote is locked by recording the commitment whose
+        `settleInCurrency` differs from its amount, at which point it becomes contractual, and the
+        obligation carries it back. A client that wants to show a member a rate before that point reads
+        `GET /fx/rates`, which is indicative and says so.
       required: [id, rate, baseAmount, convertedAmount, residualScaled, residualScale, lockedAt]
       properties:
         id: { type: string, format: uuid }
