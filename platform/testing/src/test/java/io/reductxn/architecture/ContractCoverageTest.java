@@ -27,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * behind it is invisible to both suites at once: the stub satisfies the browser tests because the stub was generated
  * from the promise, and the server never noticed because nothing on the server ever asked.
  * {@code GET /groups/{groupId}/members} sat in the contract for seven slices that way, with three screens calling it,
- * while both suites were green. An audit of the contract's thirty operations afterwards found three more reads in the
+ * while both suites were green. An audit of the contract's operations afterwards found three more reads in the
  * same state - the obligations list, the currency catalogue and the reference rate, all of which the client called -
  * plus the eight the plan already knew about. This test is that audit, run every build, so the next one is found by
  * something that is not a person having a bad feeling about a screen.
@@ -98,20 +98,19 @@ class ContractCoverageTest {
     /**
      * The operations the contract promises, the controllers do not serve, and somebody owns.
      *
-     * <p>These are the four left when ADR 0044 served the activity feed - the operation that was the least specified thing
-     * in the contract, and the one whose rows already existed. Each entry names the screen, slice or decision that would
-     * close it: members, cycles, runs, decisions, transfers, netting, obligations, currencies, rates, balances, tax,
-     * invites, sign-in, groups and now activity have all left this list.
+     * <p>Two at the time of writing, and the count is stated as a fact about now rather than as a property of the
+     * file, because a number in prose drifts: an earlier version of this paragraph said "the four left when ADR 0044
+     * served the activity feed" and was still saying four when the void slice had already made it three. Each entry
+     * names the screen, slice or decision that would close it - members, cycles, runs, decisions, transfers, netting,
+     * obligations, currencies, rates, balances, tax, invites, sign-in, groups, activity and void have all left this
+     * list.
      *
-     * <p>The {@code POST /fx/quotes} entry is not a screen. It is recorded as a candidate for removal, and it is in
-     * this map for the same reason the others are: an operation with no handler and no owner is the state that
-     * produced the seven-slice bug, and leaving it there is what "we will decide later" looks like written down.
+     * <p>{@code POST /fx/quotes} left it too, and not by being built: it was a candidate for removal, and ADR 0046
+     * decided it out of the contract rather than serving it. That is the third way an entry can go - after "served by
+     * a slice" and "still owned" - and it is worth having in this list's history, because the alternative (building
+     * a second door onto a capability the write path already has) would have added surface rather than coverage.
      */
     private static final Map<String, String> RECORDED_GAPS = Map.ofEntries(
-            Map.entry("POST /fx/quotes",
-                    "removal candidate rather than a screen: the recording path locks its own quote and the "
-                            + "obligation response carries it, so nothing calls this. ADR 0033 removed three "
-                            + "operations for the same reason - this one should be decided, not owned"),
             Map.entry("POST /runs/{runId}/execute",
                     "execute - the execution path. The worker plans and computes; performing the transfers is what "
                             + "makes a settlement final, and the rail adapter that would do it is not written"),

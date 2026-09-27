@@ -1803,59 +1803,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/fx/quotes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Lock a rate against an amount, for a cross-currency obligation
-         * @description Returns an immutable quote. The quote id is stored on the obligation, so reading history never
-         *     requires re-deriving a rate (ADR 0013). Fails closed when no fresh rate is available: the API
-         *     refuses rather than guessing, with code `fx.rate_stale` or `fx.rate_unavailable`.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header: {
-                    "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        base: components["schemas"]["Currency"];
-                        quote: components["schemas"]["Currency"];
-                        amount: components["schemas"]["Money"];
-                    };
-                };
-            };
-            responses: {
-                /** @description Quote locked */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["FxQuote"];
-                    };
-                };
-                422: components["responses"]["Problem"];
-                503: components["responses"]["Problem"];
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/webhooks/rails/{provider}": {
         parameters: {
             query?: never;
@@ -1959,6 +1906,12 @@ export interface components {
         /**
          * @description An immutable, locked conversion of one amount. Immutability is the point: the settlement rate
          *     is contractual and is never restated (ADR 0013, point 5).
+         *
+         *     **Reachable only through the obligation that needs it.** There is no standalone quote operation,
+         *     and that is deliberate (ADR 0046): a quote is locked by recording the commitment whose
+         *     `settleInCurrency` differs from its amount, at which point it becomes contractual, and the
+         *     obligation carries it back. A client that wants to show a member a rate before that point reads
+         *     `GET /fx/rates`, which is indicative and says so.
          */
         FxQuote: {
             /** Format: uuid */
