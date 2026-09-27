@@ -8,7 +8,10 @@ entirely: `/invites/$code`, where somebody with a code joins (ADR 0041) - it can
 arriving is usually not a member yet and the code is what says which group it is for - `/sign-in`, which is the only way to
 become somebody this deployment knows (ADR 0042), and `/` itself, which is now the list of groups you are in rather than
 the group-id box it was (ADR 0043). The activity feed arrived with ADR 0044, and this sentence listed it as a screen still
-to come. The route tree's remaining screens are groups of one kind or another - the group's policy and its settlement
+to come. **ADR 0054 changed what the box on `/` does**: it takes an invite code and goes to `/invites/$code`, because
+every read of a group's books needs a member of it and an id was never a credential - and the invitation screen now says
+which group a code is for, how many members are in it and when the code stops working, before it asks for a name. The
+route tree's remaining screens are groups of one kind or another - the group's policy and its settlement
 schedule - and each needs a read the contract does not serve: a group's `nettingPolicy` exists in the schema as an unserved
 field, and a schedule has no operation at all, which is the gap the plan calls "nothing decides when a cycle is due". Each
 arrives the same way: screen by screen, feeding on a read that the server had to be made to answer.
@@ -32,7 +35,7 @@ arrives the same way: screen by screen, feeding on a read that the server had to
 | `src/app` | The composition root: the router, the query client, the providers. No business logic and no screens |
 | `src/routes` | TanStack Router file-based routes, and **thin** (RULE F4): validate search parameters, wrap the screen in its locale, render one feature |
 | `src/features/<name>` | One vertical capability. Public surface is `index.ts`; everything else is private (RULE F8). `obligations` owns the list, the filters' UI and the recording form, which a **member of the group** may use and a stranger cannot (ADR 0049); `netting` owns the preview; `settlement` owns the group's runs, one run, the answer form, and closing the books at an instant, which a **member of the group** may ask for (ADR 0049); `members` owns the list of who is in the group and recording somebody which a **member of the group** may do and a stranger cannot (ADR 0048); `balances` owns what each member owes right now, which is the plan's positions joined to the group's names (ADR 0039); `tax` owns the rules in force and the report over the group's plans (ADR 0040); `invites` owns arriving from a code - the joining half of a flow whose other half sits on the members screen, where inviting somebody is how the next member arrives (ADR 0041) - and the joiner is the **signed-in account** rather than a field in the body, so the accept model no longer mints an identity and the screen says which account is joining (ADR 0047); `sign-in` owns becoming somebody: a phone number, a code, and the session the client keeps in `shared/session` (ADR 0042) |
-| `src/entities/<name>` | Domain-shaped client models and their `queryOptions` factories: `currency`, `member`, `obligation`, `netting`, `fx`, `run`, `cycle` |
+| `src/entities/<name>` | Domain-shaped client models and their `queryOptions` factories: `currency`, `member`, `obligation`, `netting`, `fx`, `run`, `cycle`, `group`, `invite`. **`invite` was types-only until ADR 0054**, and `invitePreviewQuery` is why it is not: a code could be created and spent and never read, so the acceptance page asked for a name before it could name the group |
 | `src/shared/api` | The generated contract (`schema.d.ts`) and the only `fetch` in the app (RULE F5) |
 | `src/shared/money` | Integer minor units, formatted and parsed for a locale. The P1 boundary in the client |
 | `src/shared/i18n` | Locale resolution, ICU catalogs, the direction token, the review-state rule |

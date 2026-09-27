@@ -101,4 +101,16 @@ belonged - and the reason attached to it was wrong in the direction that reads s
 repository's findings table has recorded before: a claim about one consumer of a row was used to justify the row.
 
 The first half of the bullet stands unchanged. The `execute` + rail-webhook pair has since been served (ADR 0050,
-0051), and every read is still open to anybody holding a group's id, which remains the product decision it says it is.
+0051), and the second half - "every read is open to anybody holding a group's id" - **is answered by ADR 0054**, which
+closed all nine reads and made a code the thing a group hands out instead of an id. The sentence is kept rather than
+deleted because of what it got right: it called the state a *product decision about how a group is shared* rather than an
+oversight, which is exactly what the slice that closed it had to decide - and it decided by adding the read that makes a
+code shareable, so that closing the reads is not a subtraction.
+
+One code this ADR chose was refined by that slice and the refinement is worth recording here, because it is this ADR's
+own reasoning turned on itself. It says the guard "is the same fact rather than a similar one: a decision on a run is a
+write to that group's books", and the guard stands. What did not stand is the code: `no_such_group`'s message names the
+group id it could not find, so an unauthenticated request holding a run uuid was handed the group that run belonged to -
+and the two run-scoped routes (`decisions`, `execute`) now answer `api.no_such_run` from the same narrowed read
+(`SettlementRuns.findFor`), which names only the id the caller sent. Same `404`, same refusal, one fact fewer disclosed.
+
