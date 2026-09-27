@@ -132,6 +132,13 @@ class RequestExecutionApiTest extends DatabaseTest {
     }
 
     @Test
+    void aRunThisBuildHasNeverHeardOfIsRefusedWith404() throws Exception {
+        execute(new UUID(0L, 999L), caller)
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_run"));
+    }
+
+    @Test
     void aRunThatHasAlreadyMovedIsRefusedWith409() throws Exception {
         aRunIn("executing");
 
