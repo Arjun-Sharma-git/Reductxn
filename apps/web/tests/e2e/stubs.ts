@@ -744,6 +744,24 @@ export async function stubMembersApi(
       return;
     }
 
+    // Recording somebody needs a session: a member of the group is who may add one (ADR 0048), and the stub refuses
+    // without the token exactly as the API does, so a spec that shows a member added has proved the token was sent.
+    // The group's membership itself is not modelled here - that is the API's rule, and the tests that pin it are in
+    // `AddMemberApiTest`, against a real database.
+    if (route.request().headers()['authorization'] !== `Bearer ${TOKEN_PAIR.accessToken}`) {
+      return route.fulfill({
+        status: 401,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'about:blank',
+          title: 'Unauthorized',
+          status: 401,
+          detail: 'stubbed refusal',
+          code: 'api.not_signed_in',
+        }),
+      });
+    }
+
     const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
 
     recorded.push(body);
@@ -798,9 +816,25 @@ export async function stubInvitesApi(
 ): Promise<InviteRecorder> {
   const acceptances: string[] = [];
 
-  await page.route('**/v1/groups/*/invites', (route) =>
-    route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(INVITE) }),
-  );
+  await page.route('**/v1/groups/*/invites', (route) => {
+    // A member of the group is who may create a code (ADR 0048): the stub refuses without the session's token, exactly
+    // as the creation path does, so the spec that makes a code has proved who it was made by.
+    if (route.request().headers()['authorization'] !== `Bearer ${TOKEN_PAIR.accessToken}`) {
+      return route.fulfill({
+        status: 401,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'about:blank',
+          title: 'Unauthorized',
+          status: 401,
+          detail: 'stubbed refusal',
+          code: 'api.not_signed_in',
+        }),
+      });
+    }
+
+    return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(INVITE) });
+  });
 
   await page.route('**/v1/invites/*/accept', (route) => {
     acceptances.push(route.request().postData() ?? '');

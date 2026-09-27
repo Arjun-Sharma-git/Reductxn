@@ -1,13 +1,17 @@
 package io.reductxn.api.port.in;
 
+import io.reductxn.kernel.api.Result;
+
+import java.util.UUID;
+
 /**
- * The use case: make a code that lets somebody join a group.
+ * The use case: make a code that lets somebody join a group, if the caller is in that group.
  *
- * <p><strong>No {@code Result}, because nothing here can fail.</strong> The boundary refuses a malformed group id before
- * this is called, and the store cannot refuse: a code collision is settled by the primary key and retried, and a group
- * that does not exist is not a refusal for the reason every other write in this module gives - groups are not tables in
- * this build, so "no such group" is a question this deployment cannot answer (ADR 0035). An invitation to a group
- * nobody has joined yet is a perfectly ordinary invitation.
+ * <p><strong>It answers a {@code Result} since ADR 0048, and it is the same condition the members write gained.</strong>
+ * The store still cannot refuse - a code collision is settled by the primary key and retried, and a group nobody has
+ * joined yet is a perfectly ordinary group, because groups are not tables in this build (ADR 0035) - but the *caller* can:
+ * an invitation is a link a group hands to somebody it trusts, so only somebody in the group may create one. Before this,
+ * any caller could mint a code for any group id they could type, which the contract said out loud rather than hiding.
  *
  * <p><strong>It exists at all because a read with no writer is a dead end, and here the writer comes first.</strong>
  * `POST /groups/{groupId}/invites` has been in the contract since the obligations slice with nothing behind it, and the
@@ -20,6 +24,11 @@ package io.reductxn.api.port.in;
  */
 public interface CreateInvite {
 
-    /** Records an invitation to {@code invite}'s group and answers with the code it can be spent by. */
-    CreatedInvite create(NewInvite invite);
+    /**
+     * Records an invitation to {@code invite}'s group and answers with the code it can be spent by.
+     *
+     * @param callerId who is asking, from the boundary's session - the condition this use case gained in ADR 0048
+     * @return the code, or {@code GroupRefusals.NoSuchGroup} when the caller is not a member of the group
+     */
+    Result<CreatedInvite> create(UUID callerId, NewInvite invite);
 }

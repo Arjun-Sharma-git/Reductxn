@@ -323,6 +323,7 @@ class GroupsApiTest extends DatabaseTest {
         String groupId = createdId(create(owner, "Flat 3B", "INR", null));
 
         mvc.perform(post("/v1/groups/" + groupId + "/members")
+                        .header("Authorization", "Bearer " + owner)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"userId\":\"" + UUID.randomUUID() + "\",\"displayName\":\"Rehana\","
                                 + "\"role\":\"member\"}"))

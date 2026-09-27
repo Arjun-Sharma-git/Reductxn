@@ -6,10 +6,13 @@ import io.reductxn.api.port.in.MemberRefusals;
 import io.reductxn.api.port.in.NewMember;
 import io.reductxn.api.port.in.ReadGroupMembers;
 import io.reductxn.api.port.in.RunRefusals;
+import io.reductxn.api.port.in.SignedInUser;
+import io.reductxn.api.web.CallerResolver;
 import io.reductxn.api.web.dto.MemberRequest;
 import io.reductxn.api.web.dto.MemberResponse;
 import io.reductxn.api.web.error.ExpectedFailures;
 import io.reductxn.kernel.api.DomainError;
+import io.reductxn.kernel.api.Result;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -38,10 +41,13 @@ import java.util.UUID;
  * never asked for members. The write is here because a read with no writer is a screen that is empty forever: with
  * membership as data (ADR 0035), something has to record it, and the candidate that needs no identity is the caller.
  *
- * <p><strong>The write is unauthorised, and says so rather than pretending.</strong> The contract's summary used to
- * claim \"admin only\", which this build cannot honour - there is no identity, so no `admin` row authorises anything.
- * This is the stance the decision endpoint already takes, where the member is whoever the body says (ADR 0020), and
- * the identity gap is recorded rather than papered over.
+ * <p><strong>The write requires a member since ADR 0048, and the read still does not.</strong> The read serves a bare
+ * uuid - it is where a name comes from for screens that name people - and it is one of the group's reads that never knew
+ * who was asking, which the plan records rather than pretends. The write is the opposite case: adding somebody to a group
+ * is an act within it, so the boundary resolves the caller and the use case asks whether they are in that group.
+ * <strong>Membership, not {@code admin}.</strong> The role is recorded and nothing reads it yet, so an admin-only rule
+ * here would invent a privilege whose only effect is to make this operation unusable for everybody the invitation flow
+ * creates - every member but the creator (ADR 0043).
  *
  * <p><strong>Idempotent by rule, so the status carries the answer.</strong> {@code (groupId, userId)} is the table's
  * primary key, so a second request for the same person is a {@code 200} with the member as they stand - the
@@ -60,11 +66,14 @@ public class GroupMembersController {
 
     private final ReadGroupMembers readGroupMembers;
     private final AddMember addMember;
+    private final CallerResolver callers;
     private final Clock clock;
 
-    public GroupMembersController(ReadGroupMembers readGroupMembers, AddMember addMember, Clock clock) {
+    public GroupMembersController(ReadGroupMembers readGroupMembers, AddMember addMember, CallerResolver callers,
+            Clock clock) {
         this.readGroupMembers = Objects.requireNonNull(readGroupMembers, "readGroupMembers");
         this.addMember = Objects.requireNonNull(addMember, "addMember");
+        this.callers = Objects.requireNonNull(callers, "callers");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -90,24 +99,40 @@ public class GroupMembersController {
             @RequestBody(required = false) MemberRequest request,
             HttpServletRequest http) {
 
+        // Who is asking first, as at every boundary that needs a caller (ADR 0043, 0045, 0047): a request with no session
+        // is refused as such rather than as a malformed one.
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
         DomainError malformed = malformed(groupId, request);
 
         if (malformed != null) {
             return problem(malformed, http.getRequestURI());
         }
 
-        AddedMember added = addMember.add(new NewMember(
-                UUID.fromString(groupId),
-                UUID.fromString(request.userId()),
-                request.displayName(),
-                request.role() == null ? DEFAULT_ROLE : request.role(),
-                clock.instant()));
+        Result<AddedMember> added = addMember.add(
+                ((Result.Ok<SignedInUser>) caller).value().id(),
+                new NewMember(
+                        UUID.fromString(groupId),
+                        UUID.fromString(request.userId()),
+                        request.displayName(),
+                        request.role() == null ? DEFAULT_ROLE : request.role(),
+                        clock.instant()));
 
-        ResponseEntity.BodyBuilder response = added.created()
+        if (added instanceof Result.Failure<AddedMember> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
+        AddedMember member = ((Result.Ok<AddedMember>) added).value();
+
+        ResponseEntity.BodyBuilder response = member.created()
                 ? ResponseEntity.status(HttpStatus.CREATED)
                 : ResponseEntity.ok();
 
-        return response.body(MemberResponse.of(added.member()));
+        return response.body(MemberResponse.of(member.member()));
     }
 
     private static DomainError malformed(String groupId, MemberRequest request) {
