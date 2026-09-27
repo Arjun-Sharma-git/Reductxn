@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { group, stubGroupsApi, stubIdentityApi } from './stubs';
+import { group, signIn, stubGroupsApi, stubIdentityApi } from './stubs';
 
 /**
  * The way in, in a real browser: the groups you are in, making one, and what a signed-out visitor is shown.
@@ -9,26 +9,12 @@ import { group, stubGroupsApi, stubIdentityApi } from './stubs';
  * the stub answers `401` to anything else, so a header that shows a group has proved the token was sent. Creating a group
  * carries an `Idempotency-Key`, which is the header the contract requires and the property that makes a retry safe. And a
  * visitor who is not signed in is told how to sign in rather than shown an empty list with no explanation.
+ *
+ * The `signIn` helper moved to `stubs.ts` when the invite acceptance began to need a caller too: four specs sign in now,
+ * and the two steps are the same two steps in each of them (ADR 0047).
  */
 
 const GROUP_ID = '3f6c1a52-9d4b-4a17-8e2c-5b7d9f0a1c34';
-
-/**
- * Sign in the way a person does, so the session the home screen needs really exists.
- *
- * It is not a shortcut: both the identity stub and the groups stub answer `401` to a request without the token, so a test
- * that skipped this would be testing a screen nobody can reach. Going through the two steps also means these tests exercise
- * the flow the last slice built, which is the honest price of a screen that needs a caller.
- */
-async function signIn(page: import('@playwright/test').Page) {
-  await page.goto('/sign-in');
-  await page.getByLabel('Phone number').fill('+919812345678');
-  await page.getByRole('button', { name: 'Send me a code' }).click();
-  await page.getByLabel('Code').fill('481516');
-  await page.getByRole('button', { name: 'Sign in' }).click();
-
-  await expect(page.getByText(/Signed in as/)).toBeVisible();
-}
 
 test('a signed-out visitor is shown the way in, not an empty list', async ({ page }) => {
   // No identity stub at all: every request to `/v1/me` and `/v1/groups` fails at the network, which is what a signed-out

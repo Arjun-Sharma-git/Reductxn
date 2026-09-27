@@ -643,12 +643,12 @@ export interface paths {
          * Accept an invite and join the group
          * @description Somebody hands in a code and joins the group it is for.
          *
-         *     **The body says who is joining, because nothing else can.** There is no `GET /me` and no authentication yet, so
-         *     the server cannot know who is holding the code - exactly as the decision endpoint works, where the member is
-         *     whoever the body says (ADR 0020). The alternative was to invent an identity and then trust it; naming who is
-         *     joining at least makes the trust explicit. When sign-in exists, this body disappears and the acceptance becomes
-         *     about the caller. The `userId` is therefore an assertion rather than a verified fact, and a client should not
-         *     present it as one.
+         *     **The joiner is the caller, and the body no longer says who.** This description used to promise exactly this:
+         *     "when sign-in exists, this body disappears and the acceptance becomes about the caller". Sign-in exists (ADR
+         *     0042), so the promise is kept rather than left standing - the `userId` field is gone from the request, and the
+         *     membership is recorded for whoever holds the session. A code is a thing somebody is *given*, and handing one in
+         *     joins *you*: an operation that let a caller name the joiner would let them spend an invitation on somebody
+         *     else's behalf, which is the one thing an invitation is not for (ADR 0041).
          *
          *     **Accepting joins as an ordinary `member`.** The invitation carries no role, and a code that conferred `admin`
          *     would be a privilege handed out by a default rather than decided by somebody.
@@ -703,6 +703,7 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
                 404: components["responses"]["Problem"];
                 410: components["responses"]["Problem"];
             };
@@ -2176,15 +2177,14 @@ export interface components {
             maxUses?: number;
         };
         /**
-         * @description Who is accepting an invitation. There is no `role`: accepting joins as an ordinary member.
+         * @description What somebody joining supplies, which is now only what the group will call them.
          *
-         *     `userId` is an assertion rather than a verified fact - this build has no sign-in, so the caller says who they
-         *     are and the server has nothing to check it against (the identity gap, ADR 0020, 0041). A client should not
-         *     present membership as verified on the strength of it.
+         *     The joiner is the caller, so the `userId` this schema used to carry is gone: it was an assertion the server had
+         *     nothing to check against (the identity gap, ADR 0020, 0041), and the acceptance is about the session now (ADR
+         *     0042). There is no `role` either - accepting joins as an ordinary member, because a code that conferred `admin`
+         *     would be a privilege handed out by a default rather than decided by somebody.
          */
         AcceptInvite: {
-            /** Format: uuid */
-            userId: string;
             /** @description What the group will call them - the same field, and the same limit, as recording a member. */
             displayName: string;
         };

@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 
 /**
  * The API, stubbed from fixtures that are typed by the contract.
@@ -805,6 +805,22 @@ export async function stubInvitesApi(
   await page.route('**/v1/invites/*/accept', (route) => {
     acceptances.push(route.request().postData() ?? '');
 
+    // The joiner is the caller now, so this stub refuses a request without the session's token exactly as `/v1/me` does -
+    // which is what makes "the client sends the token" an assertion rather than a claim (ADR 0047).
+    if (route.request().headers()['authorization'] !== `Bearer ${TOKEN_PAIR.accessToken}`) {
+      return route.fulfill({
+        status: 401,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'about:blank',
+          title: 'Unauthorized',
+          status: 401,
+          detail: 'stubbed refusal',
+          code: 'api.not_signed_in',
+        }),
+      });
+    }
+
     if (options.refusal !== undefined) {
       return route.fulfill({
         status: options.refusal.status,
@@ -819,12 +835,14 @@ export async function stubInvitesApi(
       });
     }
 
-    const body = JSON.parse(route.request().postData() ?? '{}') as { userId: string; displayName: string };
+    const body = JSON.parse(route.request().postData() ?? '{}') as { displayName: string };
 
+    // The member is the signed-in person, because the body no longer says who is joining: the stub answers the way the
+    // server does rather than echoing what it was sent.
     return route.fulfill({
       status: 201,
       contentType: 'application/json',
-      body: JSON.stringify({ userId: body.userId, displayName: body.displayName, role: 'member' }),
+      body: JSON.stringify({ userId: ME.id, displayName: body.displayName, role: 'member' }),
     });
   });
 
@@ -844,6 +862,24 @@ export const TOKEN_PAIR: TokenPair = {
 
 /** The signed-in person, as `GET /me` serves them: the deployment's name for them is their number. */
 export const ME = { id: '7a1e5b30-2f5c-4a1e-9c3d-2b6a4f8e1d90', displayName: '+919812345678', kycTier: 'none' };
+
+/**
+ * Sign in the way a person does, so a session the screens need really exists.
+ *
+ * It is not a shortcut: the identity stub, the groups stub and the invite acceptance all answer `401` to a request
+ * without the token, so a test that skipped this would be testing a screen nobody can reach. It lives here rather than in
+ * the spec that first needed it because four specs need a caller now (ADR 0047), and going through the two steps means
+ * each of them exercises the flow the sign-in slice built - which is the honest price of a screen that needs a caller.
+ */
+export async function signIn(page: Page) {
+  await page.goto('/sign-in');
+  await page.getByLabel('Phone number').fill('+919812345678');
+  await page.getByRole('button', { name: 'Send me a code' }).click();
+  await page.getByLabel('Code').fill('481516');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+
+  await expect(page.getByText(/Signed in as/)).toBeVisible();
+}
 
 export type IdentityRecorder = {
   /** Every code the screen handed back, so a test can see what the server would have been asked. */

@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
 import { useTranslations } from '@/shared/i18n';
 import { Card, Notice, ProblemNotice } from '@/shared/ui';
 
-import { acceptanceOf, issueWith, newMemberId } from '../model/accept';
+import { acceptanceOf, issueWith } from '../model/accept';
 import { useAcceptInvite } from '../mutations';
 import styles from './AcceptInviteScreen.module.css';
 
@@ -15,31 +15,25 @@ import styles from './AcceptInviteScreen.module.css';
  * why the contract addresses this operation by the code and not by the group: the code says which group it is for, and
  * the screen would have nothing else to show.
  *
- * **It says who it is about to become.** This build has no sign-in, so the page mints the id that stands for the person
- * joining and shows it after they are in (ADR 0041). A screen that quietly invented an identity would be worse than one
- * that says so: the id is what every other screen in this product will show next to their name, and somebody who never
- * saw it would be looking at a stranger's row.
+ * **It used to mint an identity, and now it takes one from the session.** This page generated the uuid that stood for
+ * the person joining, because there was no sign-in to ask and the contract's description said so - and it promised that
+ * "when sign-in exists, this body disappears and the acceptance becomes about the caller" (ADR 0047). Sign-in exists, so
+ * the form asks for a name and the server joins whoever is signed in. The screen says that plainly, because a person
+ * arriving from a link needs to know which account they are joining with rather than discovering it afterwards.
  *
- * **It does not pretend the name is verified either.** The name is what the group will call them, and the contract is
- * explicit that the body is an assertion rather than a fact - so the card says the group will use the name they type
- * rather than claiming anybody checked it.
+ * **It does not pretend the name is verified either.** The name is what the group will call them, and the copy says so:
+ * the group is told who joined by the session, and nothing on the page can name somebody else.
  */
 export function AcceptInviteScreen({ code }: { readonly code: string }) {
   const { t } = useTranslations();
 
   const accept = useAcceptInvite(code);
 
-  // Minted once per visit rather than per keystroke: the id is this person's identity for the join, so a re-render must
-  // not replace it - a second id would be a second member.
-  const [memberId] = useState(newMemberId);
   const [displayName, setDisplayName] = useState('');
 
   const issue = issueWith({ displayName });
 
-  const submitted = useMemo(
-    () => acceptanceOf({ displayName }, memberId),
-    [displayName, memberId],
-  );
+  const submitted = acceptanceOf({ displayName });
 
   return (
     <div className={styles.screen}>

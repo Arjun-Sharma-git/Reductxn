@@ -13,11 +13,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -51,14 +48,10 @@ class VoidObligationApiTest extends DatabaseTest {
     private String owner;
     private String stranger;
 
-    private final Map<String, UUID> users = new HashMap<>();
-
     private UUID groupId;
 
     @BeforeEach
     void buildMockMvc() throws Exception {
-        users.clear();
-
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
 
         owner = signedIn(OWNER);
@@ -70,35 +63,6 @@ class VoidObligationApiTest extends DatabaseTest {
         // the precondition rather than the subject.
         jdbc.update("INSERT INTO group_members (group_id, user_id, display_name, role, joined_at) VALUES (?, ?, ?, ?, ?)",
                 groupId, user(OWNER), "Amit", "admin", Instant.now().atOffset(ZoneOffset.UTC));
-    }
-
-    private String signedIn(String phone) {
-        UUID user = UUID.randomUUID();
-        String accessToken = SessionTokens.issue();
-        Instant now = Instant.now();
-
-        jdbc.update("INSERT INTO users (id, phone_number, display_name, created_at) VALUES (?, ?, ?, ?)",
-                user, phone, phone, now.atOffset(ZoneOffset.UTC));
-
-        jdbc.update("""
-                INSERT INTO sessions (access_token_hash, refresh_token_hash, user_id, device_id, created_at,
-                                      access_expires_at, refresh_expires_at)
-                VALUES (?, ?, ?, 'test', ?, ?, ?)
-                """,
-                SessionTokens.hash(accessToken),
-                SessionTokens.hash(SessionTokens.issue()),
-                user,
-                now.atOffset(ZoneOffset.UTC),
-                now.plus(Duration.ofMinutes(30)).atOffset(ZoneOffset.UTC),
-                now.plus(Duration.ofDays(30)).atOffset(ZoneOffset.UTC));
-
-        users.put(phone, user);
-
-        return accessToken;
-    }
-
-    private UUID user(String phone) {
-        return users.get(phone);
     }
 
     /** An open obligation, written as a row: this class is about the transition, not about recording. */
