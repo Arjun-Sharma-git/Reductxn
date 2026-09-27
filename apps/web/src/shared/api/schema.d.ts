@@ -1508,13 +1508,31 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Submit the approved run to the payment rail (idempotent) */
+        /**
+         * Ask for an approved run to be offered to the payment rail now
+         * @description **This is a request, not an execution.** The transfers that move money are submitted by the settlement
+         *     worker's driver, which offers a run to its rail on a cadence - so this records the member's intent on the run
+         *     and the worker's next pass honours it. Nothing has moved when this answers, which is why the answer is `202`
+         *     and its body is a receipt for what was written rather than a status.
+         *
+         *     **It exists because the cadence already does this, and "now" is the part a member is missing.** A run whose
+         *     rail has gone quiet waits out a backoff before it is tried again, which is the right behaviour for a system
+         *     and a bad one for a person looking at a settlement that is stuck; asking is how a member cuts to the front of
+         *     that wait. It is idempotent by construction rather than by a header: the request is a flag on the run, so a
+         *     second request is the same request, and the attempt that honours it spends it. There is therefore no
+         *     `Idempotency-Key` here, and its absence is deliberate - a key is a second identity for one intent.
+         *
+         *     **Who may ask, and what is refused.** A member of the run's group, and only them: a caller who is not gets the
+         *     `404` below, which is one answer for "no such run" and "not yours" (ADR 0049). A run that cannot move is
+         *     answered `409` - already `executing`, finished (`done`, `failed`, `rejected`), still being opened, or waiting
+         *     on a group that has not approved enough of it. A run waiting on *currency* is **not** refused: the driver
+         *     honours the request the moment the group brings the currency in, so the intent is worth recording rather than
+         *     refusing, and this operation does not widen the contract's own `409`.
+         */
         post: {
             parameters: {
                 query?: never;
-                header: {
-                    "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                };
+                header?: never;
                 path: {
                     runId: string;
                 };
@@ -1522,19 +1540,28 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Execution started */
+                /** @description Execution requested, and nothing has moved yet - this is a receipt for what was recorded. */
                 202: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["RequestedExecution"];
+                    };
                 };
-                /** @description Quorum not reached */
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
+                /**
+                 * @description Quorum not reached, or already executing. The same status for both because the diagnosis is the same: the
+                 *     run cannot be influenced by asking, and the problem body's `detail` carries the state it is in.
+                 */
                 409: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
                 };
             };
         };
@@ -2388,6 +2415,28 @@ export interface components {
             decision: "approve" | "reject";
             /** Format: date-time */
             recordedAt: string;
+        };
+        /**
+         * @description A member's request for a run to be offered to a rail, as it was recorded - a receipt rather than a status.
+         *
+         *     Nothing has moved when a client sees this. The request is a flag on the run that the settlement worker's driver
+         *     reads on its next pass, and `requestedAt` is the boundary's clock at the moment it was written (ADR 0050).
+         *     Whether the money moved is a question about the run, and `GET /runs/{runId}` is where it is answered - the same
+         *     split as this contract's other writes: an answer says what was recorded, and a read says what is true.
+         *
+         *     `requestedBy` is the member from the session, and it is kept on the run after the request is spent. The flag is
+         *     pending intent; the attribution is a fact about the run's history.
+         */
+        RequestedExecution: {
+            /** Format: uuid */
+            runId: string;
+            /**
+             * Format: uuid
+             * @description The member who asked, from the session.
+             */
+            requestedBy: string;
+            /** Format: date-time */
+            requestedAt: string;
         };
         /**
          * @description A closed period of a group's books, as `settlement_cycles` stores it (ADR 0032). It is four facts and
