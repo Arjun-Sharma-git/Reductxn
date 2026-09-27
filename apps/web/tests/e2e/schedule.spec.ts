@@ -59,4 +59,11 @@ test('states a cadence from the form, in the shape the contract describes', asyn
   expect(body.everyDays).toBe(90);
   expect(new Date(body.nextDueAt).toISOString()).toBe(new Date('2027-01-01T09:00').toISOString());
   expect(SCHEDULE.everyDays).toBe(30);
+
+  // And stopping it: the button sends the clear, and the screen goes back to the state it started in rather than keeping
+  // the cadence it just removed.
+  await page.getByRole('button', { name: 'Stop closing them by themselves' }).click();
+
+  await expect(page.getByText(/Nothing closes this group's books by itself/)).toBeVisible();
+  expect(schedule.cleared()).toBe(1);
 });
