@@ -5,6 +5,7 @@ import io.reductxn.api.port.in.GroupRefusals;
 import io.reductxn.api.port.in.InviteRefusals;
 import io.reductxn.api.port.in.MemberRefusals;
 import io.reductxn.api.port.in.SignInRefusals;
+import io.reductxn.api.port.in.RailCallbackRefusals;
 import io.reductxn.api.port.in.RunRefusals;
 import io.reductxn.api.port.in.ObligationRefusals;
 import io.reductxn.fx.api.AmountTooSmallToConvertException;
@@ -50,6 +51,9 @@ public final class ExpectedFailures {
             Map.entry(ObligationRefusals.MemoTooLong.CODE, HttpStatus.BAD_REQUEST),
             Map.entry(MemberRefusals.NameTooLong.CODE, HttpStatus.BAD_REQUEST),
             Map.entry(RunRefusals.RequestIncomplete.CODE, HttpStatus.BAD_REQUEST),
+            // A callback that verified and cannot be used: a missing field, a state outside the four this build knows,
+            // or a body that is not the json the contract declares (ADR 0051).
+            Map.entry(RailCallbackRefusals.NotUnderstood.CODE, HttpStatus.BAD_REQUEST),
 
             // The request is understood and the answer is no: an obligation that cannot exist, or a
             // conversion that is not possible at all.
@@ -107,6 +111,10 @@ public final class ExpectedFailures {
             // was tells somebody guessing whether they are guessing at something. The code names the condition from the
             // client's side: "this is not a session" or "that code is not one this deployment accepts".
             Map.entry(SignInRefusals.NotSignedIn.CODE, HttpStatus.UNAUTHORIZED),
+            // A rail's callback that did not verify (ADR 0051). The same status as a missing session because it is
+            // the same answer - this deployment does not trust the request - and one code for all three ways it can
+            // fail, because which one it was is not something a caller should be able to probe for.
+            Map.entry(RailCallbackRefusals.InvalidSignature.CODE, HttpStatus.UNAUTHORIZED),
             Map.entry(SignInRefusals.OtpNotAccepted.CODE, HttpStatus.UNAUTHORIZED),
 
             // The one refusal the contract declared before anything served it: an endpoint that sends a message on every

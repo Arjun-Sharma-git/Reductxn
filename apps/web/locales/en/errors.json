@@ -13,6 +13,8 @@
   "api.no_such_obligation": "That commitment is not one this group can see. It may have been recorded in another group, or the link may be wrong.",
   "api.no_such_run": "That settlement run does not exist.",
   "api.run_not_ready": "This run cannot move along just now - it has either already been submitted, already finished, or not yet got the approvals it needs. Asking again once the run says it is ready is the whole of what to do about it.",
+  "api.invalid_signature": "That callback was not signed with the secret this deployment shares with its rail, so none of it was read. A rail whose secret has drifted needs an operator rather than a retry.",
+  "api.callback_not_understood": "That callback was signed and cannot be used: a field is missing, says something this build does not know, or is not the shape the rail agreed to send.",
   "api.obligation_amount_not_positive": "An amount has to be more than zero.",
   "api.obligation_memo_too_long": "That note is too long. Keep it under 280 characters.",
   "api.obligation_not_open": "That commitment is in a settlement plan or has already been settled, so it cannot be voided. A cycle that releases it is what changes that.",

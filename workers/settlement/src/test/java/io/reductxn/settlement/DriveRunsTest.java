@@ -295,6 +295,83 @@ class DriveRunsTest extends WorkerDatabaseTest {
                 String.class, runId);
     }
 
+    /**
+     * A rail's callback is preferred to a poll, and the money's state is still decided in one place (ADR 0051).
+     *
+     * <p>The assertion that matters is {@code polls()} being zero: the second pass resolved a transfer it would
+     * otherwise have had to ask about, so the callback replaced a network call rather than adding a second way to
+     * decide a state. The rail's own words land on the transfer's {@code rail_detail}, which is where a person
+     * reading the run finds them - the same column a polled answer would have filled.
+     */
+    @Test
+    void aDeliveredAnswerResolvesATransferWithoutAskingTheRail() {
+        crossCurrencyObligation(ALICE, BORIS, 12_500L, 224L);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+        approveEveryone(run);
+        fundEveryRequirement(run);
+
+        String inFlight = run.transfers().get(0).railRef();
+        rail.scripting(inFlight, StubRail.Behaviour.ACCEPT_WITHOUT_CONFIRMING);
+
+        // The first pass offers both transfers and hears nothing about one of them.
+        assertThat(ok(driveRuns.driveDue(aPassNow(), 10)).driven()).isEqualTo(1);
+        assertThat(storedRunStatus(run.run().id())).isEqualTo("executing");
+        assertThat(rail.submissions()).hasSize(2);
+
+        // What the rail would tell us by poll, delivered instead - written the way `apps/api` writes it when a rail
+        // calls back, because that is the other half of this mechanism and the row is the whole of the contract
+        // between them.
+        railToldUs(inFlight, "confirmed", "settled at 14:02, per the rail's own ledger");
+
+        DrivenRuns second = ok(driveRuns.driveDue(aPassAMinuteLater(), 10));
+
+        assertThat(second.driven()).isEqualTo(1);
+        assertThat(storedRunStatus(run.run().id())).isEqualTo("done");
+        assertThat(rail.polls())
+                .as("the answer had already arrived, so no rail call was made to ask for it")
+                .isZero();
+        assertThat(storedRailDetail(inFlight)).isEqualTo("settled at 14:02, per the rail's own ledger");
+    }
+
+    /**
+     * A row on its own moves nothing, and that is the safety this mechanism needs.
+     *
+     * <p>A callback is consulted only for a transfer the rail has <em>been asked about</em> - the same place a poll
+     * would happen - so a delivered answer about a reference nobody offered cannot resolve a transfer, complete a run,
+     * or book an entry. Without this, anything able to write one row could claim that money had moved.
+     */
+    @Test
+    void aCallbackAboutATransferTheRailNeverSawIsIgnored() {
+        obligation(ALICE, BORIS, 10_000L, "INR", 2);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+
+        String neverOffered = run.transfers().get(0).railRef();
+        railToldUs(neverOffered, "confirmed", "which the rail never said, because it was never asked");
+
+        DrivenRuns pass = ok(driveRuns.driveDue(aPassNow(), 10));
+
+        assertThat(pass.refused()).as("the run still waits on its group, whatever a row says").isEqualTo(1);
+        assertThat(storedRunStatus(run.run().id())).isEqualTo("awaiting_approval");
+        assertThat(rail.submissions()).isEmpty();
+    }
+
+    /** A callback as {@code apps/api} writes it: the reference, the rail's state word, and the rail's own words. */
+    private void railToldUs(String railRef, String state, String detail) {
+        jdbc.update("""
+                INSERT INTO settlement_rail_callbacks (rail_ref, provider, state, detail, received_at)
+                VALUES (?, 'mock', ?, ?, ?::timestamptz)
+                ON CONFLICT (rail_ref) DO UPDATE
+                    SET state = excluded.state,
+                        detail = excluded.detail,
+                        received_at = excluded.received_at
+                """, railRef, state, detail, clock.instant().atOffset(ZoneOffset.UTC));
+    }
+
+    private String storedRailDetail(String railRef) {
+        return jdbc.queryForObject("SELECT rail_detail FROM settlement_transfers WHERE rail_ref = ?",
+                String.class, railRef);
+    }
+
     /** A cut-off one second ago: anything never attempted is due, and anything just attempted is not. */
     private Instant aPassNow() {
         return clock.instant().minusSeconds(1);

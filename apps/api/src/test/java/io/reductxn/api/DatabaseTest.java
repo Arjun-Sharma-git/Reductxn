@@ -123,6 +123,8 @@ abstract class DatabaseTest {
         jdbc.execute("DELETE FROM settlement_decisions");
         // And the plan's own rows, which the read models project: every one of them references the run.
         jdbc.execute("DELETE FROM settlement_transfers");
+        // Keyed by a derived reference (RULE S2), so a row left behind is read by the next test rather than ignored.
+        jdbc.execute("DELETE FROM settlement_rail_callbacks");
         jdbc.execute("DELETE FROM settlement_partitions");
         jdbc.execute("DELETE FROM settlement_run_gate_shortfalls");
         jdbc.execute("DELETE FROM settlement_run_gates");
