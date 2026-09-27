@@ -88,3 +88,17 @@ refused, whether it could be told apart - and neither about **who was asking**. 
   `execute` + rail-webhook pair is the one remaining *mechanism* recorded as a gap. And every read is open to anybody
   holding a group's id - the pattern test, the members list, the balances, the runs, the cycles and the obligations list
   all serve a bare uuid, and closing that half is a product decision about how a group is shared, not an oversight.
+
+## Amendment, 2026-09-27: the decision endpoint is served, and the reason it was last was wrong
+
+The bullet above says `POST /runs/{runId}/decisions` stays last because a stranger's answer is inert by the quorum's
+arithmetic, "so enforcement would change the status a stranger sees and nothing else". **ADR 0053 closed it, and the
+second half of that sentence was the part that did not hold.** An answer is inert to the quorum and is not inert as a
+row: `JooqActivityFeed.decisions` joins `settlement_decisions` to the group's runs, so the answer appears in the group's
+activity feed, attributed to whatever member id the request named. An unauthenticated request holding any run id could
+therefore add a line to a group's history. The *ordering* judgement here was sound - last really was where this
+belonged - and the reason attached to it was wrong in the direction that reads safely, which is the kind of wrong this
+repository's findings table has recorded before: a claim about one consumer of a row was used to justify the row.
+
+The first half of the bullet stands unchanged. The `execute` + rail-webhook pair has since been served (ADR 0050,
+0051), and every read is still open to anybody holding a group's id, which remains the product decision it says it is.
