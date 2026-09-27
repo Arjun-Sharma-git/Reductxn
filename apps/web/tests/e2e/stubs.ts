@@ -699,6 +699,25 @@ export async function stubSettlementApi(
     }
 
     if (path.endsWith('/decisions')) {
+      // The answering member is the caller since ADR 0053, so the stub refuses a write without the session's token
+      // exactly as the API does. Two things a spec proves by getting past here: the client sends its token, and the
+      // body it sends names nobody - which is what the assertion on `posted` is for.
+      if (route.request().headers()['authorization'] !== `Bearer ${TOKEN_PAIR.accessToken}`) {
+        await route.fulfill({
+          status: 401,
+          contentType: 'application/problem+json',
+          body: JSON.stringify({
+            type: 'about:blank',
+            title: 'Unauthorized',
+            status: 401,
+            detail: 'stubbed refusal',
+            code: 'api.not_signed_in',
+          }),
+        });
+
+        return;
+      }
+
       const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
 
       posted.push(body);
@@ -723,14 +742,16 @@ export async function stubSettlementApi(
 
       const decision = typeof body['decision'] === 'string' ? body['decision'] : 'approve';
 
-      answers.push({ memberId: String(body['memberId']), decision });
+      // The caller, because that is who the answer belongs to: the stub does not model membership - that is the API's
+      // rule, and its tests are against a real database - but it does model the one member an answer can come from.
+      answers.push({ memberId: ME.id, decision });
 
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
           runId: base.id,
-          memberId: body['memberId'],
+          memberId: ME.id,
           decision,
           recordedAt: '2026-09-26T10:00:00Z',
         }),

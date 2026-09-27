@@ -26,8 +26,14 @@ import { request } from '@/shared/api/client';
 
 export type DecisionWord = 'approve' | 'reject';
 
+/**
+ * The answer, and nothing about who is giving it.
+ *
+ * <p>There was a `memberId` here until ADR 0053, and the screen had a picker to fill it. It is gone rather than
+ * defaulted: the caller is the answering member now, the contract's body has no field for one, and a client that
+ * cannot name a member is a client that cannot answer as somebody else.
+ */
 export type DecisionVariables = {
-  readonly memberId: string;
   readonly decision: DecisionWord;
 };
 
@@ -70,8 +76,9 @@ export function useDecide(groupId: string, runId: string) {
       request<RecordedDecision>(`/runs/${runId}/decisions`, {
         method: 'POST',
         // Spoken rather than defaulted: the contract's absent `decision` means approve, for the clients that sent
-        // the older body, and a client that knows what it means says so.
-        body: { memberId: variables.memberId, decision: variables.decision },
+        // the older body, and a client that knows what it means says so. The member is not in this body at all since
+        // ADR 0053 - the session is who is answering, and this client has no way to say otherwise.
+        body: { decision: variables.decision },
       }),
 
     onSuccess: () => {

@@ -15,7 +15,9 @@ import java.util.UUID;
  *
  * <p>This is also where a request that does not say which answer it means becomes one, which is a property of the
  * wire format rather than of the use case: absent means approve, because approval is the common answer and because
- * the request that existed before refusals did has to keep meaning what it meant.
+ * the request that existed before refusals did has to keep meaning what it meant. An absent *body* is the same
+ * request as an absent field since ADR 0053 - the member's id was the only thing that made a body necessary, and
+ * the session supplies the author now.
  */
 public final class DecisionMapper {
 
@@ -33,9 +35,9 @@ public final class DecisionMapper {
      *            client-supplied instant would be a claim about a member's intent that nobody could check
      */
     public static NewDecision toCommand(UUID runId, DecisionRequest request, Instant now) {
-        String answer = request.decision() == null ? APPROVE : request.decision();
+        String answer = request == null || request.decision() == null ? APPROVE : request.decision();
 
-        return new NewDecision(runId, request.memberId(), answer, now);
+        return new NewDecision(runId, answer, now);
     }
 
     public static DecisionResponse toResponse(RecordedDecision recorded) {

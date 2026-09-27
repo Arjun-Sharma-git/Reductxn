@@ -76,6 +76,12 @@ public class RunsController {
      * answer forced: a path called {@code /approve} that records refusals would be the kind of near-miss this
      * module's read side already refuses to publish (ADR 0021). The request body keeps its old meaning - absent
      * {@code decision} is an approval - so the change is in the path and the response, not in what a client sends.
+     *
+     * <p><strong>The caller is resolved first, and since ADR 0053 the caller <em>is</em> the answering member.</strong>
+     * This was the last operation whose acting member arrived in the body; the order is now the one {@code execute}
+     * uses, and for its reason - who is asking is settled before the path is judged, so a request with no session is
+     * refused as a {@code 401} rather than as a malformed id. The body no longer carries an identity at all, so
+     * there is nothing left for this method to check in it: the member's id was the only field that needed one.
      */
     @PostMapping("/{runId}/decisions")
     public ResponseEntity<Object> decide(
@@ -83,18 +89,27 @@ public class RunsController {
             @RequestBody(required = false) DecisionRequest request,
             HttpServletRequest http) {
 
-        DomainError malformed = malformedRequest(runId, request);
+        // Who is asking first: a request with no session is refused as such, and an answer by nobody is no longer
+        // expressible - which is what the `memberId` field used to express and could not enforce.
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
+        DomainError malformed = malformedRunId(runId);
         if (malformed != null) {
             return problem(malformed, http.getRequestURI());
         }
 
         NewDecision command = DecisionMapper.toCommand(UUID.fromString(runId), request, clock.instant());
-        Result<RecordedDecision> result = recordDecision.record(command);
+        Result<RecordedDecision> result = recordDecision.record(
+                ((Result.Ok<SignedInUser>) caller).value().id(), command);
 
         if (result instanceof Result.Ok<RecordedDecision> recorded) {
             // 200 rather than 201: nothing was created that a client can fetch, and the contract says "Decision
             // recorded" for this status. The body echoes what the row says, so a client that recorded an answer
-            // has something to show a member - including which answer it was.
+            // has something to show a member - including which answer it was, and whose.
             return ResponseEntity.ok(DecisionMapper.toResponse(recorded.value()));
         }
 
@@ -195,30 +210,12 @@ public class RunsController {
     }
 
     /**
-     * What the request is missing, or null when it can be acted on.
-     *
-     * <p>Only the fields the use case cannot be handed: a body, a member, and an id that is an id. Whether the run
-     * exists, whether this member may answer it and whether they have already are answered by the use case and the
-     * store, because those are conditions rather than malformations - and they arrive as refusals a client can
-     * branch on.
-     */
-    private static DomainError malformedRequest(String runId, DecisionRequest request) {
-        DomainError path = malformedRunId(runId);
-        if (path != null) {
-            return path;
-        }
-        if (request == null) {
-            return new RunRefusals.RequestIncomplete("body");
-        }
-        if (request.memberId() == null) {
-            return new RunRefusals.RequestIncomplete("memberId");
-        }
-
-        return null;
-    }
-
-    /**
      * The path parameter, which the contract declares as a uuid.
+     *
+     * <p><strong>Everything this operation used to check about its body is gone with the field that needed it</strong>
+     * (ADR 0053): the member is the caller now, so the only malformation left on this endpoint is a path that is not
+     * an id. The check stayed here rather than being replaced by a {@code UUID} parameter, for the reason it was here
+     * to begin with.
      *
      * <p>Taken as a {@code String} and checked here rather than bound as a {@code UUID}, so that a malformed id gets
      * the same coded problem body every other refusal gets instead of Spring's own uncoded {@code 400} - the

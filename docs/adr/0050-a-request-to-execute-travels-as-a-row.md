@@ -90,5 +90,7 @@ as a row the API writes and the worker reads.**
 - **What this deliberately does not do.** Execution is still asynchronous: the driver's cadence is the engine, and this
   endpoint only lets a member move one run to the front of it. There is no cancel, no schedule and no retry policy of its
   own - a request that a gate refuses is a request the caller can make again once the gate is satisfied, which is what
-  the `409` tells them. And `POST /runs/{runId}/decisions` remains the only write in the contract that takes its actor
+  the `409` tells them. And `POST /runs/{runId}/decisions` remained the only write in the contract that took its actor
   from the body, deliberately, for the reason ADR 0016 gives: a stranger's answer is inert by the quorum's arithmetic.
+  *(ADR 0053 served it, and found the reason half true - inert to the quorum, and not inert as a row that the group's
+  activity feed shows.)*

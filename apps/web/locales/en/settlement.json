@@ -99,8 +99,6 @@
   "decision": {
     "title": "Your answer",
     "description": "An answer is recorded against this plan and the plan's own arithmetic decides what it means. A member has one answer per plan, and it is never overwritten.",
-    "member": "Answering as",
-    "chooseMember": "Choose the member answering",
     "approve": "Approve this plan",
     "reject": "Refuse this plan",
     "recording": "Recording your answer…",

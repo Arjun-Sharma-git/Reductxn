@@ -1457,13 +1457,19 @@ export interface paths {
          *     an absent `decision` is an approval, so a client that sent the old body still sends what it
          *     meant.
          *
-         *     `memberId` is client-supplied, as an obligation's `debtorId` is: since the group writes began
-         *     resolving a caller (ADR 0043) this is the last operation that names its *acting* member in the
-         *     body rather than taking it from the session, and the field is `required` so that an answer by
-         *     nobody is refused rather than attributed to nobody. A `memberId` that is not the caller's is not
-         *     a forgery to detect: a refusal is read through the run's own membership rather than taken at face
-         *     value, so only the run decides whether that member's answer counts (ADR 0016). Closing this
-         *     boundary is the same change the group writes made.
+         *     The answering member is **the caller**, resolved from the session (ADR 0053): this was the last
+         *     operation whose *acting* member arrived in the body, and the boundary is now closed the same way
+         *     the group writes closed theirs (ADRs 0043, 0047-0049). A request with no session is a `401`
+         *     rather than an answer by nobody, and a caller who is not a member of the group whose books this
+         *     run settles gets the `404` every other group write answers with. Nobody answers on another
+         *     member's behalf - there is no capability for it, so there is no field for it.
+         *
+         *     It was deliberately last, and why it could wait is worth keeping: a stranger's answer was already
+         *     inert by the quorum's arithmetic (ADR 0016), so the run's *outcome* never depended on this guard.
+         *     What the guard changes is the record rather than the arithmetic - an answer is a row that the
+         *     group's activity feed shows, so an unauthenticated request could put a line in a group's history,
+         *     attributed to a member id it chose. That is the whole of what this closes, and it is more than
+         *     "the status a stranger sees".
          */
         post: {
             parameters: {
@@ -1474,7 +1480,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": components["schemas"]["DecisionRequest"];
                 };
@@ -1490,6 +1496,7 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
                 404: components["responses"]["Problem"];
                 409: components["responses"]["Problem"];
                 422: components["responses"]["Problem"];
@@ -2442,13 +2449,12 @@ export interface components {
             };
         };
         /**
-         * @description One member's answer. The member is named by the client until this build has identity - the same
-         *     arrangement an obligation's `debtorId` has - and the server records who the client says answered,
-         *     while the run decides whether that member's answer counts.
+         * @description One member's answer. The answering member is the caller, resolved from the session (ADR 0053), so
+         *     the body names nobody: an answer has one author and a request cannot claim to be somebody else's.
+         *     An absent body is an approval, which is what this operation meant before refusals were expressible
+         *     - the field that made a body necessary was the member's id, and it is gone.
          */
         DecisionRequest: {
-            /** Format: uuid */
-            memberId: string;
             /**
              * @description The answer. Absent means `approve`, which is what this operation meant before refusals were
              *     expressible, so a request that omits it is still the request it always was.

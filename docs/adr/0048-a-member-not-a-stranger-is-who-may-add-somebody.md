@@ -72,8 +72,10 @@ gap rather than papering over it.
   added, so `$[0]` would have made several tests depend on the order two memberships were written in. The ones that pin a
   count assert about the person they are about, through a JSONPath predicate or a `WHERE user_id = ?`.
 - **What is still open, named.** `POST /obligations` and `POST /groups/{groupId}/cycles` take their actor from the body,
-  and the rule ADR 0047 argued (a member of the group) applies to both. `POST /runs/{runId}/decisions` stays last
+  and the rule ADR 0047 argued (a member of the group) applies to both. `POST /runs/{runId}/decisions` stayed last
   because a stranger's answer is inert by the quorum's arithmetic (ADR 0016) - enforcement would change nothing except
-  the status a stranger sees. And every read is still open to anybody holding an id: the obligations, members, balances
+  the status a stranger sees. *(ADR 0053 has since served it, and that reason turned out to be half true: the answer is
+  inert to the quorum and not inert as a row, because the group's activity feed shows it. The sentence above is kept as
+  written rather than rewritten, and the correction is in 0049's amendment and in ADR 0053.)* And every read is still open to anybody holding an id: the obligations, members, balances
   and runs reads serve a bare uuid, the home screen's paste-a-group-id flow depends on it, and closing that half is a
   product decision about how a group is shared rather than a gap nobody noticed.
