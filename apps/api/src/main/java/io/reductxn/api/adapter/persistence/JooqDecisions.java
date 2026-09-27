@@ -26,6 +26,10 @@ import java.util.UUID;
  * (RULE B16), so the row is built and read as {@code Record}, and the SQL here is the contract - which is why
  * {@code RecordedDecisionsTest} in the worker writes the same statement to pin the other side of it.
  *
+ * <p><strong>It no longer reads.</strong> Until ADR 0053 it also answered {@code hasRun}, asking
+ * {@code settlement_runs} whether the run existed; that question is {@code ReadRun}'s now, because the same read has
+ * to say which group the run belongs to and two queries for one fact can disagree. What is left is the insert.
+ *
  * <p><strong>The word written here is the run's, and now there are two of them.</strong> {@code V502}'s check
  * constraint fixes the vocabulary and the run's quorum reads it, so this class writes words it does not own: the
  * answer arrives from the request and this is still the only place one becomes SQL. A word that is not in the
@@ -41,11 +45,6 @@ import java.util.UUID;
  */
 @Repository
 public class JooqDecisions implements Decisions {
-
-    /** The run whose answers these are. Read here, written by the worker. */
-    private static final Table<Record> RUNS = DSL.table("settlement_runs");
-
-    private static final Field<UUID> RUN_ID = DSL.field("id", UUID.class);
 
     /** The decision rows. */
     private static final Table<Record> DECISIONS = DSL.table("settlement_decisions");
@@ -63,20 +62,14 @@ public class JooqDecisions implements Decisions {
     }
 
     @Override
-    public boolean hasRun(UUID runId) {
-        Objects.requireNonNull(runId, "runId");
-
-        return dsl.fetchExists(dsl.selectOne().from(RUNS).where(RUN_ID.eq(runId)));
-    }
-
-    @Override
-    public Written record(NewDecision decision) {
+    public Written record(UUID answeringMember, NewDecision decision) {
+        Objects.requireNonNull(answeringMember, "answeringMember");
         Objects.requireNonNull(decision, "decision");
 
         try {
             dsl.insertInto(DECISIONS)
                     .columns(DECISION_RUN, DECISION_MEMBER, DECISION_WORD, DECISION_AT)
-                    .values(decision.runId(), decision.memberId(), decision.decision(),
+                    .values(decision.runId(), answeringMember, decision.decision(),
                             toOffset(decision.recordedAt()))
                     .execute();
 

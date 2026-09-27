@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { MEMBERS, WAITING_RUN, signIn, stubIdentityApi, stubSettlementApi } from './stubs';
+import { ME, WAITING_RUN, signIn, stubIdentityApi, stubSettlementApi } from './stubs';
 
 /**
  * The approval path, end to end in a browser: find a run, read it, answer it.
@@ -14,13 +14,17 @@ import { MEMBERS, WAITING_RUN, signIn, stubIdentityApi, stubSettlementApi } from
 const GROUP = '3f7c1c1e-0d2a-4a5e-9a6f-6c1d2f4b8e10';
 const RUNS = `/groups/${GROUP}/settlement`;
 const RUN = `${RUNS}/${WAITING_RUN.id}`;
-const ASHA = MEMBERS[0]!.userId;
-const BHAVESH = MEMBERS[1]!.userId;
 
-/** Opens a run and picks the member who is answering. */
-async function open(page: Page, member = ASHA): Promise<void> {
+/**
+ * Opens a run as a signed-in member, because the session is who answers since ADR 0053.
+ *
+ * <p>This helper used to take a member and select them in the form's picker. Both are gone: the answer's author is
+ * the caller, the contract's body has no field for one, and signing in is what makes an answer possible at all -
+ * which is why every test that answers stubs the identity API and signs in first.
+ */
+async function open(page: Page): Promise<void> {
+  await signIn(page);
   await page.goto(RUN);
-  await page.getByLabel('Answering as').selectOption(member);
 }
 
 test('closes the group’s books and sees the cycle waiting to be computed', async ({ page }) => {
@@ -105,6 +109,7 @@ test('shows what the plan asks for, in names, and names the group’s own conver
 
 test('records an answer and shows it on the record without claiming it counted', async ({ page }) => {
   const api = await stubSettlementApi(page);
+  await stubIdentityApi(page);
   await open(page);
 
   await page.getByRole('button', { name: 'Approve this plan' }).click();
@@ -112,8 +117,15 @@ test('records an answer and shows it on the record without claiming it counted',
   // The server's word for the answer, and its own hedge: whether it counts is the plan's decision, and its status
   // is where that shows.
   await expect(page.getByText("Recorded: Approved. Whether it counts is the plan's own decision")).toBeVisible();
+
+  // **The body names nobody**, which is the client-side half of ADR 0053 and the reason the picker is gone: the
+  // session says who is answering, so a client that cannot name a member cannot answer as somebody else. Asserted as
+  // the exact body rather than as a field's absence, because that is what a stale client would get wrong.
   expect(api.posted).toHaveLength(1);
-  expect(api.posted[0]).toEqual({ memberId: ASHA, decision: 'approve' });
+  expect(api.posted[0]).toEqual({ decision: 'approve' });
+
+  // And the answer on the record belongs to the signed-in member rather than to anybody the request mentioned.
+  expect(api.answers[0]!.memberId).toBe(ME.id);
 
   // And it is on the record: the run is re-read, so the answer appears in the answer table.
   await expect(page.getByText('Nobody has answered this plan yet.')).toHaveCount(0);
@@ -122,18 +134,34 @@ test('records an answer and shows it on the record without claiming it counted',
 
 test('a refusal is recorded as a refusal, not as a failure', async ({ page }) => {
   const api = await stubSettlementApi(page);
-  await open(page, BHAVESH);
+  await stubIdentityApi(page);
+  await open(page);
 
   await page.getByRole('button', { name: 'Refuse this plan' }).click();
 
   await expect(page.getByText('Recorded: Refused.')).toBeVisible();
-  expect(api.posted[0]).toEqual({ memberId: BHAVESH, decision: 'reject' });
+  expect(api.posted[0]).toEqual({ decision: 'reject' });
+  expect(api.answers[0]!.memberId).toBe(ME.id);
+});
+
+test('refuses an answer from nobody, and says what to do about it', async ({ page }) => {
+  await stubSettlementApi(page);
+  await page.goto(RUN);
+
+  // No sign-in and no identity stub: a member looking at a plan without a session, which the read allows and the
+  // answer does not (ADR 0053). The form is offered, the server refuses, and the refusal is what the member sees -
+  // in the catalog's wording for `api.not_signed_in` rather than in anything this screen invented.
+  await page.getByRole('button', { name: 'Approve this plan' }).click();
+
+  await expect(page.getByText('You are not signed in, or your session has ended.')).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Approved' })).toHaveCount(0);
 });
 
 test('stops offering the answer when the member has already answered', async ({ page }) => {
   await stubSettlementApi(page, {
     decision: { kind: 'refuse', code: 'api.decision_already_answered', status: 409 },
   });
+  await stubIdentityApi(page);
   await open(page);
 
   await page.getByRole('button', { name: 'Approve this plan' }).click();

@@ -91,15 +91,17 @@ participants are the worker's positions and are not published here.
 
 ## What is not here yet
 
-The rest of the settlement surface, and the last place an acting member can be named by a request body. Identity
-arrived in ADR 0042 and the group writes take their actor from the session (ADR 0047, 0048, 0049); `groups` is a
-table since ADR 0043. An obligation's `group_id` still has no foreign key, but not for the reason this section used
-to give: that table is additive, so a group with commitments and no row keeps working, and a foreign key would refuse
-exactly that case. The one boundary left where the body names the member is `POST /v1/runs/{runId}/decisions`, and
-ADR 0016 is what makes it safe rather than merely unchecked - quorum intersects an answer with the run's own
-participants, so the worst a mistaken write does is record an answer the run ignores. A cross-currency obligation
-*can* be stored since `V103` and `libs/fx`'s quote tables - and it is why rate ingestion exists (ADR 0027), because
-a conversion with no rate is refused rather than guessed.
+The rest of the settlement surface. Identity arrived in ADR 0042 and the group writes take their actor from the session
+(ADR 0047, 0048, 0049); `groups` is a table since ADR 0043. An obligation's `group_id` still has no foreign key, but not
+for the reason this section used to give: that table is additive, so a group with commitments and no row keeps working,
+and a foreign key would refuse exactly that case. **No boundary is left where the body names the acting member**:
+`POST /v1/runs/{runId}/decisions` was the last one, and ADR 0053 closed it - which is also where this paragraph's old
+reassurance was corrected, because "ADR 0016 is what makes it safe rather than merely unchecked" was true of the quorum
+and false of the record: an answer is a row, and the group's activity feed shows it, attributed to whichever member id
+the request named. What is still body-named is an obligation's *parties*, which is a different kind of claim - a debtor
+is the debt's party rather than its author, and no session decides who owes whom. A cross-currency obligation *can* be
+stored since `V103` and `libs/fx`'s quote tables - and it is why rate ingestion exists (ADR 0027), because a conversion
+with no rate is refused rather than guessed.
 
 The sentence this paragraph used to carry - that a cross-currency obligation could not be stored because
 `obligations` had no quote columns - outlived the columns by several slices. Recorded here rather than quietly
@@ -188,13 +190,18 @@ which the entry hash covers. `POST /runs/{runId}/execute` joined them in ADR 005
 the worker's use case from here is what RULE B6 forbids. `POST /webhooks/rails/{provider}` is the one boundary no person
 uses (ADR 0051): a rail has no session, so it authenticates with an HMAC-SHA256 signature over the raw body rather than
 the bearer scheme every other operation requires - and the row it writes is read by the settlement worker the same way.
-The decision endpoint still takes its actor from the body, and that is a decision rather than an omission: a stranger's
-answer is inert by the quorum's arithmetic (ADR 0016).
+`POST /runs/{runId}/decisions` was the last boundary to take its **acting member** from the body, and it stopped doing so
+in ADR 0053: the answering member is the caller, and a caller who is not a member of the group whose books the run
+settles is refused with the same `no_such_group` every other group write answers with. The argument that kept this one
+last - that a stranger's answer is inert by the quorum's arithmetic (ADR 0016) - was true of the run and false of the
+record: an answer is a row, the group's activity feed shows it, and an unauthenticated request could therefore put a line
+in a group's history naming a member of its choosing. What is still body-named is an obligation's *parties*, which is a
+different kind of id: a debtor is the debt's party rather than its author, and no session decides who owes whom.
 
 `GET /v1/groups`, `POST /v1/groups` and `GET /v1/groups/{groupId}` are the group itself, and they are **the first
 operations in this build that need a caller** (ADR 0043). All three read the bearer token, because a group list is a
-question about a person and a group's own screen decides membership - and the older boundaries keep taking whoever the
-body says until a slice that owns that change. `CallerResolver` is the one place a token becomes a person; `GET /me` uses
+question about a person and a group's own screen decides membership - and the boundaries that used to take whoever the
+body said have been closed one slice at a time since, the last of them in ADR 0053. `CallerResolver` is the one place a token becomes a person; `GET /me` uses
 
 it too.
 

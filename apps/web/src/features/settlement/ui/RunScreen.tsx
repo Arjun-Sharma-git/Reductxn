@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { currencyCatalogQuery, indexByCode } from '@/entities/currency';
-import { membersQuery, type Member } from '@/entities/member';
+import { membersQuery } from '@/entities/member';
 import { runQuery, runTransfersQuery } from '@/entities/run';
 import { useTranslations } from '@/shared/i18n';
 import { Card, Notice, ProblemNotice } from '@/shared/ui';
@@ -28,35 +28,30 @@ import styles from './SettlementScreens.module.css';
  *     screen does not warn that refusing ends the run: that is the run's own status change, and stating it here would
  *     be predicting arithmetic this screen does not have.
  *
- * <p>The member is chosen rather than assumed. This operation names its *acting* member in the body rather than
- * taking it from the session - the last one that does, which is what `DecisionRequest`'s own comment carries - so the
- * screen asks instead of guessing, because an answer attributed to nobody is refused by the server anyway. This
- * paragraph said "this build has no identity" until the pass that corrected it; identity arrived in ADR 0042, and a
- * body-named member is a property of this operation rather than of the build.
+ * <p><strong>The member is not chosen any more: the session is who is answering.</strong> This operation used to name
+ * its acting member in the body, and the screen had a picker for it - so a member could answer, or claim to answer,
+ * as anybody the group listed. Since ADR 0053 the caller is the answering member, the field is gone from the contract,
+ * and the picker is gone with it: there is nothing left to choose, which is a shorter form rather than a lost feature.
+ * This paragraph and that picker were the last two places in this screen that described the old boundary.
  */
 /**
- * The answer form: who is answering, and which way.
+ * The answer form: which way, and nothing about who.
  *
- * <p>Both buttons are disabled until a member is chosen, and nothing else about the form is a rule. Absent a choice
- * the screen cannot attribute an answer, and the server refuses an answer by nobody - so the choice is required here
- * rather than learned from a refusal.
+ * <p>Nothing about the form is a rule, and that is a change worth noticing: the buttons used to be disabled until a
+ * member was chosen, because the screen had to supply the answer's author and the server refused an answer by nobody.
+ * The session supplies the author now (ADR 0053), so a member who is signed in can answer with one click and one who
+ * is not gets the refusal the API sends rather than a form that will not submit.
  *
  * <p>The recorded message repeats the server's word for the answer rather than the button's: the response echoes what
  * the row holds (`DecisionResponse`), which is what tells a member that a rejection was recorded as a rejection.
  */
 export function Decision({
-  members,
-  memberId,
-  onMember,
   answered,
   pending,
   recorded,
   fault,
   onAnswer,
 }: {
-  readonly members: readonly Member[];
-  readonly memberId: string;
-  readonly onMember: (memberId: string) => void;
   readonly answered: boolean;
   readonly pending: boolean;
   readonly recorded: string | undefined;
@@ -68,29 +63,12 @@ export function Decision({
   return (
     <Card title={t('settlement.decision.title')} description={t('settlement.decision.description')}>
       <div className={styles.decision}>
-        <label className={styles.decision}>
-          <span>{t('settlement.decision.member')}</span>
-          <select
-            aria-label={t('settlement.decision.member')}
-            className={styles.filterControl}
-            value={memberId}
-            onChange={(event) => onMember(event.target.value)}
-          >
-            <option value="">{t('settlement.decision.chooseMember')}</option>
-            {members.map((member) => (
-              <option key={member.userId} value={member.userId}>
-                {member.displayName}
-              </option>
-            ))}
-          </select>
-        </label>
-
         {answered ? null : (
           <div className={styles.actions}>
             <button
               className="rn-button"
               type="button"
-              disabled={memberId === '' || pending}
+              disabled={pending}
               onClick={() => onAnswer('approve')}
             >
               {t('settlement.decision.approve')}
@@ -98,7 +76,7 @@ export function Decision({
             <button
               className={`rn-button ${styles.reject}`}
               type="button"
-              disabled={memberId === '' || pending}
+              disabled={pending}
               onClick={() => onAnswer('reject')}
             >
               {t('settlement.decision.reject')}
@@ -134,14 +112,13 @@ export function RunScreen({ groupId, runId }: { readonly groupId: string; readon
   const currencies = useQuery(currencyCatalogQuery());
 
   const decide = useDecide(groupId, runId);
-  const [memberId, setMemberId] = useState('');
 
   const catalog = useMemo(() => indexByCode(currencies.data ?? []), [currencies.data]);
 
   // Once the server says this member has answered, the buttons go away: the answer is never overwritten, so offering
   // them again would be inviting something the system will not do.
   const answered = decide.isError && alreadyAnswered(decide.error);
-  const answer = (decision: DecisionWord) => decide.mutate({ memberId, decision });
+  const answer = (decision: DecisionWord) => decide.mutate({ decision });
 
   return (
     <div className={styles.screen}>
@@ -196,9 +173,6 @@ export function RunScreen({ groupId, runId }: { readonly groupId: string; readon
           </Card>
 
           <Decision
-            members={members.data ?? []}
-            memberId={memberId}
-            onMember={setMemberId}
             answered={answered}
             pending={decide.isPending}
             recorded={decide.isSuccess ? decide.data.decision : undefined}
