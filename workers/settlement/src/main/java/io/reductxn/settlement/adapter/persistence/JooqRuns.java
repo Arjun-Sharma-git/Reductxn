@@ -78,6 +78,8 @@ public class JooqRuns implements Runs {
     private static final Field<OffsetDateTime> RUN_COMPUTED = DSL.field("computed_at", OffsetDateTime.class);
     private static final Field<OffsetDateTime> RUN_CREATED = DSL.field("created_at", OffsetDateTime.class);
     private static final Field<OffsetDateTime> RUN_DRIVEN = DSL.field("driven_at", OffsetDateTime.class);
+    private static final Field<OffsetDateTime> RUN_REQUESTED =
+            DSL.field("execute_requested_at", OffsetDateTime.class);
     // The due query joins runs to their cycles, so both tables are aliased and every column is qualified: the
     // three names they have in common (`id`, `group_id`, `created_at`) are exactly the ones an unqualified field
     // would resolve against the wrong table, or fail to resolve at all. JooqChainHeads sets out the reasoning
@@ -93,6 +95,8 @@ public class JooqRuns implements Runs {
             DSL.field(DSL.name("due_run", "created_at"), OffsetDateTime.class);
     private static final Field<OffsetDateTime> DUE_RUN_DRIVEN =
             DSL.field(DSL.name("due_run", "driven_at"), OffsetDateTime.class);
+    private static final Field<OffsetDateTime> DUE_RUN_REQUESTED =
+            DSL.field(DSL.name("due_run", "execute_requested_at"), OffsetDateTime.class);
     private static final Field<UUID> DUE_RUN_CYCLE = DSL.field(DSL.name("due_run", "cycle_id"), UUID.class);
 
     private static final Field<UUID> DUE_CYCLE_ID = DSL.field(DSL.name("due_cycle", "id"), UUID.class);
@@ -366,7 +370,12 @@ public class JooqRuns implements Runs {
                 .where(DUE_RUN_STATUS.in(DRIVEABLE))
                 // Null means never attempted, and it is due: a run opened a second ago has never been offered to
                 // a rail. `attemptedBefore` is the window's cut-off, computed by the caller.
-                .and(DUE_RUN_DRIVEN.isNull().or(DUE_RUN_DRIVEN.lt(attemptedBefore.atOffset(ZoneOffset.UTC))))
+                .and(DUE_RUN_DRIVEN.isNull().or(DUE_RUN_DRIVEN.lt(attemptedBefore.atOffset(ZoneOffset.UTC)))
+                        // A member's request is honoured inside the window: it is the one thing that can make a run
+                        // with a live backoff due, and it is spent by the attempt (ADR 0050). The third disjunct
+                        // compares the request against the *last attempt* rather than against now, so a request
+                        // made before a pass that then ran is already satisfied and does not re-open the window.
+                        .or(DUE_RUN_REQUESTED.gt(DUE_RUN_DRIVEN)))
                 // And something in it has to be attemptable: a run whose every unresolved transfer is waiting out
                 // a backoff has nothing to try, and driving it would mark it as attempted every window while
                 // nothing happened - a pass that reports "1 run moved" for a run standing still. This is the
@@ -397,8 +406,11 @@ public class JooqRuns implements Runs {
         Objects.requireNonNull(runId, "runId");
         Objects.requireNonNull(attemptedAt, "attemptedAt");
 
+        // The attempt consumes any pending request for one (ADR 0050). `execute_requested_by` is deliberately left as
+        // it is: the request's *flag* is spent by the attempt, and the record of who asked is not.
         dsl.update(RUNS)
                 .set(RUN_DRIVEN, attemptedAt.atOffset(ZoneOffset.UTC))
+                .set(RUN_REQUESTED, (OffsetDateTime) null)
                 .where(RUN_ID.eq(runId))
                 .execute();
     }

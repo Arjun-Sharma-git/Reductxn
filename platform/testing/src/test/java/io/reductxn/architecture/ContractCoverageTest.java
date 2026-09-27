@@ -111,12 +111,13 @@ class ContractCoverageTest {
      * a second door onto a capability the write path already has) would have added surface rather than coverage.
      */
     private static final Map<String, String> RECORDED_GAPS = Map.ofEntries(
-            Map.entry("POST /runs/{runId}/execute",
-                    "execute - the execution path. The worker plans and computes; performing the transfers is what "
-                            + "makes a settlement final, and the rail adapter that would do it is not written"),
             Map.entry("POST /webhooks/rails/{provider}",
                     "webhooks - what a rail tells us asynchronously, which is the answer to an execution that cannot "
-                            + "be completed inside the request that started it"));
+                            + "be completed inside the request that started it. It stays recorded after ADR 0050 served "
+                            + "`execute` for a reason that is no longer the original one: the driver already polls a "
+                            + "rail for what it has not answered, so this is a latency improvement rather than the only "
+                            + "way money can be resolved - and a callback needs a secret to verify it against and a "
+                            + "web-capable place to receive it, neither of which exists"));
 
     @Test
     void everyPromisedOperationIsEitherServedOrRecordedWithItsOwner() throws IOException {

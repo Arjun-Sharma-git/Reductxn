@@ -78,6 +78,9 @@ public final class ExpectedFailures {
             // There is nothing to answer, which is not the same as answering nothing: a client that got this for a
             // malformed body would go looking for an id that was correct all along.
             Map.entry(RunRefusals.NoSuchRun.CODE, HttpStatus.NOT_FOUND),
+            // A run that cannot move for now. The contract's own 409 for POST /runs/{runId}/execute, which names
+            // quorum and "already executing" as the same answer (ADR 0050).
+            Map.entry(RunRefusals.NotReadyToExecute.CODE, HttpStatus.CONFLICT),
 
             // A code nobody holds. 404 rather than the 410 below, and the difference is what a client does next: a
             // mistyped code is a code for nothing, while an invitation that ran out is one that existed and is spent.
