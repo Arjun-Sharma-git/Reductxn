@@ -108,11 +108,17 @@ at the time, that "every read is open to anybody holding a group's id" - nine of
 preview, the obligations list, the cycles and runs lists, the members list, a run, its transfers and the tax report. Each
 resolves a caller now, asks `Groups.isMember` before reading anything, and refuses with the `no_such_group` `404` ADR 0043
 gave the group read. Their replacements are not a rule about paths: `GET /tax/reports` takes its group as a **query
-parameter**, so it is the one a path-shaped check would have missed, and the ADR records that as a finding. What is
-deliberately still open, in the same list: who may hand a code out (the `admin` role is recorded and nothing reads it, so
-a group cannot make its invitations admin-only the way ADR 0048 declined to), and whether a group can share a *read* with
-somebody who must not become a member - a capability link, which needs a principal that is not a user and is therefore a
-feature rather than a permission. Nothing still decides when a cycle is due: a group has no schedule.
+parameter**, so it is the one a path-shaped check would have missed, and the ADR records that as a finding.
+
+**And a group can hand a *look* to somebody who will never be a member (ADR 0055).** `POST /groups/{groupId}/shares`
+makes a code that grants reading rather than membership, and `GET /shared/{code}` serves it with no session at all - the
+same `security: []` the invitation preview has, for the same reason: the person who follows the link has no account here.
+It answers the group's positions with the names the group recorded, and nothing else: no memos, no activity, no
+invitations, and nothing that can change anything. The two reads of a group's positions share one composition
+(`GroupPositions`) and differ only in who may ask - a membership, or a code - which is the split that keeps ADR 0039's
+"one computation" rule while adding a second reader. What is still open, in the same list: who may hand a code out (the
+`admin` role is recorded and nothing reads it), revocation (a link stops when its window closes and there is no way to
+stop one earlier), a window a caller chooses, and nothing still decides when a cycle is due - a group has no schedule.
 
 The sentence this paragraph used to carry - that a cross-currency obligation could not be stored because
 `obligations` had no quote columns - outlived the columns by several slices. Recorded here rather than quietly

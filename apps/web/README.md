@@ -10,7 +10,10 @@ become somebody this deployment knows (ADR 0042), and `/` itself, which is now t
 the group-id box it was (ADR 0043). The activity feed arrived with ADR 0044, and this sentence listed it as a screen still
 to come. **ADR 0054 changed what the box on `/` does**: it takes an invite code and goes to `/invites/$code`, because
 every read of a group's books needs a member of it and an id was never a credential - and the invitation screen now says
-which group a code is for, how many members are in it and when the code stops working, before it asks for a name. The
+which group a code is for, how many members are in it and when the code stops working, before it asks for a name.
+**ADR 0055 added the fourth screen outside the group's tree**: `/shared/$code`, what a share link shows - the group's
+positions with the names the group recorded, read by somebody who is not a member and usually has no session at all. Its
+code is made on the members screen, beside the invitation, because both are the same act for a different audience. The
 route tree's remaining screens are groups of one kind or another - the group's policy and its settlement
 schedule - and each needs a read the contract does not serve: a group's `nettingPolicy` exists in the schema as an unserved
 field, and a schedule has no operation at all, which is the gap the plan calls "nothing decides when a cycle is due". Each

@@ -2,6 +2,7 @@ package io.reductxn.api.web.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 
+
 import io.reductxn.api.port.in.InvitePreview;
 
 import java.time.Instant;
@@ -23,7 +24,12 @@ import java.util.UUID;
  * {@code Optional} anywhere in this record, which would put the distinction in a Java type the wire cannot see.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record InvitePreviewResponse(String code, Instant expiresAt, Integer maxUses, Group group) {
+public record InvitePreviewResponse(
+        String code,
+        String grants,
+        Instant expiresAt,
+        Integer maxUses,
+        Group group) {
 
     /** What a code joins somebody to: the group's id always, its name when it has one, and how many members. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -33,6 +39,7 @@ public record InvitePreviewResponse(String code, Instant expiresAt, Integer maxU
     public static InvitePreviewResponse of(InvitePreview preview) {
         return new InvitePreviewResponse(
                 preview.code(),
+                preview.grants().wireName(),
                 preview.expiresAt(),
                 preview.maxUses(),
                 new Group(preview.group().id(), preview.group().name(), preview.group().memberCount()));

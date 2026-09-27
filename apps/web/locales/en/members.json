@@ -34,5 +34,13 @@
     "making": "Making a code…",
     "expires": "Usable until {when}, then it stops working.",
     "noLimit": "This code has no limit on how many times it can be used. It stops when it expires, and not before."
+  },
+  "share": {
+    "cardTitle": "A link somebody can look through",
+    "cardDescription": "For somebody who needs to see what the group owes whom and will never be a member of it: an accountant, a landlord, a mediator. It shows the positions and the names the group recorded, and it joins nobody - there is no way to accept it, and no screen behind it can change anything.",
+    "make": "Make a link",
+    "making": "Making it…",
+    "expires": "Usable until {when}",
+    "warning": "Whoever holds this link can read those numbers, and a link is easy to forward. It stops working when the window above closes; this build cannot revoke one earlier, so a group that needs that makes a new link rather than taking an old one back."
   }
 }

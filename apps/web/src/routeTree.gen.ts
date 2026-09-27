@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as GroupsGroupIdRouteRouteImport } from './routes/groups/$groupId/route'
 import { Route as InvitesCodeRouteImport } from './routes/invites/$code'
+import { Route as SharedCodeRouteImport } from './routes/shared/$code'
 import { Route as GroupsGroupIdActivityRouteImport } from './routes/groups/$groupId/activity'
 import { Route as GroupsGroupIdBalancesRouteImport } from './routes/groups/$groupId/balances'
 import { Route as GroupsGroupIdMembersRouteImport } from './routes/groups/$groupId/members'
@@ -40,6 +41,11 @@ const GroupsGroupIdRouteRoute = GroupsGroupIdRouteRouteImport.update({
 const InvitesCodeRoute = InvitesCodeRouteImport.update({
   id: '/invites/$code',
   path: '/invites/$code',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SharedCodeRoute = SharedCodeRouteImport.update({
+  id: '/shared/$code',
+  path: '/shared/$code',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GroupsGroupIdActivityRoute = GroupsGroupIdActivityRouteImport.update({
@@ -91,6 +97,7 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
   '/invites/$code': typeof InvitesCodeRoute
+  '/shared/$code': typeof SharedCodeRoute
   '/groups/$groupId/activity': typeof GroupsGroupIdActivityRoute
   '/groups/$groupId/balances': typeof GroupsGroupIdBalancesRoute
   '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
@@ -105,6 +112,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
   '/invites/$code': typeof InvitesCodeRoute
+  '/shared/$code': typeof SharedCodeRoute
   '/groups/$groupId/activity': typeof GroupsGroupIdActivityRoute
   '/groups/$groupId/balances': typeof GroupsGroupIdBalancesRoute
   '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
@@ -120,6 +128,7 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRoute
   '/groups/$groupId': typeof GroupsGroupIdRouteRouteWithChildren
   '/invites/$code': typeof InvitesCodeRoute
+  '/shared/$code': typeof SharedCodeRoute
   '/groups/$groupId/activity': typeof GroupsGroupIdActivityRoute
   '/groups/$groupId/balances': typeof GroupsGroupIdBalancesRoute
   '/groups/$groupId/members': typeof GroupsGroupIdMembersRoute
@@ -136,6 +145,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/groups/$groupId'
     | '/invites/$code'
+    | '/shared/$code'
     | '/groups/$groupId/activity'
     | '/groups/$groupId/balances'
     | '/groups/$groupId/members'
@@ -150,6 +160,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/groups/$groupId'
     | '/invites/$code'
+    | '/shared/$code'
     | '/groups/$groupId/activity'
     | '/groups/$groupId/balances'
     | '/groups/$groupId/members'
@@ -164,6 +175,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/groups/$groupId'
     | '/invites/$code'
+    | '/shared/$code'
     | '/groups/$groupId/activity'
     | '/groups/$groupId/balances'
     | '/groups/$groupId/members'
@@ -179,6 +191,7 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRoute
   GroupsGroupIdRouteRoute: typeof GroupsGroupIdRouteRouteWithChildren
   InvitesCodeRoute: typeof InvitesCodeRoute
+  SharedCodeRoute: typeof SharedCodeRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -209,6 +222,13 @@ declare module '@tanstack/react-router' {
       path: '/invites/$code'
       fullPath: '/invites/$code'
       preLoaderRoute: typeof InvitesCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/shared/$code': {
+      id: '/shared/$code'
+      path: '/shared/$code'
+      fullPath: '/shared/$code'
+      preLoaderRoute: typeof SharedCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/groups/$groupId/activity': {
@@ -300,6 +320,7 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRoute,
   GroupsGroupIdRouteRoute: GroupsGroupIdRouteRouteWithChildren,
   InvitesCodeRoute: InvitesCodeRoute,
+  SharedCodeRoute: SharedCodeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

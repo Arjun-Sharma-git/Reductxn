@@ -15,14 +15,22 @@ import java.util.Objects;
  * zero. There is no {@code groupId} here even though the store knows it: the schema this answers has no such field, and
  * a caller who created the code already knows which group it is for.
  *
+ * <p><strong>{@code grants} arrived with the share link (ADR 0055), and it is here because the contract's `Invite`
+ * schema declares it required.</strong> The operation that made the code knows what it made, and a client showing a code
+ * has to say what it is for - "whoever holds this can join" and "whoever holds this can look" are different sentences,
+ * and before this field the only way to tell them apart was to know which operation had been called.
+ *
  * @param code      the code itself, to be read out loud or copied
- * @param expiresAt when it stops joining anybody
- * @param maxUses   how many times it may be spent, or null for no limit
+ * @param grants    what holding it entitles somebody to
+ * @param expiresAt when it stops working
+ * @param maxUses   how many times it may be spent, or null for no limit. Never consulted for a {@code READ} code:
+ *                  reading through a share link spends nothing, because a limit is about how many people a group lets in
  */
-public record CreatedInvite(String code, Instant expiresAt, Integer maxUses) {
+public record CreatedInvite(String code, InvitationGrant grants, Instant expiresAt, Integer maxUses) {
 
     public CreatedInvite {
         Objects.requireNonNull(code, "code");
+        Objects.requireNonNull(grants, "grants");
         Objects.requireNonNull(expiresAt, "expiresAt");
     }
 }

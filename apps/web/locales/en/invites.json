@@ -1,6 +1,11 @@
 {
   "title": "Join this group",
   "lede": "Somebody sent you a code that lets you join their group. This page says which group it is for, and then asks for the name the group will know you by.",
+  "share": {
+    "title": "This code is a link to look through",
+    "description": "It does not join anybody to a group. Whoever holds it can see what the group owes whom - the same positions a member sees, with the names the group recorded - and nothing else. Nothing on that page can change anything.",
+    "open": "Open it"
+  },
   "preview": {
     "title": "What this code is for",
     "withName": "You are joining {group}.",

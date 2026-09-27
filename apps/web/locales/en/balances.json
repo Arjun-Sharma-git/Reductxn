@@ -11,5 +11,13 @@
     "direction": "Direction",
     "net": "Net",
     "unnamedNote": "A row shown by identifier is either the currency clearing account - the group's own requirement when a commitment crossed currencies, which the response cannot yet label - or a member the group's member list does not name. The identifier is shown rather than a guess."
+  },
+  "shared": {
+    "title": "What this group owes",
+    "lede": "This is a link somebody in the group shared with you. It shows the group's positions - what each member owes or is owed right now - and nothing else: no commitments' memos, no history, and nothing that can change anything.",
+    "description": "{count} members. One row per member per currency, never summed: adding rupees to yen is not addition.",
+    "stamp": "Computed at {generated}, and this link works until {expires}.",
+    "empty": "Nothing is outstanding right now, so there is nothing to show.",
+    "caption": "What each member owes or is owed, by currency"
   }
 }

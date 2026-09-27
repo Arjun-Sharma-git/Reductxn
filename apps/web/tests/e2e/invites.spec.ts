@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { INVITE, ME, signIn, stubIdentityApi, stubInvitesApi, stubMembersApi } from './stubs';
+import { INVITE, ME, signIn, stubIdentityApi, stubInvitesApi, stubMembersApi, stubSharesApi } from './stubs';
 
 /**
  * The invite flow in a real browser: making a code, and spending one.
@@ -76,6 +76,20 @@ test('accepting a code joins the group as the account that is signed in', async 
   // member carries no group. The group id comes from the preview.
   await page.getByRole('link', { name: 'Go to the group' }).click();
   await expect(page).toHaveURL(new RegExp(`/groups/${GROUP}/netting$`));
+});
+
+test('a code that grants reading says so rather than offering a form', async ({ page }) => {
+  // The other kind of code (ADR 0055): the preview says it grants reading, so this screen offers the link to what it
+  // shows rather than a name field. Offering the form would collect a name for an operation that refuses it.
+  await stubInvitesApi(page, { grants: 'read' });
+  await stubSharesApi(page);
+
+  await page.goto(`/invites/${CODE}`);
+
+  await expect(page.getByText('This code is a link to look through')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Join the group' })).toBeHidden();
+  // The link goes to the screen that shows what the code is for, and it keeps the code the person was sent.
+  await expect(page.getByRole('link', { name: 'Open it' })).toHaveAttribute('href', `/shared/${CODE}`);
 });
 
 test('a code for a group that has no name yet still says which group it is', async ({ page }) => {

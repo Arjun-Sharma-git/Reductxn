@@ -2,6 +2,7 @@ package io.reductxn.api.port.out;
 
 import io.reductxn.api.port.in.CreatedInvite;
 import io.reductxn.api.port.in.Invitation;
+import io.reductxn.api.port.in.InvitationGrant;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -36,10 +37,12 @@ public interface Invitations {
     /**
      * Records an invitation and answers with the code it can be spent by.
      *
-     * <p>The window's two bounds and the limit are the caller's, because they are the caller's policy. The code is not:
+     * <p>The window's two bounds and the limit are the caller's, because they are the caller's policy. {@code grants} is
+     * too, and since ADR 0055 it is a parameter rather than a constant: the store writes what it is told, and which
+     * operation tells it which word is the boundary's business rather than this layer's. The code is not the caller's:
      * see the class comment.
      */
-    CreatedInvite record(UUID groupId, Instant createdAt, Instant expiresAt, Integer maxUses);
+    CreatedInvite record(UUID groupId, InvitationGrant grants, Instant createdAt, Instant expiresAt, Integer maxUses);
 
     /** The invitation with this code, or empty when no invitation has it. */
     Optional<Invitation> findByCode(String code);
@@ -69,19 +72,26 @@ public interface Invitations {
     boolean spend(String code, Instant now);
 
     /**
-     * An invitation and the group it joins, as the read that decides whether it still works needs both.
+     * An invitation and the group it joins or shows, as the read that decides whether it still works needs both.
      *
      * <p>It is a store record rather than the answer, and the difference is the two fields the answer does not carry:
      * {@code uses} and {@code groupId}. The use case needs {@code uses} to choose between "expired" and "exhausted" -
      * two codes under one status, so a reader is told which ran out (ADR 0041) - and it needs the group's id because the
      * preview answers with it: a person who has just joined has no other way to reach the group they joined.
      *
+     * <p><strong>{@code grants} is why one statement serves two reads</strong> (ADR 0055): the preview answers with it so
+     * somebody knows whether accepting is possible, and the shared view refuses a code that does not grant reading. Both
+     * ask this method and read that field, which is one query for the code, its terms and its group's label.
+     *
+     * @param grants what holding the code entitles somebody to
      * @param groupName the group's name, or null for a group that exists only as rows (ADR 0043)
      * @param memberCount how many memberships the group has, counted in the same statement
      */
-    record Preview(UUID groupId, String groupName, int memberCount, Instant expiresAt, Integer maxUses, int uses) {
+    record Preview(InvitationGrant grants, UUID groupId, String groupName, int memberCount, Instant expiresAt,
+            Integer maxUses, int uses) {
 
         public Preview {
+            Objects.requireNonNull(grants, "grants");
             Objects.requireNonNull(groupId, "groupId");
             Objects.requireNonNull(expiresAt, "expiresAt");
         }

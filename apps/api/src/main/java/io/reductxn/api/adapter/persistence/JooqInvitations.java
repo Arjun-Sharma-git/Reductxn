@@ -2,6 +2,7 @@ package io.reductxn.api.adapter.persistence;
 
 import io.reductxn.api.port.in.CreatedInvite;
 import io.reductxn.api.port.in.Invitation;
+import io.reductxn.api.port.in.InvitationGrant;
 import io.reductxn.api.port.out.Invitations;
 
 import org.jooq.DSLContext;
@@ -45,6 +46,7 @@ public class JooqInvitations implements Invitations {
 
     private static final Field<String> CODE = DSL.field("code", String.class);
     private static final Field<UUID> GROUP_ID = DSL.field("group_id", UUID.class);
+    private static final Field<String> GRANTS = DSL.field("grants", String.class);
     private static final Field<OffsetDateTime> CREATED_AT = DSL.field("created_at", OffsetDateTime.class);
     private static final Field<OffsetDateTime> EXPIRES_AT = DSL.field("expires_at", OffsetDateTime.class);
     private static final Field<Integer> MAX_USES = DSL.field("max_uses", Integer.class);
@@ -100,19 +102,21 @@ public class JooqInvitations implements Invitations {
     }
 
     @Override
-    public CreatedInvite record(UUID groupId, Instant createdAt, Instant expiresAt, Integer maxUses) {
+    public CreatedInvite record(UUID groupId, InvitationGrant grants, Instant createdAt, Instant expiresAt,
+            Integer maxUses) {
+
         for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
             String code = code();
 
             int inserted = dsl.insertInto(INVITATIONS)
-                    .columns(CODE, GROUP_ID, CREATED_AT, EXPIRES_AT, MAX_USES)
-                    .values(code, groupId, at(createdAt), at(expiresAt), maxUses)
+                    .columns(CODE, GROUP_ID, GRANTS, CREATED_AT, EXPIRES_AT, MAX_USES)
+                    .values(code, groupId, grants.wireName(), at(createdAt), at(expiresAt), maxUses)
                     .onConflict(CODE)
                     .doNothing()
                     .execute();
 
             if (inserted > 0) {
-                return new CreatedInvite(code, expiresAt, maxUses);
+                return new CreatedInvite(code, grants, expiresAt, maxUses);
             }
         }
 
@@ -124,7 +128,7 @@ public class JooqInvitations implements Invitations {
 
     @Override
     public Optional<Invitation> findByCode(String code) {
-        Record row = dsl.select(GROUP_ID, EXPIRES_AT, MAX_USES, USES)
+        Record row = dsl.select(GROUP_ID, GRANTS, EXPIRES_AT, MAX_USES, USES)
                 .from(INVITATIONS)
                 .where(CODE.eq(canonical(code)))
                 .fetchOne();
@@ -134,6 +138,7 @@ public class JooqInvitations implements Invitations {
         }
 
         return Optional.of(new Invitation(
+                grantOf(row.get(GRANTS)),
                 row.get(GROUP_ID),
                 row.get(EXPIRES_AT).toInstant(),
                 row.get(MAX_USES),
@@ -142,7 +147,7 @@ public class JooqInvitations implements Invitations {
 
     @Override
     public Optional<Preview> previewOf(String code) {
-        Record row = dsl.select(GROUP_ID, GROUP_NAME, MEMBER_COUNT, EXPIRES_AT, MAX_USES, USES)
+        Record row = dsl.select(GROUP_ID, GRANTS, GROUP_NAME, MEMBER_COUNT, EXPIRES_AT, MAX_USES, USES)
                 .from(INVITATIONS)
                 // A left join, because a group that exists only as rows has no `groups` row to find - and its
                 // invitations are real ones (ADR 0043). The name is then null and the count is still right.
@@ -155,12 +160,30 @@ public class JooqInvitations implements Invitations {
         }
 
         return Optional.of(new Preview(
+                grantOf(row.get(GRANTS)),
                 row.get(GROUP_ID),
                 row.get(GROUP_NAME),
                 row.get(MEMBER_COUNT),
                 row.get(EXPIRES_AT).toInstant(),
                 row.get(MAX_USES),
                 row.get(USES)));
+    }
+
+    /**
+     * The grant a row holds, as the one place the word becomes an enum.
+     *
+     * <p><strong>It fails loudly rather than defaulting</strong>, and the reason is the difference between this column
+     * and the wire it feeds: the table's CHECK constraint names the two words, so a third can only arrive with a
+     * migration - and a row this build cannot interpret is a row written by something this build does not know about.
+     * Reading it as `MEMBERSHIP` would hand somebody a way into a group because their code's purpose was unfamiliar,
+     * which is the one mistake a default here could make.
+     */
+    private static InvitationGrant grantOf(String word) {
+        return InvitationGrant.fromWire(word).orElseThrow(() -> new IllegalStateException(
+                "the invitations row holds the grant '" + word + "', which this build does not know. The column's CHECK "
+                        + "constraint names " + InvitationGrant.vocabulary() + ", so this row was written by a newer "
+                        + "deployment than this one - and guessing which of them it means is not a decision to make "
+                        + "while somebody is trying to use a code (ADR 0055)"));
     }
 
     @Override

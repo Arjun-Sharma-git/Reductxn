@@ -646,6 +646,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/groups/{groupId}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                groupId: components["parameters"]["GroupId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a link that lets somebody look, without joining
+         * @description A code that lets whoever holds it see what the group owes whom, and does not join them to it.
+         *
+         *     **Why this is a separate operation rather than a body on the invitation.** `POST /groups/{groupId}/invites` takes
+         *     no request body on purpose: a window a caller can choose is a window nobody can reproduce from the code. The
+         *     choice here is not a parameter of that operation - it is a different audience. An invitation is a link a group
+         *     sends to somebody it is about to have as a member; a share link is what a group gives an accountant, a landlord
+         *     or a mediator, who will never be one - and making somebody a member in order to show them a number is how a
+         *     group ends up with a member it did not want.
+         *
+         *     **The code is the same instrument.** Same alphabet, same eight characters, same seven days, same absence of a use
+         *     limit, and the same store: what differs is what the code grants, and `Invite.grants` says which. That is
+         *     deliberate rather than convenient - a second kind of credential would need a second set of rules about expiry,
+         *     spending and revocation, and this build has exactly one code that is unguessable, expiring and revocable by not
+         *     making another one.
+         *
+         *     **What it shows is the money, not the ledger.** The link answers the group's positions with the names the group
+         *     recorded for its members. What it does not answer: memos, the activity feed, the invitations the group has made,
+         *     or anything a member can change. A share link is a read, and no code in this build grants a write.
+         *
+         *     **A member of the group may create one** - ADR 0048's rule, unchanged: a link is something a group hands out, and
+         *     the question of who may hand one out is recorded separately (ADR 0056).
+         *
+         *     **Nothing here is revocable, and that is the shape this build has.** A code stops working when its window closes;
+         *     stopping one earlier needs an operation that does not exist yet, which the plan records as a gap. A share link's
+         *     window is therefore the invitation's seven days: a longer window is a decision with no way back.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    groupId: components["parameters"]["GroupId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Share link created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Invite"];
+                    };
+                };
+                400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/invites/{code}/accept": {
         parameters: {
             query?: never;
@@ -683,6 +753,12 @@ export interface paths {
          *     they are different questions: a mistyped code is a code for nothing, while an expired or exhausted invitation
          *     existed and is finished. The `code` field of the problem body says which of the two it was, so a client can say
          *     "that one has been used" rather than "that code is wrong".
+         *
+         *     **A share link cannot accept anybody, and it says so rather than pretending not to exist** (ADR 0055). A code
+         *     whose `grants` are `read` is refused with `422 api.invite_not_a_membership`: the code is real and the refusal
+         *     names the true condition, because the caller already holds the secret - the `404`-for-two-conditions discipline
+         *     elsewhere is about ids that can be guessed, and a code cannot be. A client that read `InvitePreview.grants`
+         *     never has to ask this question; an API client that does gets an answer it can render.
          */
         post: {
             parameters: {
@@ -722,6 +798,7 @@ export interface paths {
                 401: components["responses"]["Problem"];
                 404: components["responses"]["Problem"];
                 410: components["responses"]["Problem"];
+                422: components["responses"]["Problem"];
             };
         };
         delete?: never;
@@ -738,10 +815,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * What an invite code is for, before accepting it
-         * @description The group a code joins somebody to, and whether the code still works.
+         * What a code is for, before accepting it
+         * @description The group a code is for, what holding it entitles somebody to, and whether it still works.
          *
-         *     **This is the read that makes the code the thing a group shares** (ADR 0054). Until it existed, a code could
+         *     **This is the read that makes the code the thing a group shares** (ADR 0054), and since ADR 0055 it answers both
+         *     kinds of code. Until it existed, a code could
          *     only be *spent*: the acceptance answered with the membership it created, so the person following a link had to
          *     type their name into an operation that named no group, and a group with something to share had nothing to send
          *     but an id. A code was already the only credential this product hands out - eight characters from a
@@ -749,8 +827,8 @@ export interface paths {
          *     mechanism but a *screen's worth of facts*: which group, how many people are in it, and whether the invitation
          *     has run out.
          *
-         *     **No session, and that is the operation rather than an omission.** This is the one read in the document with
-         *     `security: []`, and the reason is who asks it: a person who followed a link and has not signed in yet. The
+         *     **No session, and that is the operation rather than an omission.** This is one of the two reads in the document
+         *     with `security: []`, and the reason is who asks it: a person who followed a link and has not signed in yet. The
          *     code *is* the capability - it is unguessable, it expires, and the group chose to hand it out - so a preview
          *     readable by whoever holds the code is exactly as private as the link itself. What that buys is the flow the
          *     acceptance cannot provide: somebody can see what they are being asked to join, and decide, before creating a
@@ -785,7 +863,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description The invitation, and the group it joins somebody to */
+                /** @description The code, what it entitles somebody to, and the group it is for */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -797,6 +875,72 @@ export interface paths {
                 400: components["responses"]["Problem"];
                 404: components["responses"]["Problem"];
                 410: components["responses"]["Problem"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What a share link shows - the group's positions, to whoever holds it
+         * @description The group a share link is for, and what it owes whom right now, with the names the group recorded.
+         *
+         *     **No session, and the code is the whole credential.** Like `GET /invites/{code}`, this is `security: []`: it is
+         *     asked by somebody who was handed a link and has no account here - an accountant doing a quarter's review does not
+         *     sign up to read it. The code is unguessable (forty bits), it expires, and a member hands it out, so "whoever
+         *     holds the code may read" is a decision a group makes per link rather than a policy about ids: no group id appears
+         *     in this URL, and a link for one group says nothing about another.
+         *
+         *     **The refusal names the true condition, because the caller already holds the secret.** A code that was never made
+         *     is `404`, one whose window has closed is `410`, and one that *joins* people rather than showing them anything is
+         *     `422 api.invite_not_a_share` (`api.invite_not_a_membership` is the same condition from the other end). The
+         *     difference from the `no_such_group`/`no_such_run` sameness everywhere else is worth stating: those ids are
+         *     guessable and enumerable, so telling two conditions apart would let somebody learn which ids are real. A code is
+         *     neither guessable nor enumerable - the person asking this question *holds* it - so a refusal that tells them what
+         *     their own code is for is more useful than one that pretends not to know it exists.
+         *
+         *     **What it does not show.** Not the commitments' memos, not the activity feed, not the group's members as a list,
+         *     not the invitations the group has made, and nothing that could change anything. The positions carry each member's
+         *     id and the name the group recorded for it, which is what a reader needs to say who owes what; an id the group's
+         *     membership does not name - the currency clearing account, or a member who has left - is answered with no name
+         *     rather than with a guess.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The share link's code, as it was created. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The group, and what it owes whom right now */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SharedView"];
+                    };
+                };
+                400: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
+                410: components["responses"]["Problem"];
+                422: components["responses"]["Problem"];
             };
         };
         put?: never;
@@ -2454,15 +2598,28 @@ export interface components {
             role: "admin" | "member";
         };
         /**
-         * @description A code that lets somebody join a group: the code itself, when it stops working, and - when the deployment sets
-         *     one - how many times it may be spent.
+         * @description A code a group hands out: the code itself, what holding it entitles somebody to, when it stops working, and -
+         *     when the deployment sets one - how many times it may be spent.
          *
-         *     `maxUses` is absent when there is no limit, which is what this deployment's creation operation produces: a code
+         *     **`grants` is what makes one instrument serve two audiences.** A code that grants `membership` joins whoever
+         *     spends it to the group; a code that grants `read` shows them what the group owes whom and joins nobody. Both are
+         *     created by a member, both are eight characters from a thirty-two-symbol alphabet, both expire, and both live in
+         *     the same store, because the rules about a code are the same rules - only the entitlement differs (ADR 0055).
+         *
+         *     `maxUses` is absent when there is no limit, which is what this deployment's creation operations produce: a code
          *     is stopped by its window rather than by a count. A client must read an absent `maxUses` as "no limit" rather
-         *     than as zero, which is a value the table refuses precisely so the two cannot be confused.
+         *     than as zero, which is a value the table refuses precisely so the two cannot be confused. A `read` code is never
+         *     spent at all: reading through a share link does not count against a limit, because a limit is about how many
+         *     people a group lets in.
          */
         Invite: {
             code: string;
+            /**
+             * @description What the code entitles somebody to. `membership` is an invitation - spending it writes a member;
+             *     `read` is a share link - holding it reads the group's positions and nothing more.
+             * @enum {string}
+             */
+            grants: "membership" | "read";
             /** Format: date-time */
             expiresAt: string;
             maxUses?: number;
@@ -2477,6 +2634,13 @@ export interface components {
          */
         InvitePreview: {
             code: string;
+            /**
+             * @description What holding the code entitles somebody to, so a client shows the right thing: a `membership` code is one
+             *     they can accept, and a `read` code is one that shows them the group's positions. Asking this before offering
+             *     a form is the whole point of the read (ADR 0054, 0055).
+             * @enum {string}
+             */
+            grants: "membership" | "read";
             /** Format: date-time */
             expiresAt: string;
             /**
@@ -2498,6 +2662,61 @@ export interface components {
                 /** @description How many members the group has now, including anybody who joined with this same code. */
                 memberCount: number;
             };
+        };
+        /**
+         * @description What a share link shows: which group it is for, what that group owes whom right now, and when the link stops
+         *     working.
+         *
+         *     It carries no memos, no activity and no list of invitations, because a group that hands out a link to look at
+         *     what it owes has not agreed to open its ledger. The positions it does carry name each member the way the group's
+         *     own members name them, and nothing in this schema can change anything: a share link is a read (ADR 0055).
+         */
+        SharedView: {
+            code: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /**
+             * Format: date-time
+             * @description The instant the positions were computed at. A balance is "now", and this is the one read where the reader and
+             *     the server may be in different rooms - the link can be opened at any hour, days after it was made - so the
+             *     answer says which "now" it was rather than leaving the reader to assume it is theirs.
+             */
+            generatedAt: string;
+            /** @description The group the link is for, as much of it as somebody who is not a member is entitled to know. */
+            group: {
+                /** Format: uuid */
+                id: string;
+                /**
+                 * @description The group's name, or absent for a group that exists only as rows: `group_members` and `invitations`
+                 *     write a bare uuid, and a group with members and no `groups` row of its own is a state this build
+                 *     contains (ADR 0043).
+                 */
+                name?: string;
+                memberCount: number;
+            };
+            /**
+             * @description One entry per member per currency, as `GET /groups/{groupId}/balances` answers them - the same computation,
+             *     read with a code instead of a membership. A member in two currencies appears twice, because ADR 0012
+             *     refuses a cross-currency total, and this list is never summed for the same reason.
+             */
+            positions: components["schemas"]["SharedPosition"][];
+        };
+        /**
+         * @description One member's position as a share link serves it: the balances read's entry plus the name the group recorded.
+         *
+         *     The name is here rather than left to a second read, because the person reading a share link cannot call
+         *     `GET /groups/{groupId}/members` - that read is the group's. An id the group's membership does not name carries no
+         *     `displayName`, which is the same absence the balances screen shows as an identifier: the currency clearing
+         *     account is not a person, and a member who has left is not one the group names any more.
+         */
+        SharedPosition: {
+            /** Format: uuid */
+            memberId: string;
+            /** @description What the group calls them, or absent when the group's membership does not name this id. */
+            displayName?: string;
+            /** @enum {string} */
+            direction: "pay" | "receive" | "flat";
+            net: components["schemas"]["Money"];
         };
         /**
          * @description What somebody joining supplies, which is now only what the group will call them.
