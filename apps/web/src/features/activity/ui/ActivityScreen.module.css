@@ -1,0 +1,31 @@
+/* The feed: one row per thing that happened, with when it happened beside what it was. */
+
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rn-space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  padding-block: var(--rn-space-2);
+  border-block-end: 1px solid var(--rn-border);
+}
+
+.at {
+  color: var(--rn-text-muted);
+  font-size: var(--rn-text-sm);
+  /* The instant is read before the sentence beside it in either direction, so the order is the reading order's. */
+  white-space: nowrap;
+}
+
+.what {
+  flex: 1 1 20ch;
+}

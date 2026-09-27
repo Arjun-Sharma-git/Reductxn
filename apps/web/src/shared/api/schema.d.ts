@@ -793,11 +793,44 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** Group activity feed */
+        /**
+         * Group activity feed
+         * @description What has happened in this group, newest first.
+         *
+         *     **This operation was the least specified thing in this document, and this is where its shape is decided.** It had a
+         *     summary, a `cursor`, a `limit`, and a `200` whose entire description was "Activity page" - no schema, no failure, no
+         *     description. It is specified here rather than left as a promise, because a client that has to guess a shape is a
+         *     client that will guess differently from the next one (ADR 0044).
+         *
+         *     **`cursor` is deleted and `limit` stays.** The document promised a cursor and no limit, which is a promise to answer
+         *     with every event a group has ever produced; the obligations read already made this decision for the same reason - a
+         *     page is what a screen can render, the clamp is the one the runs, cycles and obligations reads apply, and a cursor
+         *     arrives with the pagination this build still owes.
+         *
+         *     **There is no activity table, and there is not going to be one.** The feed is derived from the rows that already
+         *     record an act: a membership (somebody joined), a settlement decision (somebody answered a run), and an invitation (a
+         *     code was created). An `activity` table would be a second copy of facts those rows state, and the first write that
+         *     updated one and not the other would make the two disagree - with the log being the copy nobody can check.
+         *
+         *     **Three kinds, and what is not here is a decision.** Obligations, cycles and runs are not in this feed: each has its
+         *     own read and its own screen, and a feed that repeated them would be a second view of one set of rows that could
+         *     disagree with the first about ordering, filters and status. What a member wants here is the *social* history of the
+         *     group - who joined, who answered, what was asked.
+         *
+         *     **Two things this feed cannot say, and it does not pretend to.** Who created an invitation: `invitations` records
+         *     the code and its window and has no creator column, because the create operation is unauthenticated in this build and
+         *     there is nobody to name (ADR 0041). And who accepted one: acceptance increments a use count and writes a membership,
+         *     so the feed reports the membership that resulted and does not report the acceptance. Both are the rows' own limits
+         *     rather than this read's choices, and a client that showed "Amit invited Rehana" would be inventing a fact.
+         *
+         *     **Membership is the condition** - a group the caller is not in is a `404` with the same code and the same reasoning
+         *     as the group read (ADR 0043): telling "no such group" and "not yours" apart would let anybody holding a guess learn
+         *     which ids are real.
+         */
         get: {
             parameters: {
                 query?: {
-                    cursor?: string;
+                    /** @description How many events to answer with. Clamped to 200, the bound every paged read here applies. */
                     limit?: number;
                 };
                 header?: never;
@@ -808,13 +841,18 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Activity page */
+                /** @description Activity, newest first */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ActivityEvent"][];
+                    };
                 };
+                400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
             };
         };
         put?: never;
@@ -2017,6 +2055,50 @@ export interface components {
             displayName: string;
             /** @enum {string} */
             kycTier: "none" | "basic" | "full";
+        };
+        /**
+         * @description One thing that happened in a group, derived from the row that recorded it rather than from a log.
+         *
+         *     **Which fields a kind carries is stated rather than discovered.** `at` is always there, because it is what the order
+         *     is built on; `memberId` and `displayName` are there whenever the row names a person; and exactly one of `role`,
+         *     `decision` or `uses` is there, for the kind that has one. There is no `detail` string, deliberately: a server that
+         *     composed prose would be rendering one language at a client that may be reading another (RULE B20, ADR 0014).
+         *
+         *     - `member_joined`: `memberId`, `displayName`, `role` - the membership the group recorded.
+         *     - `decision_recorded`: `memberId`, `decision` - an answer to a settlement run. `displayName` is absent, because
+         *       `settlement_decisions` records who answered and not what the group calls them.
+         *     - `invitation_created`: `uses` and `maxUses` - a code that exists, and how many times it has been spent. No member,
+         *       because there is nobody the row names (ADR 0044).
+         */
+        ActivityEvent: {
+            /** @enum {string} */
+            kind: "member_joined" | "decision_recorded" | "invitation_created";
+            /**
+             * Format: date-time
+             * @description When the thing happened, from the row's own column - never the read's clock.
+             */
+            at: string;
+            /**
+             * Format: uuid
+             * @description Who did it, when the row names somebody.
+             */
+            memberId?: string;
+            /** @description What the group calls them, when the row records it. */
+            displayName?: string;
+            /**
+             * @description The role the membership carries. Recorded and not enforced, like every role in this build.
+             * @enum {string}
+             */
+            role?: "admin" | "member";
+            /**
+             * @description The answer a member gave a settlement run.
+             * @enum {string}
+             */
+            decision?: "approve" | "reject";
+            /** @description How many times an invitation code has been spent. */
+            uses?: number;
+            /** @description How many times it may be spent. Absent means unbounded, which is the invitations table's own rule. */
+            maxUses?: number;
         };
         /**
          * @description A group: what it is called, what it settles in, and how many members it has.

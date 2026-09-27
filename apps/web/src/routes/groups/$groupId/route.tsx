@@ -87,6 +87,15 @@ function GroupLayout() {
         </Link>
         <Link
           className={styles.link}
+          to="/groups/$groupId/activity"
+          params={{ groupId }}
+          search={carryLocale}
+          activeProps={{ 'aria-current': 'page', className: styles.current }}
+        >
+          {t('common.groupNav.activity')}
+        </Link>
+        <Link
+          className={styles.link}
           to="/groups/$groupId/netting"
           params={{ groupId }}
           search={carryLocale}

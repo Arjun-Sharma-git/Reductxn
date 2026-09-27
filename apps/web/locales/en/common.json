@@ -18,6 +18,7 @@
   "groupNav": {
     "label": "This group",
     "members": "Members",
+    "activity": "Activity",
     "obligations": "Commitments",
     "balances": "Balances",
     "netting": "Netting preview",

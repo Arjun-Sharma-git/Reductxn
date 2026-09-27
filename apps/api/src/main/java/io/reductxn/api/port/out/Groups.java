@@ -35,6 +35,19 @@ public interface Groups {
     /** One group, but only if this person is a member of it. */
     Optional<StoredGroup> forMember(UUID groupId, UUID userId);
 
+    /**
+     * Whether this person is a member of this group id, and nothing else.
+     *
+     * <p><strong>It exists because {@link #forMember} requires a group <em>row</em>, and this build is full of groups that
+     * have none.</strong> A read that only needs to know whether the caller belongs - the activity feed, which narrows to
+     * the memberships and reads no group column at all - would otherwise have answered `404` for a group whose commitments
+     * and members are perfectly readable, which is the one group read that would disagree with the others (ADR 0043, 0044).
+     * The members list, the obligations list and the cycles list all serve a bare uuid; a feed that refused to would be the
+     * inconsistency a member notices first, because the screen that lists them works and the one that shows what they did
+     * does not.
+     */
+    boolean isMember(UUID groupId, UUID userId);
+
     /** A group to write. */
     record NewGroupRow(UUID id, String name, Currency currency, Currency reportingCurrency, String settlementTimezone,
             int maxMembers, UUID createdBy, String idempotencyKey, Instant createdAt) {

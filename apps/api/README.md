@@ -194,6 +194,15 @@ settlement zone is nullable rather than defaulted, because a default would decid
 household somewhere else; `maxMembers` is recorded and nothing consults it yet; and `nettingPolicy` is not served at all,
 because the sentence it would carry summarises a configuration this build does not have.
 
+`GET /v1/groups/{groupId}/activity` is the group's history, derived rather than logged (ADR 0044): the memberships, the
+settlement decisions and the invitations **are** the events, and there is no `activity_events` table to disagree with them.
+Three kinds and no `detail` string - a server cannot see a locale, so the client composes the sentence from `memberId`,
+`displayName`, `role`, `decision` and `uses`. The `cursor` parameter is **deleted** and `limit` is clamped, the same decision
+the obligations read made. A decision reaches its group through `settlement_runs.group_id`, which is why the read crosses
+into the settlement worker's tables and writes nothing there. Membership is the condition, asked of `group_members` alone -
+the first version asked it through the group read, which silently required a `groups` row and would have answered `404` for
+every group with commitments and no row.
+
 `POST /v1/groups/{groupId}/invites` and `POST /v1/invites/{code}/accept` are the last two operations of section 6's
 route tree, and serving them closes the route tree's screens (ADR 0041). The slice also created the table, and the shape
 of the data followed from the wire: acceptance is addressed by the code alone, so **the code is the primary key** and is

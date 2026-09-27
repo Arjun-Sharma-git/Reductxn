@@ -957,3 +957,47 @@ export async function stubGroupsApi(
 
   return { created };
 }
+
+// --- Activity ------------------------------------------------------------------------------------------
+
+export type ActivityRow = {
+  readonly kind: 'member_joined' | 'decision_recorded' | 'invitation_created';
+  readonly at: string;
+  readonly memberId?: string;
+  readonly displayName?: string;
+  readonly role?: string;
+  readonly decision?: string;
+  readonly uses?: number;
+  readonly maxUses?: number;
+};
+
+/**
+ * The group's history.
+ *
+ * The stub answers `404` with the group read's own code when the caller is not a member, because that is what the server
+ * does and what the screen has to render: one code for "no such group" and "not a group you are in" (ADR 0043, 0044). A stub
+ * that answered `200 []` would make the refusal path untestable and would hide the reason the screen shows a message.
+ */
+export async function stubActivityApi(
+  page: Page,
+  events: readonly ActivityRow[],
+  options: { readonly forbidden?: boolean } = {},
+): Promise<void> {
+  await page.route('**/v1/groups/*/activity**', (route) => {
+    if (options.forbidden === true) {
+      return route.fulfill({
+        status: 404,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'about:blank',
+          title: 'Not Found',
+          status: 404,
+          detail: 'stubbed refusal',
+          code: 'api.no_such_group',
+        }),
+      });
+    }
+
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(events) });
+  });
+}
