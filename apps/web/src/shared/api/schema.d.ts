@@ -1876,31 +1876,90 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Rail status callback (signature-verified, idempotent) */
+        /**
+         * Rail status callback (signature-verified, idempotent)
+         * @description **What a rail tells us asynchronously, and what this deployment does with it.** A callback is recorded, not
+         *     applied: the row it writes is read by the settlement worker's driver, which prefers a delivered answer to a
+         *     poll (ADR 0051) - so a rail that volunteers an answer is not asked to repeat itself, and the transfer's state,
+         *     the run's fate and the ledger entry remain the worker's to decide. Nothing has moved when this answers.
+         *
+         *     **Authentication is a signature rather than a session.** A rail has no member and no token, so this operation
+         *     opts out of the global bearer scheme. What it requires instead is `X-Rail-Signature`: HMAC-SHA256 over the
+         *     *exact bytes* of the body - never a re-serialisation of the parsed fields - keyed with the deployment's
+         *     `reductxn.rails.webhook-secret`, formatted `sha256=<lowercase hex>`. A deployment with no secret configured
+         *     refuses **every** callback with `401`: it cannot tell a callback from anybody else's POST.
+         *
+         *     **Idempotency is the schema's, not a check.** The reference is the row's key, so a redelivery - which every
+         *     rail sends, because a callback is an at-least-once signal - replaces the rail's word about that transfer rather
+         *     than adding a second opinion about it. A rail may therefore retry until it sees this `202`.
+         *
+         *     **A callback naming a reference no transfer was offered under is accepted, and does nothing.** The row is
+         *     inert because nothing ever asks about that reference, and the alternative - this API checking the worker's own
+         *     tables before writing to them - is the duplicated judgement ADR 0020 refuses. What that costs is one row per
+         *     unknown reference; what it buys is that a forged-but-signed callback cannot move money, which is what the
+         *     worker's test asserts.
+         *
+         *     **What a `401` does not say.** A missing signature, a wrong secret and a body altered after signing are one
+         *     code, because a caller's next step is the same in all three cases and because telling them apart would tell
+         *     somebody probing this endpoint which half of their guess was right.
+         */
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header: {
+                    /**
+                     * @description `sha256=<lowercase hex>`, an HMAC-SHA256 of the body's exact bytes under the deployment's webhook secret.
+                     *     Verified before the body is parsed, so a request whose signature does not verify is never read.
+                     */
+                    "X-Rail-Signature": string;
+                };
                 path: {
+                    /**
+                     * @description Which rail is calling back. Recorded with the answer, and quoted in a refusal so a rail can be told which
+                     *     delivery of its own was dropped.
+                     */
                     provider: string;
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RailCallback"];
+                };
+            };
             responses: {
-                /** @description Accepted */
+                /**
+                 * @description Accepted and recorded. The transfer this is about has *not* moved yet - the settlement worker reads this
+                 *     answer on its next pass - so the body is a receipt for what was written.
+                 */
                 202: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["RailCallbackReceipt"];
+                    };
                 };
-                /** @description Invalid signature */
+                /**
+                 * @description The signature verified and the body cannot be used: a missing field, a state outside the four this build
+                 *     acts on, or a body that is not the json below. The problem body names the field.
+                 */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Invalid signature. Nothing about the request is trusted, including the provider in its path. */
                 401: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
                 };
             };
         };
@@ -2415,6 +2474,46 @@ export interface components {
             decision: "approve" | "reject";
             /** Format: date-time */
             recordedAt: string;
+        };
+        /**
+         * @description What a rail sends when it has something to say about a transfer, without being asked.
+         *
+         *     `railRef` is the reference the transfer was offered under (RULE S2) - the rail's idempotency key and, here, the
+         *     identity of the row this writes. `state` is the rail's word, and the four below are the whole vocabulary this
+         *     build acts on: a fifth is refused with `400` rather than stored, because the worker maps a stored word to a
+         *     transfer's state exhaustively and a word it could not map would reach the rows as a question (ADR 0051).
+         *
+         *     `detail` is the rail's own text about why, passed through and never interpreted: it lands in the transfer's
+         *     `rail_detail`, which is where a person reading a run finds the rail's own account. It may be absent, and a
+         *     callback that says only `confirmed` has still said everything it needs to.
+         */
+        RailCallback: {
+            /** @description The reference this deployment offered the transfer under. */
+            railRef: string;
+            /**
+             * @description `accepted` and `pending` both mean the rail holds the instruction and has not confirmed it; `confirmed` is
+             *     money moved; `failed` is the rail saying it will not move.
+             * @enum {string}
+             */
+            state: "accepted" | "pending" | "confirmed" | "failed";
+            /** @description The rail's own words about why. Stored as it arrived, never derived here. */
+            detail?: string;
+        };
+        /**
+         * @description The acknowledgement: what this deployment now holds, which is what the rail just told it plus the instant it
+         *     holds it under. It is not a status - whether the money moved is a question about the transfer, and
+         *     `GET /runs/{runId}` is where it is answered.
+         *
+         *     The state is echoed so a rail can see what was recorded rather than only that something was, and `receivedAt`
+         *     is how it acknowledges a delivery without replaying it.
+         */
+        RailCallbackReceipt: {
+            provider: string;
+            railRef: string;
+            /** @enum {string} */
+            state: "accepted" | "pending" | "confirmed" | "failed";
+            /** Format: date-time */
+            receivedAt: string;
         };
         /**
          * @description A member's request for a run to be offered to a rail, as it was recorded - a receipt rather than a status.
