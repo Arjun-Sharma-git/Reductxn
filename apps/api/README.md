@@ -32,9 +32,13 @@ only credible because the domain logic lives in `libs/*` and cannot be reached a
 doubles left: `JooqOpenObligations` and `JooqTaxRuleCatalog` are the only implementations of their ports, so
 a missing database or an unset `reductxn.tax.jurisdiction` stops the context. That replaced a
 profile-gated design that existed for one reason - keeping an in-memory stub out of a deployment - and the
-mechanism went with the stubs: there is nothing left to keep out. `docker compose -f
-infra/docker/compose.yaml up postgres` and then
-`./gradlew :apps:api:bootRun --args='--reductxn.tax.jurisdiction=IN'` is the local path.
+mechanism went with the stubs: there is nothing left to keep out. The local path is to bring up **both**
+`postgres` and `pgbouncer` (`docker compose -f infra/docker/compose.yaml up -d postgres pgbouncer` - the default
+datasource URL dials the pooler on 6432) and then
+`./gradlew :apps:api:bootRun --args='--reductxn.tax.jurisdiction=IN'`. **[`QUICKSTART.md`](../../QUICKSTART.md)
+is the whole path, including the two deployables' migration interaction**, which is worth reading before running
+this on a machine that has never had the schema: with only the API up, every obligation-backed read answers `500`
+because the tables its read joins belong to the worker.
 
 **No business rules live here.** Which currencies a cycle spans, how each partition nets, what the tax is
 and where the FX requirement lands are answered by `libs/*`. A rule that appears in `application` is a
