@@ -12,6 +12,7 @@
   "api.too_many_otp_requests": "That number has asked for as many codes as this deployment sends in a few minutes. Waiting is the answer - the last code is still good for a while.",
   "api.no_such_obligation": "That commitment is not one this group can see. It may have been recorded in another group, or the link may be wrong.",
   "api.no_such_run": "That settlement run does not exist.",
+  "api.run_not_ready": "This run cannot move along just now - it has either already been submitted, already finished, or not yet got the approvals it needs. Asking again once the run says it is ready is the whole of what to do about it.",
   "api.obligation_amount_not_positive": "An amount has to be more than zero.",
   "api.obligation_memo_too_long": "That note is too long. Keep it under 280 characters.",
   "api.obligation_not_open": "That commitment is in a settlement plan or has already been settled, so it cannot be voided. A cycle that releases it is what changes that.",

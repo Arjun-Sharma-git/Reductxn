@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -216,6 +217,82 @@ class DriveRunsTest extends WorkerDatabaseTest {
                 .hasSize(1);
         assertThat(theNextPass.outcomes().get(0).runId())
                 .isNotEqualTo(oneAtATime.outcomes().get(0).runId());
+    }
+
+    /**
+     * A member's request makes a run due inside the window, and the attempt spends it (ADR 0050).
+     *
+     * <p>The API is what writes these two columns, and this test writes them the same way - with SQL, because the
+     * mechanism under test is the *read* side: the due query's third disjunct and the clear in {@code markDriven}.
+     * Writing them through a use case that does not exist in this module would be asserting the writer rather than
+     * the reader, which is the half this worker owns.
+     */
+    @Test
+    void aRunAMemberAskedForIsDrivenWithoutWaitingOutTheWindow() {
+        crossCurrencyObligation(ALICE, BORIS, 12_500L, 224L);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+
+        // One pass, refused by a gate - the run is waiting on the group - so the window has now started.
+        ok(driveRuns.driveDue(aPassNow(), 10));
+
+        approveEveryone(run);
+        fundEveryRequirement(run);
+
+        // Nothing new is recorded, so the window holds: this is the backoff doing its job, and it is the state a
+        // member's request has to beat.
+        assertThat(ok(driveRuns.driveDue(aPassNow(), 10)).driven())
+                .as("asked for nothing, and recently attempted")
+                .isZero();
+
+        requestedToExecute(run.run().id(), ALICE);
+
+        DrivenRuns asked = ok(driveRuns.driveDue(aPassNow(), 10));
+
+        assertThat(asked.driven()).isEqualTo(1);
+        assertThat(storedRunStatus(run.run().id())).as("the request is what moved the money").isEqualTo("done");
+    }
+
+    /**
+     * The request is a flag, not a standing instruction: it is spent by the attempt that honours it.
+     *
+     * <p>The run is left waiting on its group deliberately - nothing is approved - because a run that settled is
+     * terminal and a request against it would be honoured by nothing. Refusing is still an *attempt*: the driver marks
+     * it, which is what spends the request, so the third pass has nothing left to act on.
+     */
+    @Test
+    void theAttemptSpendsTheRequestSoTheWindowStartsAgain() {
+        obligation(ALICE, BORIS, 10_000L, "INR", 2);
+        ComputedRun run = computed(new RunRequest(GROUP, AS_OF));
+
+        assertThat(ok(driveRuns.driveDue(aPassNow(), 10)).refused()).isEqualTo(1);
+
+        requestedToExecute(run.run().id(), ALICE);
+
+        // The refusal *is* the attempt - the driver marked it - so the request is spent by it and the third pass has
+        // nothing left to act on. `refused()` rather than `driven()`: this run never progresses, because nobody has
+        // approved it, and what the two passes after the request are being counted for is that they were attempted.
+        assertThat(ok(driveRuns.driveDue(aPassNow(), 10)).refused())
+                .as("honoured inside the window")
+                .isEqualTo(1);
+
+        assertThat(ok(driveRuns.driveDue(aPassNow(), 10)).outcomes())
+                .as("and spent, so the window is back in force")
+                .isEmpty();
+        assertThat(storedRequestedBy(run.run().id())).as("who asked stays on the record").isEqualTo(ALICE.toString());
+    }
+
+    /** A request, as the API writes it: the flag is now, and the attribution is the member who asked. */
+    private void requestedToExecute(UUID runId, UUID memberId) {
+        jdbc.update("""
+                UPDATE settlement_runs
+                SET execute_requested_at = ?, execute_requested_by = ?
+                WHERE id = ?
+                """, clock.instant().plusSeconds(1).atOffset(ZoneOffset.UTC), memberId, runId);
+    }
+
+    private String storedRequestedBy(UUID runId) {
+        return jdbc.queryForObject("SELECT execute_requested_by::text FROM settlement_runs WHERE id = ?",
+                String.class, runId);
     }
 
     /** A cut-off one second ago: anything never attempted is due, and anything just attempted is not. */

@@ -107,6 +107,13 @@ public interface Runs {
      * the queue, so a group that never approves its run cannot keep a different run - one that is ready to settle
      * - from ever being looked at. Ordering by creation would do exactly that.
      *
+     * <p><strong>Since ADR 0050 a member's request is the one thing that outranks the window.</strong> A run whose
+     * {@code execute_requested_at} is later than its own {@code driven_at} is due however recently it was attempted,
+     * which is how {@code POST /runs/{runId}/execute} reaches this worker: the API writes the request, and this query
+     * is where it is read. It is compared against the last attempt rather than against {@code now} because the
+     * request is *spent* by the attempt that honours it - see {@link #markDriven} - and a comparison with now would
+     * read a spent request as a live one for as long as the instant itself lasted.
+     *
      * @param now             what "now" means for a transfer's own wait: a run whose transfers are all waiting is
      *                        not due, however long it has been since it was last driven
      * @param attemptedBefore a run attempted at or after this instant is not due
@@ -124,6 +131,11 @@ public interface Runs {
      * <p>It records the attempt and not its outcome, deliberately. What happened is already recorded where it
      * happened - the transfer's state, the run's status, the rail's own words in {@code rail_detail} - and a
      * second copy here would be a claim that can disagree with them.
+     *
+     * <p><strong>It also spends any pending request to execute (ADR 0050).</strong> A request that outlived its
+     * attempt would keep the run due inside the window on every pass, which is the backoff defeated for that run
+     * permanently. Who asked is not cleared: {@code execute_requested_by} is a fact about the run's history, and
+     * only the flag is a pending intent.
      */
     void markDriven(UUID runId, Instant attemptedAt);
 

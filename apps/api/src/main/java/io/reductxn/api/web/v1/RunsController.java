@@ -4,9 +4,14 @@ import io.reductxn.api.port.in.ReadRun;
 import io.reductxn.api.port.in.RecordDecision;
 import io.reductxn.api.port.in.NewDecision;
 import io.reductxn.api.port.in.RecordedDecision;
+import io.reductxn.api.port.in.RequestRunExecution;
+import io.reductxn.api.port.in.RequestedExecution;
 import io.reductxn.api.port.in.RunRefusals;
 import io.reductxn.api.port.in.RunReport;
+import io.reductxn.api.port.in.SignedInUser;
+import io.reductxn.api.web.CallerResolver;
 import io.reductxn.api.web.dto.DecisionMapper;
+import io.reductxn.api.web.dto.RequestedExecutionResponse;
 import io.reductxn.api.web.dto.RunMapper;
 import io.reductxn.api.web.dto.DecisionRequest;
 import io.reductxn.api.web.error.ExpectedFailures;
@@ -51,11 +56,16 @@ public class RunsController {
 
     private final RecordDecision recordDecision;
     private final ReadRun readRun;
+    private final RequestRunExecution requestRunExecution;
+    private final CallerResolver callers;
     private final Clock clock;
 
-    public RunsController(RecordDecision recordDecision, ReadRun readRun, Clock clock) {
+    public RunsController(RecordDecision recordDecision, ReadRun readRun, RequestRunExecution requestRunExecution,
+            CallerResolver callers, Clock clock) {
         this.recordDecision = Objects.requireNonNull(recordDecision, "recordDecision");
         this.readRun = Objects.requireNonNull(readRun, "readRun");
+        this.requestRunExecution = Objects.requireNonNull(requestRunExecution, "requestRunExecution");
+        this.callers = Objects.requireNonNull(callers, "callers");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -89,6 +99,47 @@ public class RunsController {
         }
 
         return problem(((Result.Failure<RecordedDecision>) result).error(), http.getRequestURI());
+    }
+
+    /**
+     * {@code POST /v1/runs/{runId}/execute}: a member asks for this run to be offered to the rail now.
+     *
+     * <p><strong>The endpoint that makes the settlement worker's last unreachable use case reachable.</strong>
+     * {@code ExecuteRun} exists, is tested, and had no production caller until a schedule took it up - and the same
+     * fact was true one level down of {@code DriveRuns.driveOne}, the "drive this named run, ignoring the window"
+     * primitive, which only tests call. This is the member-facing door onto it: the request is recorded on the run's
+     * own row, and the worker's next pass honours it (ADR 0050).
+     *
+     * <p><strong>What it answers, and what it refuses.</strong> {@code 202} with a receipt, because nothing has moved
+     * yet. {@code 404} for a run that does not exist and for one whose group the caller is not in - one answer, so a
+     * guessed id cannot be tested. {@code 409} for a run that cannot move: already executing, finished, still being
+     * opened, or waiting on a group that has not approved enough of it. Every judgement about the run is the use
+     * case's; this method resolves the caller, parses the path and turns the answer into the contract's shape.
+     */
+    @PostMapping("/{runId}/execute")
+    public ResponseEntity<Object> execute(@PathVariable String runId, HttpServletRequest http) {
+        // Who is asking first: a request with no session is refused as such rather than as a malformed path.
+        Result<SignedInUser> caller = callers.resolve(http);
+
+        if (caller instanceof Result.Failure<SignedInUser> refused) {
+            return problem(refused.error(), http.getRequestURI());
+        }
+
+        DomainError malformed = malformedRunId(runId);
+        if (malformed != null) {
+            return problem(malformed, http.getRequestURI());
+        }
+
+        Result<RequestedExecution> requested = requestRunExecution.request(
+                ((Result.Ok<SignedInUser>) caller).value().id(), UUID.fromString(runId));
+
+        if (requested instanceof Result.Ok<RequestedExecution> recorded) {
+            // 202 rather than 201: the request is recorded, and the thing a client would want to fetch next is the
+            // run - which already exists and is where the money's own answer will appear.
+            return ResponseEntity.accepted().body(RequestedExecutionResponse.of(recorded.value()));
+        }
+
+        return problem(((Result.Failure<RequestedExecution>) requested).error(), http.getRequestURI());
     }
 
     /**

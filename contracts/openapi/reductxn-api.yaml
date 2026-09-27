@@ -1038,16 +1038,47 @@ paths:
   /runs/{runId}/execute:
     post:
       tags: [settlement]
-      summary: Submit the approved run to the payment rail (idempotent)
+      summary: Ask for an approved run to be offered to the payment rail now
+      description: |
+        **This is a request, not an execution.** The transfers that move money are submitted by the settlement
+        worker's driver, which offers a run to its rail on a cadence - so this records the member's intent on the run
+        and the worker's next pass honours it. Nothing has moved when this answers, which is why the answer is `202`
+        and its body is a receipt for what was written rather than a status.
+
+        **It exists because the cadence already does this, and "now" is the part a member is missing.** A run whose
+        rail has gone quiet waits out a backoff before it is tried again, which is the right behaviour for a system
+        and a bad one for a person looking at a settlement that is stuck; asking is how a member cuts to the front of
+        that wait. It is idempotent by construction rather than by a header: the request is a flag on the run, so a
+        second request is the same request, and the attempt that honours it spends it. There is therefore no
+        `Idempotency-Key` here, and its absence is deliberate - a key is a second identity for one intent.
+
+        **Who may ask, and what is refused.** A member of the run's group, and only them: a caller who is not gets the
+        `404` below, which is one answer for "no such run" and "not yours" (ADR 0049). A run that cannot move is
+        answered `409` - already `executing`, finished (`done`, `failed`, `rejected`), still being opened, or waiting
+        on a group that has not approved enough of it. A run waiting on *currency* is **not** refused: the driver
+        honours the request the moment the group brings the currency in, so the intent is worth recording rather than
+        refusing, and this operation does not widen the contract's own `409`.
       parameters:
         - name: runId
           in: path
           required: true
           schema: { type: string, format: uuid }
-        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        '202': { description: Execution started }
-        '409': { description: Quorum not reached, or already executing }
+        '202':
+          description: |-
+            Execution requested, and nothing has moved yet - this is a receipt for what was recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequestedExecution' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: |-
+            Quorum not reached, or already executing. The same status for both because the diagnosis is the same: the
+            run cannot be influenced by asking, and the problem body's `detail` carries the state it is in.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   /runs/{runId}/transfers:
     get:
@@ -1273,14 +1304,18 @@ components:
         way - so statelessness would buy one indexed lookup and cost a key management problem this deployment does not
         have.
 
-        **Declared globally, and read by six boundaries so far.** Every path below requires this scheme unless it opts out
-        with `security: []` - which the three auth operations do. The boundaries that resolve a caller are `GET /me`, the
-        three group operations, the void, the activity feed and the acceptance of an invitation (ADR 0042, 0043, 0045,
-        0047). The rest still take their actor from the body, and each of those operations says so where it is described:
-        the gap is recorded rather than implied here, because a scheme's description is the wrong place for a list that
-        changes with every slice. Enforcing the declaration on the remaining boundaries is a recorded next step - it
-        would refuse every existing caller of them at once, which is a decision that belongs to its own slice rather
-        than behind a token that already exists.
+        **Declared globally, and read by every write that names a group.** Every path below requires this scheme unless
+        it opts out with `security: []` - which the three auth operations do, and the rail webhook would if it were
+        served. The boundaries that resolve a caller are `GET /me`, the three group operations, the void, the activity
+        feed, the acceptance of an invitation, the two group-management writes and the two writes to a group's books
+        (ADR 0042, 0043, 0045, 0047, 0048, 0049), and `POST /runs/{runId}/execute` (ADR 0050) - all but the first
+        requiring a **member of the group**, which is asked of the group's own rows rather than taken from the request.
+
+        **No count is given here on purpose.** An earlier version of this paragraph said "six boundaries so far", and
+        the number was wrong within two slices - a fact about now is not a property of a document that changes, which is
+        the lesson the coverage gate's own prose learned twice (ADR 0046). What remains true is the rule: a boundary
+        that acts for somebody resolves that somebody from this scheme, and the one that does not is the decision
+        endpoint, whose body still names its member - a gap recorded rather than implied.
 
   parameters:
     GroupId:
@@ -1827,6 +1862,27 @@ components:
         memberId: { type: string, format: uuid }
         decision: { type: string, enum: [approve, reject] }
         recordedAt: { type: string, format: date-time }
+
+    RequestedExecution:
+      type: object
+      description: |
+        A member's request for a run to be offered to a rail, as it was recorded - a receipt rather than a status.
+
+        Nothing has moved when a client sees this. The request is a flag on the run that the settlement worker's driver
+        reads on its next pass, and `requestedAt` is the boundary's clock at the moment it was written (ADR 0050).
+        Whether the money moved is a question about the run, and `GET /runs/{runId}` is where it is answered - the same
+        split as this contract's other writes: an answer says what was recorded, and a read says what is true.
+
+        `requestedBy` is the member from the session, and it is kept on the run after the request is spent. The flag is
+        pending intent; the attribution is a fact about the run's history.
+      required: [runId, requestedBy, requestedAt]
+      properties:
+        runId: { type: string, format: uuid }
+        requestedBy:
+          type: string
+          format: uuid
+          description: The member who asked, from the session.
+        requestedAt: { type: string, format: date-time }
 
     SettlementCycle:
       type: object
