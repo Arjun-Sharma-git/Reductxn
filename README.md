@@ -43,9 +43,24 @@ Pre-implementation. Phase 0 - decisions and ADRs.
 
 ## Quick start
 
+**From a new machine, read [`QUICKSTART.md`](QUICKSTART.md).** It is the whole path - the database, the two backend
+deployables, the web client, the first five minutes in the product, and the five ways a fresh checkout fails - and
+every command in it was run against an empty database before it was written.
+
+The short version, once the database is up (`docker compose -f infra/docker/compose.yaml up -d postgres pgbouncer`)
+and `REDUCTXN_TAX_JURISDICTION` is set:
+
+```bash
+./gradlew :apps:api:bootRun             # HTTP on :8080
+./gradlew :workers:settlement:bootRun   # the settlement cadences; run both, see QUICKSTART section 3
+pnpm -C apps/web dev                    # http://localhost:5173
+```
+
+The gates:
+
 ```bash
 ./gradlew build            # backend + RULE enforcement (ArchUnit)
-pnpm -C apps/web test      # frontend unit tests
+pnpm -C apps/web check     # types, lint, catalogs, unit tests, a build
 ```
 
 The same three commands a developer runs are what `.github/workflows/ci.yml` runs, in two jobs: `api` is
@@ -57,6 +72,8 @@ produce (RULE C3), and it starts from an environment nobody has been warming up 
 last two verification defects were found. What it deliberately does not add is a second definition of
 "passing": no CI-only flags, no test selection. See ADR 0031.
 
-> **Note:** the `gradlew` wrapper must be generated once on a machine that has Gradle
-> (`gradle wrapper --gradle-version 9`). The wrapper JAR is binary and is intentionally not
-> committed by this scaffolding.
+> **Note:** the `gradlew` wrapper is committed, jar included, so a fresh clone can run `./gradlew` with no local
+> Gradle. (This note used to say the opposite - that the wrapper JAR was "intentionally not committed" and had to be
+> generated once with `gradle wrapper --gradle-version 9`. That stopped being true at some point and nobody
+> corrected it; `git ls-files gradle/wrapper` lists the jar. A new machine following the old note would have
+> installed Gradle for nothing.)

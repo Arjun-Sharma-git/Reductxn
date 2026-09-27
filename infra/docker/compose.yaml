@@ -33,8 +33,21 @@ services:
       POOL_MODE: transaction
       MAX_CLIENT_CONN: "200"
       DEFAULT_POOL_SIZE: "20"
+      # Must be stated, and it must be scram. Postgres 16 defaults to
+      # `password_encryption = scram-sha-256`, so the password the server stores for
+      # `reductxn_app` is a SCRAM verifier - and this image's own default is `md5`, which
+      # builds an md5 hash for its userlist. The client then authenticates and the *server*
+      # login fails with "wrong password type", which is what a fresh checkout hit: the
+      # application was answering 500 to every database-backed request with a pooler that
+      # had never carried one.
+      AUTH_TYPE: scram-sha-256
     ports:
-      - "6432:6432"
+      # 6432 on the host, 5432 in the container: this image starts PgBouncer on 5432
+      # (`/etc/pgbouncer/pgbouncer.ini`), and the API's default datasource URL dials the
+      # host's 6432 (`apps/api/src/main/resources/application.properties`). A `6432:6432`
+      # mapping - which this file had - publishes a port nothing inside the container is
+      # listening on, and every connection is reset.
+      - "6432:5432"
     depends_on:
       postgres:
         condition: service_healthy
