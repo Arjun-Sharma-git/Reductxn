@@ -172,14 +172,19 @@ named rather than implied. And **`bearerFormat: JWT` is gone**: the token is opa
 the row - both tokens, in one conditional update, without moving the session's end, so a replayed refresh token finds
 nothing and the old access token dies with it.
 
-The one thing this slice deliberately did not do is require a token anywhere except `/me`. Enforcing it on the members
-write, the invitation acceptance and the decision endpoint is a slice of its own: it would break every existing caller at
-once, and doing it here would hide all of that behind identity's arrival.
+The one thing that slice deliberately did not do is require a token anywhere except `/me`. Three slices later, the
+boundaries that read a caller are `GET /me`, the three group operations, the void, the activity feed and the acceptance
+of an invitation (ADR 0043, 0045, 0047) - and the acceptance is the one whose own contract description had **promised** to
+become about the caller once sign-in existed, which is what made closing it a debt rather than a feature. The members
+write, the invites write, the obligation recording and the cycle opening still take their actor from the body, and each
+one says so where it is described; enforcing them is a slice of its own, because it refuses every existing caller of them
+at once.
 
 `GET /v1/groups`, `POST /v1/groups` and `GET /v1/groups/{groupId}` are the group itself, and they are **the first
 operations in this build that need a caller** (ADR 0043). All three read the bearer token, because a group list is a
 question about a person and a group's own screen decides membership - and the older boundaries keep taking whoever the
 body says until a slice that owns that change. `CallerResolver` is the one place a token becomes a person; `GET /me` uses
+
 it too.
 
 **The `groups` table is additive, and that is the decision this slice turns on.** Every `group_id` in this database is a
