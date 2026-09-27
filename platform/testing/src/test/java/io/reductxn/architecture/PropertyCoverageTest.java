@@ -24,7 +24,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * halves had different amounts of discipline: the RULEs at least had a table claiming what was
  * enforced, while a property could be written into a spec, never tested, and nothing anywhere would
  * say so. {@code N5} sat in that state, ledger's {@code L1-L9} and i18n's {@code I1-I7} were listed
- * with it, and ledger's list has since fallen from nine to four as the types that verify it landed.
+ * with it. Ledger's list has since fallen from nine to four as the types that verify it landed, and
+ * i18n's seven left it when this learned to read evidence outside the JVM (ADR 0052) - every one was
+ * implemented all along, and the map could not see a Node script, a Vitest test or an ESLint rule.
  *
  * <p><strong>Coverage is detected, not declared.</strong> A property counts as covered when a test
  * labels an assertion with its id:
@@ -100,22 +102,70 @@ class PropertyCoverageTest {
             Map.entry("L5", "a balance is a projection, never stored truth. The projection is built: "
                     + "Balances.netDebitOf sums signed postings, order-independently, and a compensated "
                     + "entry returns zero. The 'never stored' half claims that no balance column exists "
-                    + "anywhere, which is a property of a schema rather than of this module"),
+                    + "anywhere, which is a property of a schema rather than of this module")
 
-            Map.entry("I1", "every en key exists in every shipped locale. There is no catalog and no "
-                    + "second locale yet; ADR 0014 scaffolding is unstarted"),
-            Map.entry("I2", "no unused keys in en. Needs the catalog, and only means something once it "
-                    + "has keys that could go unused"),
-            Map.entry("I3", "error-code parity, both directions. The server half is now enumerable - "
-                    + "every DomainError declares its code as a constant - so this gate became possible, "
-                    + "but en/errors.json does not exist and there is nothing to compare against"),
-            Map.entry("I4", "format/parse round trip per locale. Needs the formatting layer"),
-            Map.entry("I5", "formatting never changes the digits. Needs the formatting layer; the "
-                    + "integer-minor-units rule it protects is already enforced for domain code by P1"),
-            Map.entry("I6", "no double or float in the format/parse path. Needs that path to exist; P1 "
-                    + "covers the domain half of the same concern today"),
-            Map.entry("I7", "plural forms per locale. Needs the catalog and ru, which is the locale that "
-                    + "makes this non-trivial (one/few/many/other)"));
+            // I1-I7 left this map in ADR 0052, and the reason they sat here is worth keeping. Each said the
+            // same thing in different words - "needs the catalog", "needs the formatting layer" - and all of
+            // it landed across ADRs 0014, 0028 and 0029: the catalogs, the money and rate formatting, the
+            // catalog check itself, the lint rules. What they were missing was never the implementation; it
+            // was a way for this map to name one, because coverage was only ever detected from Java assertion
+            // labels and the evidence for these is a Node script, a Vitest test and an ESLint rule. They are
+            // in ENFORCED_PROPERTIES now, each with the anchor it is declared under - which is the
+            // contradiction this test could not see for three slices, while docs/specs/i18n.md said
+            // "Implemented" for all seven and this map said the layer did not exist.
+            );
+
+    /**
+     * Properties something outside this JVM enforces, each with the evidence that it does.
+     *
+     * <p><strong>Why this exists.</strong> Coverage used to be detected from one thing only: an assertion
+     * label. That works for a property a Java test proves and cannot see one a browser tool proves, so the
+     * i18n family sat in {@link #DEFERRED_PROPERTIES} saying "there is no catalog and no second locale yet"
+     * while {@code docs/specs/i18n.md} section 10 said all seven were <em>Implemented</em> and named the gate
+     * for each. Two documents contradicting each other, and no test able to see it - because a deferral was
+     * only ever checked against JVM labels. Recorded in MASTER-PLAN's findings table and corrected here.
+     *
+     * <p><strong>References rather than prose, for the reason {@link RuleCoverageTest} uses them.</strong> A
+     * claim of enforcement nothing verifies is the bug both maps were written for. The shape is
+     * {@code <repo-relative path>#<kind>:<anchor>}:
+     *
+     * <pre>
+     *   apps/web/tools/check-catalogs.mjs#banner:I1              the section marker the check is implemented under
+     *   apps/web/src/shared/money/money.test.ts#test:I4          a test whose declared name carries the id
+     *   apps/web/eslint.config.js#rule:no-restricted-properties  a rule the config turns on
+     * </pre>
+     *
+     * <p><strong>Three kinds because the three files declare a check differently, and each anchor is the
+     * declaration rather than a mention.</strong> That distinction is not pedantry: a bare search for
+     * {@code I4} would match this file's own header listing the family, and a search for a tool's name would
+     * match its usage comment. A banner heads the block that does the work, a test name is what the runner
+     * registers, and a quoted rule key is what turns an ESLint rule on.
+     *
+     * <p><strong>What this proves and what it does not.</strong> It proves the file exists and still declares
+     * that check, so a claim cannot outlive the thing it names - which is the whole failure it was built for.
+     * It cannot prove the check asserts what the property says, exactly as {@link RuleCoverageTest} says of
+     * its own source references. The claim remains a written decision; what is mechanical is that the
+     * evidence is still there.
+     */
+    private static final Map<String, List<String>> ENFORCED_PROPERTIES = Map.ofEntries(
+            // The catalog tool, one section per property. Its banners are its own structure - `--- I1` heads
+            // the loop that compares each locale against the source - so a reordering that drops one fails here.
+            Map.entry("I1", List.of("apps/web/tools/check-catalogs.mjs#banner:I1")),
+            Map.entry("I2", List.of("apps/web/tools/check-catalogs.mjs#banner:I2")),
+            Map.entry("I3", List.of("apps/web/tools/check-catalogs.mjs#banner:I3")),
+            Map.entry("I7", List.of("apps/web/tools/check-catalogs.mjs#banner:I7")),
+
+            // The two that are round-trip and digit properties, in one Vitest file whose test names carry the
+            // ids. Naming them separately is deliberate: I4's generator could be weakened to values that
+            // survive any formatter, and I5 is the one that catches a `toLocaleString(amount / 100)` refactor.
+            Map.entry("I4", List.of("apps/web/src/shared/money/money.test.ts#test:I4")),
+            Map.entry("I5", List.of("apps/web/src/shared/money/money.test.ts#test:I5")),
+
+            // Two rules, because the spec's I6 is two bans: a property/method that would parse a float, and a
+            // syntax that would divide by a hundred. Either one alone leaves the other half unenforced.
+            Map.entry("I6", List.of(
+                    "apps/web/eslint.config.js#rule:no-restricted-properties",
+                    "apps/web/eslint.config.js#rule:no-restricted-syntax")));
 
     @Test
     void everySpecPropertyIsLabelledByATestOrExplicitlyDeferred() throws IOException {
@@ -129,16 +179,19 @@ class PropertyCoverageTest {
 
         List<String> silent = new ArrayList<>();
         for (String property : defined) {
-            if (!labelled.contains(property) && !DEFERRED_PROPERTIES.containsKey(property)) {
+            if (!labelled.contains(property)
+                    && !ENFORCED_PROPERTIES.containsKey(property)
+                    && !DEFERRED_PROPERTIES.containsKey(property)) {
                 silent.add(property);
             }
         }
 
         assertThat(silent)
-                .as("these properties are declared in docs/specs and no test labels an assertion with "
-                        + "their id, so nothing would notice if they stopped being true. Label the "
-                        + "assertion `.as(\"<id>: ...\")`, or add the property to DEFERRED_PROPERTIES "
-                        + "with the reason it cannot be tested yet")
+                .as("these properties are declared in docs/specs and nothing claims to enforce them, so "
+                        + "nothing would notice if they stopped being true. Label the assertion "
+                        + "`.as(\"<id>: ...\")`, or add the property to ENFORCED_PROPERTIES with the file "
+                        + "and anchor that enforces it, or add it to DEFERRED_PROPERTIES with the reason "
+                        + "it cannot be tested yet")
                 .isEmpty();
 
         List<String> stale = DEFERRED_PROPERTIES.keySet().stream()
@@ -148,12 +201,79 @@ class PropertyCoverageTest {
                 .as("DEFERRED_PROPERTIES names properties that no spec declares any more")
                 .isEmpty();
 
+        // Enforcement counts here as well as labelling, and that widening is the point of ADR 0052: a
+        // deferral that outlived its implementation is stale whichever way the implementation arrived, and
+        // the i18n family was deferred for three slices while a Node script, a Vitest test and two lint rules
+        // enforced every one of them. Checking only JVM labels is what let the two disagree in silence.
         List<String> noLongerTrue = DEFERRED_PROPERTIES.keySet().stream()
-                .filter(labelled::contains)
+                .filter(property -> labelled.contains(property) || ENFORCED_PROPERTIES.containsKey(property))
                 .toList();
         assertThat(noLongerTrue)
-                .as("these properties are deferred but a test does label them, so the deferral is stale "
-                        + "and is understating what is covered")
+                .as("these properties are deferred but something does enforce them, so the deferral is "
+                        + "stale and is understating what is covered")
+                .isEmpty();
+    }
+
+    /**
+     * The claims in {@link #ENFORCED_PROPERTIES} still point at something that declares that check.
+     *
+     * <p>This is the direction that makes the map worth having. A claim naming a file that has moved, a
+     * Vitest test that was renamed, or an ESLint rule that was switched off is a sentence that reads like
+     * coverage and is not - and nothing else in this build would say so, because the file it names belongs to
+     * another language, another test runner and another toolchain, none of which this module runs. It is also
+     * the check that would have caught the i18n family's deferral from the other end: it fails when the
+     * evidence disappears, and the deferral failed when the evidence appeared.
+     */
+    @Test
+    void everyEnforcementClaimOutsideTheJvmResolves() throws IOException {
+        List<String> unresolved = new ArrayList<>();
+
+        for (Map.Entry<String, List<String>> claim : ENFORCED_PROPERTIES.entrySet()) {
+            for (String reference : claim.getValue()) {
+                String reason = checkFileReference(reference);
+
+                if (reason != null) {
+                    unresolved.add(claim.getKey() + " -> " + reference + ": " + reason);
+                }
+            }
+        }
+
+        assertThat(ENFORCED_PROPERTIES.values().stream().mapToInt(List::size).sum())
+                .as("ENFORCED_PROPERTIES is empty, so the check below would pass without checking "
+                        + "anything - which is the failure mode this whole class exists to catch")
+                .isGreaterThan(0);
+
+        assertThat(unresolved)
+                .as("a property is claimed as enforced by a file that does not declare that check, so the "
+                        + "claim reads like coverage and is not")
+                .isEmpty();
+    }
+
+    /**
+     * No property is both enforced and deferred, and every claim names a property a spec declares.
+     *
+     * <p>{@link RuleCoverageTest} gained this direction when a rule turned out to be enforced and deferred at
+     * once, and the reason is the same here: the two maps answer different questions - what covers this, and
+     * what cannot be covered yet - so an entry in both makes the pair say nothing. A key that no spec defines
+     * is the other half: a claim about a property that no longer exists under that id.
+     */
+    @Test
+    void enforcementAndDeferralDoNotOverlap() throws IOException {
+        Set<String> defined = propertiesDefinedInTheSpecs();
+
+        assertThat(ENFORCED_PROPERTIES.keySet().stream()
+                .filter(property -> !defined.contains(property))
+                .toList())
+                .as("ENFORCED_PROPERTIES claims enforcement for a property that no spec declares, so the "
+                        + "claim points at an id that means nothing - usually a renumbering")
+                .isEmpty();
+
+        assertThat(ENFORCED_PROPERTIES.keySet().stream()
+                .filter(DEFERRED_PROPERTIES::containsKey)
+                .toList())
+                .as("these properties are both enforced and deferred, so the two maps contradict each "
+                        + "other: ENFORCED_PROPERTIES is the answer to 'what covers this' and "
+                        + "DEFERRED_PROPERTIES is the answer to 'what cannot be covered yet'")
                 .isEmpty();
     }
 
@@ -190,6 +310,82 @@ class PropertyCoverageTest {
                 .as("INTRODUCED_IN_PROSE lists properties that no spec mentions any more, so the set "
                         + "would widen the net by adding ids that mean nothing")
                 .isEmpty();
+    }
+
+    /** The anchor kinds {@link #checkFileReference} knows, and the only spellings that resolve. */
+    private static final String BANNER = "banner";
+
+    private static final String TEST = "test";
+
+    private static final String RULE = "rule";
+
+    private static final String ANCHOR_KINDS = BANNER + ", " + TEST + " or " + RULE;
+
+    /**
+     * Resolves a claim about a check that lives outside this JVM, by reading the file it names.
+     *
+     * <p><strong>Why reading a file rather than running the check.</strong> This module runs none of them:
+     * the catalog tool is Node, the property tests are Vitest, the lint rules are ESLint. Running them from
+     * here would mean Gradle reaching into another toolchain to assert a cross-language wiring, where what
+     * matters is the narrower claim that the check is still declared. Reading the source proves that much and
+     * says so, and two other guards here already read files for the same reason - {@code SchemaOwnershipTest}
+     * reads migrations and {@link RuleCoverageTest} reads a named test's source - because some facts are about
+     * what a repository contains rather than about what a JVM can load.
+     *
+     * <p><strong>Each anchor is a declaration, and that is the difference between this and a substring
+     * search.</strong> A banner heads the block that does the work, a test name is what the runner registers,
+     * and a quoted key is what turns an ESLint rule on. Searching for the bare id instead would match this
+     * file's own header listing the family, which is exactly how a check of this kind lies.
+     *
+     * @return null when the claim resolves, otherwise why it does not
+     */
+    private static String checkFileReference(String reference) throws IOException {
+        int hash = reference.indexOf('#');
+
+        if (hash < 0) {
+            return "not a <path>#<kind>:<anchor> reference, so nothing was checked";
+        }
+
+        String path = reference.substring(0, hash);
+        String anchor = reference.substring(hash + 1);
+        int colon = anchor.indexOf(':');
+
+        if (colon < 0) {
+            return "no anchor kind: expected one of " + ANCHOR_KINDS;
+        }
+
+        String kind = anchor.substring(0, colon);
+        String name = anchor.substring(colon + 1);
+
+        Path source = Repository.root().resolve(path);
+        if (!Files.isRegularFile(source)) {
+            return "no file at " + path + ", so this claim points at something that is not there";
+        }
+
+        String text = Files.readString(source);
+
+        return switch (kind) {
+            // A word boundary, not a `contains`. The id must END at the marker: `--- I2` must not be satisfied
+            // by `--- I2x`, which is what the sabotage in ADR 0052 found when a renamed banner still passed.
+            case BANNER -> Pattern.compile("---\\s+" + Pattern.quote(name) + "\\b")
+                    .matcher(text)
+                    .find()
+                    ? null
+                    : "no '--- " + name + "' section marker in " + path + ", so the block this claim "
+                            + "names is gone";
+            case TEST -> Pattern.compile("\\b(?:it|test)\\(\\s*['\"]" + Pattern.quote(name))
+                    .matcher(text)
+                    .find()
+                    ? null
+                    : "no test declared with a name starting '" + name + "' in " + path + ", so nothing "
+                            + "is registered under this property any more";
+            case RULE -> text.contains("'" + name + "':")
+                    ? null
+                    : "the rule '" + name + "' is not turned on in " + path + ", so this claim names a ban "
+                            + "that is not in force";
+            default -> "unknown anchor kind '" + kind + "', so nothing checked this claim - the kinds are "
+                    + ANCHOR_KINDS;
+        };
     }
 
     private static Set<String> propertiesDefinedInTheSpecs() throws IOException {

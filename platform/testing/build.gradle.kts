@@ -76,6 +76,20 @@ val javaTestTrees = fileTree(rootProject.layout.projectDirectory) {
     include("platform/*/src/test/java/**/*.java")
 }
 
+// PropertyCoverageTest checks that its claims about the i18n family still point at something, by reading the
+// three files those checks are declared in: the catalog tool, a Vitest property test and the lint config.
+//
+// Same reason as the docs above, and the same failure if it is missed - Gradle sees an unchanged task, leaves it
+// UP-TO-DATE and the test does not run at all. The patterns name those files rather than globbing `apps/web/src`,
+// because a wider input would make this module re-run on every client edit for checks that read none of them;
+// and the coupling is real in the other direction too: a new claim in ENFORCED_PROPERTIES that names another file
+// has to be added here, or it will be checked once and never refreshed.
+val webChecksReadByPropertyCoverageTest = fileTree(rootProject.layout.projectDirectory) {
+    include("apps/web/tools/*.mjs")
+    include("apps/web/eslint.config.js")
+    include("apps/web/src/shared/money/money.test.ts")
+}
+
 tasks.withType<Test>().configureEach {
     inputs.dir(coverageTestInputs[0])
         .withPropertyName("docsReadByTheCoverageTests")
@@ -91,5 +105,9 @@ tasks.withType<Test>().configureEach {
 
     inputs.files(migrations)
         .withPropertyName("migrationsReadBySchemaOwnershipTest")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+
+    inputs.files(webChecksReadByPropertyCoverageTest)
+        .withPropertyName("webChecksNamedByPropertyCoverageTest")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }
