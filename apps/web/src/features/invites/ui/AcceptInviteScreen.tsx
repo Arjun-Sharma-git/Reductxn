@@ -45,8 +45,9 @@ export function AcceptInviteScreen({ code }: { readonly code: string }) {
 
   const submitted = acceptanceOf({ displayName });
 
-  // The group's name when it has one, and the identifier when it does not: a group that exists only as rows is a state
-  // this build contains (ADR 0043), and its codes are real.
+  // The group a code joins, for the link the joined card offers. It is `undefined` only while the preview is in flight or
+  // has been refused - and no acceptance can succeed in either state, because the form renders only after a successful
+  // preview.
   const group = preview.data?.group;
 
   return (
@@ -68,14 +69,15 @@ export function AcceptInviteScreen({ code }: { readonly code: string }) {
         <Card
           title={t('invites.preview.title')}
           description={
-            group?.name === undefined
-              ? t('invites.preview.withoutName', { groupId: group?.id ?? '' })
-              : t('invites.preview.withName', { group: group.name })
+            // `preview.isSuccess` narrows the response, and the contract requires `group` on a `200` - so this reads the
+            // preview's own group rather than a maybe. The only state without one is a refusal, and a refusal renders no
+            // card at all.
+            preview.data.group.name === undefined
+              ? t('invites.preview.withoutName', { groupId: preview.data.group.id })
+              : t('invites.preview.withName', { group: preview.data.group.name })
           }
         >
-          {group === undefined ? null : (
-            <p className={styles.members}>{t('invites.preview.members', { count: group.memberCount })}</p>
-          )}
+          <p className={styles.members}>{t('invites.preview.members', { count: preview.data.group.memberCount })}</p>
 
           <p className={styles.caption}>
             {t('invites.preview.expires', { when: toLocalInput(preview.data.expiresAt) })}

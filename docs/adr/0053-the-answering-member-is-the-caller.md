@@ -108,3 +108,25 @@ is a guard justified by the least of what the row does.
   where this belonged - so what is corrected is the reason attached to it, and the reason was wrong in the direction
   that reads safely: "changes nothing about the outcome" was true of the run's outcome and false of the record's.
 
+## Amendment, 2026-09-27: the refusal code on a run-scoped route
+
+ADR 0054 closed the nine reads that served a bare group uuid, and closing them corrected one thing this ADR decided:
+**the code this write refuses a stranger with.** The bullet above says the guard is "refused with the same
+`no_such_group` `404` every other group write answers with (ADR 0049)", and the guard is untouched - a decision on a run
+is a write to that group's books, and a member of the group is who may make it. What did not survive is the code, for a
+reason this ADR could not have seen from where it stood.
+
+`GroupRefusals.NoSuchGroup` answers "no such group" and "not yours" with one code on purpose, so that a guessed id cannot
+be tested by comparing two refusals - and its *message* names the group id it could not find, which is a fact about the
+caller's request rather than about the group. On a route addressed by a group that is the right trade: the caller sent a
+group id, so the refusal tells them nothing they did not already have. On a route addressed by a **run** it is not: an
+unauthenticated request holding any run uuid was handed the group that run belongs to. The refusal leaked exactly what the
+sameness existed to withhold, one hop out.
+
+Both run-scoped writes (`decisions` here, `execute` in ADR 0050) now share the reader this ADR already authorised with -
+`SettlementRuns.findFor(runId, callerId)`, where the membership became a condition of the query - and answer
+`api.no_such_run` for both conditions. Same `404`, same guard, same one-answer-for-two-conditions reasoning; the id in the
+prose is the one the caller sent. The general shape is the one ADR 0053's own context established: a claim about one
+consumer of a value is not a claim about the value, and here it is a claim about one *field* of a refusal.
+
+
