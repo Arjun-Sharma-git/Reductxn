@@ -124,3 +124,17 @@ match now, and the case fails. The other was a flawed experiment rather than a f
 the rule case changed only one of the config's two declarations of `no-restricted-properties`, and the claim
 correctly still resolved against the other one - so the experiment was repeated with every occurrence renamed.
 
+The input declarations were checked in three directions rather than assumed, because a missing input is silent:
+
+| Observation | Result |
+|---|---|
+| two consecutive runs with nothing changed | `:platform:testing:test UP-TO-DATE`, both times |
+| `apps/web/tools/check-catalogs.mjs` edited | the task re-ran, so the claim is refreshed when the tool changes |
+| `apps/web/src/features/groups/ui/GroupsScreen.tsx` edited | `UP-TO-DATE`, so the input list is the three files rather than all of the client |
+
+**And the same mistake twice in one slice, which is the part worth keeping.** Both the flawed ESLint sabotage
+and the first input check were *verifications whose setup changed the thing being held constant* - restoring a
+file after a sabotage is a second modification, exactly as editing one of two rule declarations is half an
+edit. A check run that way reports the setup rather than the mechanism, and it looks like a finding. The
+pattern to watch for is a step that writes to the repository between the baseline and the observation.
+
