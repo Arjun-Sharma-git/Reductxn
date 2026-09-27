@@ -54,8 +54,10 @@ reason for this path to be the one that loses it.
 
 ## Consequences
 
-- **`ContractCoverageTest` reports thirty operations, twenty-seven served and three recorded** - labels, execute, webhooks
-  and the `POST /fx/quotes` removal candidate.
+- **`ContractCoverageTest` reports thirty operations, twenty-seven served and three recorded** - execute, the rail
+  webhook and the `POST /fx/quotes` removal candidate - all three of them real. This line named a fourth, `labels`,
+  which was never a contract gap at all, until the slice that removed `POST /fx/quotes` (ADR 0046) corrected it: a
+  count in prose is only as good as the audit it was copied from.
 - **Two codes are served now**, and both are `ExpectedFailures` entries, so the server's catalogue grows by exactly two:
   `api.no_such_obligation` (`404`) and `api.obligation_not_open` (`409`).
 - **One code covers two conditions**, as the group reads and the activity feed already do: no such obligation, or not one
@@ -76,7 +78,9 @@ reason for this path to be the one that loses it.
   the status column already says `Settled` or `In a plan` beside the words "Nothing to do", and a tooltip is
   unreachable without a mouse.
 - **The other boundaries still take the caller from the body** - members, invitations, decisions, obligation recording -
-  which is what ADR 0042/0043 deferred and this slice begins to undo.
+  which is what ADR 0042/0043 deferred and this slice begins to undo. The `POST /fx/quotes` removal candidate was
+  decided out of the contract afterwards rather than built (ADR 0046), which is why that list has one item fewer than
+  the day it was written.
 
 ## Alternatives considered - and why rejected
 
