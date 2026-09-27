@@ -98,19 +98,16 @@ class ContractCoverageTest {
     /**
      * The operations the contract promises, the controllers do not serve, and somebody owns.
      *
-     * <p>These are the five left when ADR 0043 served the groups - the three operations that were the last screens of
-     * section 6's route tree, and the first ones in this document that cannot be called without a credential. Each entry
-     * names the screen, slice or decision that would close it: members, cycles, runs, decisions, transfers, netting,
-     * obligations, currencies, rates, balances, tax, invites, sign-in and now groups have all left this list.
+     * <p>These are the four left when ADR 0044 served the activity feed - the operation that was the least specified thing
+     * in the contract, and the one whose rows already existed. Each entry names the screen, slice or decision that would
+     * close it: members, cycles, runs, decisions, transfers, netting, obligations, currencies, rates, balances, tax,
+     * invites, sign-in, groups and now activity have all left this list.
      *
      * <p>The {@code POST /fx/quotes} entry is not a screen. It is recorded as a candidate for removal, and it is in
      * this map for the same reason the others are: an operation with no handler and no owner is the state that
      * produced the seven-slice bug, and leaving it there is what "we will decide later" looks like written down.
      */
     private static final Map<String, String> RECORDED_GAPS = Map.ofEntries(
-            Map.entry("GET /groups/{groupId}/activity",
-                    "activity - who did what. The member and invite screens link to it, and the rows it would read "
-                            + "(decisions, invitations, membership changes) already exist"),
             Map.entry("POST /fx/quotes",
                     "removal candidate rather than a screen: the recording path locks its own quote and the "
                             + "obligation response carries it, so nothing calls this. ADR 0033 removed three "
