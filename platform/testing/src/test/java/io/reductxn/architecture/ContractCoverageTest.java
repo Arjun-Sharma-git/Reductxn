@@ -112,9 +112,6 @@ class ContractCoverageTest {
                     "removal candidate rather than a screen: the recording path locks its own quote and the "
                             + "obligation response carries it, so nothing calls this. ADR 0033 removed three "
                             + "operations for the same reason - this one should be decided, not owned"),
-            Map.entry("POST /obligations/{obligationId}/void",
-                    "void - recording that an obligation should never have been written. The plan lists it beside "
-                            + "execute because both are transitions rather than new rows"),
             Map.entry("POST /runs/{runId}/execute",
                     "execute - the execution path. The worker plans and computes; performing the transfers is what "
                             + "makes a settlement final, and the rail adapter that would do it is not written"),
