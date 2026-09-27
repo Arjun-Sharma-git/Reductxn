@@ -1025,13 +1025,40 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Void an obligation (compensating entry, never a delete) */
+        /**
+         * Void an obligation (compensating entry, never a delete)
+         * @description Records that a commitment should never have been written. The row stays and keeps its instant; `voided_at` is set and
+         *     the derived status becomes `voided` (ADR 0004, 0036). A delete would erase the fact that a member recorded it, and a
+         *     group that cannot see its own mistakes cannot audit them.
+         *
+         *     **The response is the obligation, and the contract's `200` had no body at all.** "Voided" is not something a client can
+         *     act on: the screen showing the row needs its new status, and the shape it already renders is this one, so answering
+         *     with a different one would make the void path the only place a client parses a second shape. `occurredAt` stays the
+         *     instant the commitment was incurred - when it was voided is not in this schema, deliberately: this is the commitment,
+         *     and an audit trail is the activity feed's business rather than a field bolted onto the row a member reads.
+         *
+         *     **The `Idempotency-Key` header is deleted, and the row's own state is why.** A key would create a second record of the
+         *     same act - an idempotency row - while `voided_at` already answers "has this been voided". Voiding an already-voided
+         *     obligation is a `200` with the row, not a `409`: the caller asked for a state the obligation is in, which is
+         *     idempotence by state rather than by key (the same reasoning as `POST /groups` answering a replay with its record,
+         *     ADR 0043).
+         *
+         *     **`409` is kept, and this is the one place in the document where it means something.** An obligation a settlement run
+         *     holds (`netted`) or has taken (`settled`) cannot be voided: the run's plan is built on it, and a commitment that
+         *     disappeared from underneath a plan is what the run's lock exists to prevent. That is a conflict with the world rather
+         *     than a malformed request, which is exactly what `409` is for - and the remedy is named in the body: open a cycle that
+         *     releases it, or correct it in a later one.
+         *
+         *     **Membership is the condition, and this is the first write that says so.** The caller comes from the token
+         *     (ADR 0043), and they must be a member of the obligation's group. A group they are not in answers `404` with the same
+         *     code as an obligation that does not exist, for the reason the reads give: telling the two apart would let anybody
+         *     holding a guess learn which ids are real. The check needs the row to know the group, so unlike the activity read the
+         *     order is read-then-check - and the refusal is still the same code, so nothing leaks by ordering.
+         */
         post: {
             parameters: {
                 query?: never;
-                header: {
-                    "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                };
+                header?: never;
                 path: {
                     obligationId: string;
                 };
@@ -1039,13 +1066,18 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Voided */
+                /** @description Voided, or already voided */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Obligation"];
+                    };
                 };
+                400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
                 409: components["responses"]["Problem"];
             };
         };
