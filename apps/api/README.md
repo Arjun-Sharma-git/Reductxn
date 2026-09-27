@@ -180,8 +180,11 @@ controller. Recording an obligation also attributes it: the caller travels to th
 which the entry hash covers. `POST /runs/{runId}/execute` joined them in ADR 0050, and it is the one boundary whose
 *work* happens in the other deployable: the API writes a request onto the run's own row
 (`settlement_runs.execute_requested_at`) and the settlement worker's driver honours it on its next pass, because calling
-the worker's use case from here is what RULE B6 forbids. The decision endpoint still takes its actor from the body, and
-that is a decision rather than an omission: a stranger's answer is inert by the quorum's arithmetic (ADR 0016).
+the worker's use case from here is what RULE B6 forbids. `POST /webhooks/rails/{provider}` is the one boundary no person
+uses (ADR 0051): a rail has no session, so it authenticates with an HMAC-SHA256 signature over the raw body rather than
+the bearer scheme every other operation requires - and the row it writes is read by the settlement worker the same way.
+The decision endpoint still takes its actor from the body, and that is a decision rather than an omission: a stranger's
+answer is inert by the quorum's arithmetic (ADR 0016).
 
 `GET /v1/groups`, `POST /v1/groups` and `GET /v1/groups/{groupId}` are the group itself, and they are **the first
 operations in this build that need a caller** (ADR 0043). All three read the bearer token, because a group list is a

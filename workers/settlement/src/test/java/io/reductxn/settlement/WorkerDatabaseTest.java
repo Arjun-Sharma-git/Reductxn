@@ -153,6 +153,9 @@ abstract class WorkerDatabaseTest {
         // The plan's tables first, children before parents. The foreign keys are within this module, which is
         // why they exist at all (RULE B17 allows them inside one owner), and they have to be respected here.
         jdbc.execute("DELETE FROM settlement_transfers");
+        // A callback is keyed by a reference that the plan derives (RULE S2), so the same run produces the same
+        // reference in every test - and a row left behind would be read by an unrelated test rather than ignored.
+        jdbc.execute("DELETE FROM settlement_rail_callbacks");
         jdbc.execute("DELETE FROM net_positions");
         jdbc.execute("DELETE FROM settlement_partitions");
         jdbc.execute("DELETE FROM settlement_run_obligations");

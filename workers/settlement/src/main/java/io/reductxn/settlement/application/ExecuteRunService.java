@@ -17,6 +17,7 @@ import io.reductxn.settlement.port.in.SettlementRun;
 import io.reductxn.settlement.port.in.TransferStatus;
 import io.reductxn.settlement.port.out.ChainHeads;
 import io.reductxn.settlement.port.out.JournalEntries;
+import io.reductxn.settlement.port.out.RailCallbacks;
 import io.reductxn.settlement.port.out.Runs;
 
 import org.springframework.stereotype.Service;
@@ -82,6 +83,7 @@ public class ExecuteRunService implements ExecuteRun {
     private final JournalEntries journalEntries;
     private final ChainHeads chainHeads;
     private final Backoff backoff;
+    private final RailCallbacks railCallbacks;
     private final Clock clock;
     private final TransactionTemplate transactions;
 
@@ -91,6 +93,7 @@ public class ExecuteRunService implements ExecuteRun {
             JournalEntries journalEntries,
             ChainHeads chainHeads,
             Backoff backoff,
+            RailCallbacks railCallbacks,
             Clock clock,
             PlatformTransactionManager transactionManager) {
 
@@ -99,6 +102,7 @@ public class ExecuteRunService implements ExecuteRun {
         this.journalEntries = Objects.requireNonNull(journalEntries, "journalEntries");
         this.chainHeads = Objects.requireNonNull(chainHeads, "chainHeads");
         this.backoff = Objects.requireNonNull(backoff, "backoff");
+        this.railCallbacks = Objects.requireNonNull(railCallbacks, "railCallbacks");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.transactions = new TransactionTemplate(
                 Objects.requireNonNull(transactionManager, "transactionManager"));
@@ -285,8 +289,22 @@ public class ExecuteRunService implements ExecuteRun {
      * refusal to answer a question into money marked as not having moved. What that costs is a rail that refuses
      * to answer a reference being polled until the cap - which is the escalation gap, recorded as one, rather
      * than a transfer failed on the strength of a question.
+     *
+     * <p><strong>A delivered answer is preferred to an asked one (ADR 0051).</strong> A rail's callback reaches
+     * {@code apps/api}, which verifies it and stores it; when one has arrived for this reference, this method reads it
+     * instead of calling the rail. It is the same answer {@link PaymentRail#status(String)} would return, handed to the
+     * same {@link #record} path, so nothing about how a state is decided changes - what changes is that a callback
+     * costs one indexed row rather than a network call, and that a rail which has already told us the answer is not
+     * asked to repeat itself.
      */
     private void askTheRailForIt(PlannedTransfer transfer, SettlementRun run) {
+        Optional<PaymentRail.RailStatus> delivered = railCallbacks.answerFor(transfer.railRef());
+
+        if (delivered.isPresent()) {
+            record(transfer, run, delivered.get());
+            return;
+        }
+
         Result<PaymentRail.RailStatus> answer = rail.status(transfer.railRef());
 
         if (answer instanceof Result.Failure<PaymentRail.RailStatus> failure) {

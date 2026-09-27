@@ -98,26 +98,27 @@ class ContractCoverageTest {
     /**
      * The operations the contract promises, the controllers do not serve, and somebody owns.
      *
-     * <p>Two at the time of writing, and the count is stated as a fact about now rather than as a property of the
-     * file, because a number in prose drifts: an earlier version of this paragraph said "the four left when ADR 0044
-     * served the activity feed" and was still saying four when the void slice had already made it three. Each entry
-     * names the screen, slice or decision that would close it - members, cycles, runs, decisions, transfers, netting,
-     * obligations, currencies, rates, balances, tax, invites, sign-in, groups, activity and void have all left this
-     * list.
+     * <p><strong>Empty at the time of writing, and that is the state to hold it to rather than a number.</strong>
+     * Every operation the contract promises is now served by a handler, so this map has nothing to report - and an
+     * earlier version of this paragraph is why it stays empty rather than claiming a count: it said "the four left
+     * when ADR 0044 served the activity feed" and was still saying four when the void slice had made it three. Each
+     * entry that has been here named the screen, slice or decision that would close it - members, cycles, runs,
+     * decisions, transfers, netting, obligations, currencies, rates, balances, tax, invites, sign-in, groups, activity,
+     * void, identity, execute and the rail webhook - and the empty map is what "every promise is either served or
+     * owned" reads like when there is nothing owned and outstanding.
      *
-     * <p>{@code POST /fx/quotes} left it too, and not by being built: it was a candidate for removal, and ADR 0046
+     * <p>{@code POST /fx/quotes} left this list without being built: it was a candidate for removal, and ADR 0046
      * decided it out of the contract rather than serving it. That is the third way an entry can go - after "served by
-     * a slice" and "still owned" - and it is worth having in this list's history, because the alternative (building
-     * a second door onto a capability the write path already has) would have added surface rather than coverage.
+     * a slice" and "still owned" - and it is worth keeping in this list's history, because the alternative (building a
+     * second door onto a capability the write path already has) would have added surface rather than coverage.
+     *
+     * <p><strong>What an empty map costs is that a direction of this test goes unexercised.</strong> The assertion that
+     * a recorded entry whose handler has landed fails has nothing to fail on here, so it can only be trusted because it
+     * was made to fail while the list was still being emptied (ADR 0038) - and re-recording a gap is what would bring
+     * it back into use. The other two directions still run on every build: a promised operation with no handler fails,
+     * and a handler the contract does not declare fails.
      */
-    private static final Map<String, String> RECORDED_GAPS = Map.ofEntries(
-            Map.entry("POST /webhooks/rails/{provider}",
-                    "webhooks - what a rail tells us asynchronously, which is the answer to an execution that cannot "
-                            + "be completed inside the request that started it. It stays recorded after ADR 0050 served "
-                            + "`execute` for a reason that is no longer the original one: the driver already polls a "
-                            + "rail for what it has not answered, so this is a latency improvement rather than the only "
-                            + "way money can be resolved - and a callback needs a secret to verify it against and a "
-                            + "web-capable place to receive it, neither of which exists"));
+    private static final Map<String, String> RECORDED_GAPS = Map.ofEntries();
 
     @Test
     void everyPromisedOperationIsEitherServedOrRecordedWithItsOwner() throws IOException {
