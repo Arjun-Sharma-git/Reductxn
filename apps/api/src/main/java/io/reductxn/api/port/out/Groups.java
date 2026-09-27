@@ -40,11 +40,18 @@ public interface Groups {
      *
      * <p><strong>It exists because {@link #forMember} requires a group <em>row</em>, and this build is full of groups that
      * have none.</strong> A read that only needs to know whether the caller belongs - the activity feed, which narrows to
-     * the memberships and reads no group column at all - would otherwise have answered `404` for a group whose commitments
-     * and members are perfectly readable, which is the one group read that would disagree with the others (ADR 0043, 0044).
-     * The members list, the obligations list and the cycles list all serve a bare uuid; a feed that refused to would be the
-     * inconsistency a member notices first, because the screen that lists them works and the one that shows what they did
-     * does not.
+     * the memberships and reads no group column at all, and since ADR 0054 the nine reads that take a group id and serve
+     * its books - would otherwise have answered `404` for a group whose commitments and members are perfectly readable,
+     * which is a refusal about a row rather than about a person. Ten reads ask it now, and the sentence behind all ten is
+     * the same: being in a group is a fact about a membership row, not about the group having a name.
+     *
+     * <p><strong>This paragraph used to argue the other way, and it is worth keeping because of how it was wrong.</strong>
+     * It said the members list, the obligations list and the cycles list all served a bare uuid, so a feed that refused to
+     * "would be the inconsistency a member notices first". That was a description of the build rather than a decision about
+     * it - nine reads were open to anybody holding an id and the one read that asked was the outlier - and ADR 0054
+     * closed the nine, which turned this method from the exception into the shared condition. A javadoc is exactly where a
+     * wrong argument can sit for a long time, because nothing fails when it is wrong: this one described a hole as a
+     * design until the slice that closed the hole read it.
      */
     boolean isMember(UUID groupId, UUID userId);
 

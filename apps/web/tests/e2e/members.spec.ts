@@ -77,8 +77,10 @@ test('refuses an identifier that is not one without asking the server', async ({
 
 test('a signed-out visitor cannot record a member, and is told why', async ({ page }) => {
   // No identity stub and no sign-in: the write goes out with no token, so the stub answers 401 the way the API does.
-  // The form stays on the screen with the refusal beside it - nobody was added, and the screen does not pretend.
-  const api = await stubMembersApi(page);
+  // The form stays on the screen with the refusal beside it - nobody was added, and the screen does not pretend. The
+  // helper is told not to sign in, because it does by default now that the *read* beside the write needs a member too
+  // (ADR 0054) - and a signed-in page cannot produce this answer.
+  const api = await stubMembersApi(page, undefined, { signedIn: false });
 
   await page.goto(MEMBERS);
   await page.getByLabel('User id').fill('44444444-4444-4444-8444-444444444444');
@@ -90,7 +92,10 @@ test('a signed-out visitor cannot record a member, and is told why', async ({ pa
   // what "nobody was added" means from the client's side. (The screen says this twice: once as a standing warning for a
   // visitor with no session, once as the refusal beside the field, which is why this is `.first()`.)
   expect(api.recorded).toHaveLength(0);
-  await expect(page.getByRole('cell', { name: 'Asha Menon' })).toBeVisible();
+  // And no list either, which is new with ADR 0054: the read beside this write needs a member of the group now, so a
+  // signed-out visitor is told that the group's members are not theirs to read rather than being shown them. This line
+  // asserted the opposite - that Asha Menon's row was visible - because the read answered anybody then.
+  await expect(page.getByRole('cell', { name: 'Asha Menon' })).toHaveCount(0);
 });
 
 test('says nothing about a group with no members except how to start', async ({ page }) => {

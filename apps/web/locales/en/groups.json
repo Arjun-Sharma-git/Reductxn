@@ -18,9 +18,9 @@
     "busy": "Making it…"
   },
   "open": {
-    "title": "Open a group by id",
-    "description": "For a group you were given the identifier of - and for a group that only exists as commitments, which is what this build's development data is: rows can name a group that was never created.",
-    "groupId": "Group id",
-    "submit": "Open"
+    "title": "Join a group with a code",
+    "description": "A group hands out a code that lets somebody join it. It is eight characters, it lasts seven days, and whoever holds it can use it - which is why a group sends it to somebody it trusts rather than posting it. This takes you to the page that says which group it is for before you join.",
+    "code": "Invite code",
+    "submit": "Look it up"
   }
 }

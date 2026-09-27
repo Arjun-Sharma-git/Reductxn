@@ -89,7 +89,7 @@ class AddMemberApiTest extends DatabaseTest {
 
         // Asserted by predicate rather than by position: the list now holds the caller as well, and an index would make
         // this test depend on the order two memberships were written in.
-        mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
+        mvc.perform(get("/v1/groups/{groupId}/members", GROUP).header("Authorization", "Bearer " + owner))
                 .andExpect(jsonPath("$[?(@.userId=='" + ASHA + "')].displayName", contains("Asha")));
     }
 
@@ -114,7 +114,7 @@ class AddMemberApiTest extends DatabaseTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Asha"));
 
-        mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
+        mvc.perform(get("/v1/groups/{groupId}/members", GROUP).header("Authorization", "Bearer " + owner))
                 .andExpect(jsonPath("$[?(@.userId=='" + ASHA + "')].displayName", contains("Asha")));
     }
 

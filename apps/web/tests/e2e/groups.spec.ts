@@ -17,15 +17,17 @@ import { group, signIn, stubGroupsApi, stubIdentityApi } from './stubs';
 const GROUP_ID = '3f6c1a52-9d4b-4a17-8e2c-5b7d9f0a1c34';
 
 test('a signed-out visitor is shown the way in, not an empty list', async ({ page }) => {
-  // No identity stub at all: every request to `/v1/me` and `/v1/groups` fails at the network, which is what a signed-out
-  // browser looks like from the screen's side.
-  await stubGroupsApi(page);
+  // No identity stub and no sign-in: every request to `/v1/me` and `/v1/groups` fails at the network, which is what a
+  // signed-out browser looks like from the screen's side. The helper is told, because it signs a page in by default now
+  // that the reads require a member (ADR 0054).
+  await stubGroupsApi(page, [], { signedIn: false });
 
   await page.goto('/');
 
   await expect(page.getByText('Sign in to see the groups you belong to.')).toBeVisible();
-  // The paste box still works, because opening a group by id never needed to know who was asking.
-  await expect(page.getByLabel('Group id')).toBeVisible();
+  // The box still works, and it takes a code: reading what a code is for never needed to know who was asking either, so
+  // the one thing a visitor can still do is follow the invitation somebody sent them.
+  await expect(page.getByLabel('Invite code')).toBeVisible();
 });
 
 test('the groups you are in are listed with what they settle in', async ({ page }) => {

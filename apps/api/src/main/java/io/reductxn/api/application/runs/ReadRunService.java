@@ -26,6 +26,17 @@ import java.util.UUID;
  * <p>{@code @Transactional} for a read, which is not ceremony: the projection is four reads of four tables, and
  * without one transaction a run could be reported as {@code executing} while its transfers still read as
  * {@code pending} - two instants stitched into a picture that was never true.
+ *
+ * <p><strong>The caller travels to the store rather than being checked beside it</strong> (ADR 0054). This use case
+ * asks {@code SettlementRuns.findFor(runId, callerId)} - the membership is a condition of the query, not a statement
+ * after it - and the difference from the nine group reads is *why*: a run's group is only knowable from the run, so a
+ * check that came first would need its own query whose only purpose was to be first. Both shapes exist in this module
+ * and each has its reason: {@code ReadActivityService} checks first and then reads, because its three sources do not
+ * contain a group's membership; this one cannot check first without asking the same question twice.
+ *
+ * <p>The refusal is {@link RunRefusals.NoSuchRun} for both conditions - a run that does not exist and a run in a group
+ * this caller is not in - because telling them apart would make this read an oracle for which run ids are real. That
+ * is the mirror of {@code no_such_group} on the group reads.
  */
 @Service
 public class ReadRunService implements ReadRun {
@@ -38,10 +49,11 @@ public class ReadRunService implements ReadRun {
 
     @Override
     @Transactional(readOnly = true)
-    public Result<RunReport> read(UUID runId) {
+    public Result<RunReport> read(UUID callerId, UUID runId) {
+        Objects.requireNonNull(callerId, "callerId");
         Objects.requireNonNull(runId, "runId");
 
-        Optional<RunReport> run = runs.findById(runId);
+        Optional<RunReport> run = runs.findFor(runId, callerId);
 
         return run.<Result<RunReport>>map(Result::ok)
                 .orElseGet(() -> Result.fail(new RunRefusals.NoSuchRun(runId)));

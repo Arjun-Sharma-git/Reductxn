@@ -1,8 +1,11 @@
 package io.reductxn.api.application.netting;
 
+import io.reductxn.api.port.in.GroupRefusals;
 import io.reductxn.api.port.in.PreviewNetting;
+import io.reductxn.api.port.out.Groups;
 import io.reductxn.api.port.out.OpenObligations;
 import io.reductxn.api.port.out.TaxRuleCatalog;
+import io.reductxn.kernel.api.Result;
 import io.reductxn.planning.api.CycleObligation;
 import io.reductxn.planning.api.SettlementPlan;
 import io.reductxn.planning.api.SettlementPlanner;
@@ -41,13 +44,15 @@ import java.util.UUID;
 @Service
 public class NettingPreviewService implements PreviewNetting {
 
+    private final Groups groups;
     private final OpenObligations openObligations;
     private final TaxRuleCatalog taxRules;
     private final SettlementPlanner planner;
 
     public NettingPreviewService(
-            OpenObligations openObligations, TaxRuleCatalog taxRules, SettlementPlanner planner) {
+            Groups groups, OpenObligations openObligations, TaxRuleCatalog taxRules, SettlementPlanner planner) {
 
+        this.groups = Objects.requireNonNull(groups, "groups");
         this.openObligations = Objects.requireNonNull(openObligations, "openObligations");
         this.taxRules = Objects.requireNonNull(taxRules, "taxRules");
         this.planner = Objects.requireNonNull(planner, "planner");
@@ -55,15 +60,23 @@ public class NettingPreviewService implements PreviewNetting {
 
     @Override
     @Transactional(readOnly = true)
-    public SettlementPlan preview(UUID groupId, Instant asOf) {
+    public Result<SettlementPlan> preview(UUID callerId, UUID groupId, Instant asOf) {
+        Objects.requireNonNull(callerId, "callerId");
         Objects.requireNonNull(groupId, "groupId");
         Objects.requireNonNull(asOf, "asOf");
+
+        // The membership is the condition since ADR 0054, and it is checked here rather than a line later because the
+        // tax resolver below is asked per currency: a stranger who got as far as the plan could learn which currencies
+        // this deployment has rules for from the difference between a `404` and a `422` (ADR 0049's ordering).
+        if (!groups.isMember(groupId, callerId)) {
+            return Result.fail(new GroupRefusals.NoSuchGroup(groupId));
+        }
 
         List<CycleObligation> open = openObligations.openFor(groupId, asOf);
 
         // `asOf` is bound here rather than passed through, because the planner is pure and may not read a
         // clock (RULE B21). This is the boundary where "as of when" stops being a parameter and becomes a
         // fixed answer.
-        return planner.plan(open, currency -> taxRules.activeFor(currency, asOf));
+        return Result.ok(planner.plan(open, currency -> taxRules.activeFor(currency, asOf)));
     }
 }

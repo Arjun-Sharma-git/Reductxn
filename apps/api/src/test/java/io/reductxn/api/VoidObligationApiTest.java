@@ -121,7 +121,7 @@ class VoidObligationApiTest extends DatabaseTest {
 
         assertThat(voidedAt(obligation), notNullValue());
 
-        mvc.perform(get("/v1/obligations").param("groupId", groupId.toString()))
+        mvc.perform(get("/v1/obligations").param("groupId", groupId.toString()).header("Authorization", "Bearer " + owner))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].status").value("voided"));

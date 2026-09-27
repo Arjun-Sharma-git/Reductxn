@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, type Route } from '@playwright/test';
 
 /**
  * The API, stubbed from fixtures that are typed by the contract.
@@ -77,20 +77,65 @@ export async function stubApi(
   );
 
   await page.route('**/v1/groups/*/netting/preview*', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(options.preview ?? PREVIEW),
-    }),
+    isSignedIn(route)
+      ? route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(options.preview ?? PREVIEW),
+        })
+      : route.fulfill(NOT_SIGNED_IN),
   );
 
   await page.route('**/v1/groups/*/balances', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(options.balances ?? BALANCES),
-    }),
+    isSignedIn(route)
+      ? route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(options.balances ?? BALANCES),
+        })
+      : route.fulfill(NOT_SIGNED_IN),
   );
+
+  await signedInReader(page);
+}
+
+/**
+ * The session a stub insists on, and the refusal it answers with when there is not one.
+ *
+ * **Every group read requires a member since ADR 0054**, so the stubs that serve them answer `401` without the token the
+ * identity stub issued - exactly as the API does. That is what makes "the client sends the token" an assertion rather
+ * than a claim: a screen that rendered a group's plan while sending no credential would fail here rather than pass.
+ */
+function isSignedIn(route: Route): boolean {
+  return route.request().headers()['authorization'] === `Bearer ${TOKEN_PAIR.accessToken}`;
+}
+
+const NOT_SIGNED_IN = {
+  status: 401,
+  contentType: 'application/problem+json',
+  body: JSON.stringify({
+    type: 'about:blank',
+    title: 'Unauthorized',
+    status: 401,
+    detail: 'stubbed refusal',
+    code: 'api.not_signed_in',
+  }),
+} as const;
+
+/**
+ * A signed-in reader, for the stub helpers that serve a group's own data.
+ *
+ * **The read helpers call this rather than each spec**, and the reason is what the reads became: nine of them now answer
+ * `401` without a member's session, so a helper that served them without a session would be arming every spec with a
+ * page that cannot read anything. The sign-in goes through the two steps a person does - the number, then the code -
+ * which is why these helpers also register the identity stub.
+ *
+ * A spec that is *about* the signed-out answer registers its own stubs and does not call a read helper, or it passes
+ * `{ signedIn: false }` where the helper offers it.
+ */
+async function signedInReader(page: Page): Promise<void> {
+  await stubIdentityApi(page);
+  await signIn(page);
 }
 
 /** A group with nothing open in it: the same shape, with no partitions and nothing to settle. */
@@ -206,6 +251,12 @@ export async function stubTaxApi(
   );
 
   await page.route('**/v1/tax/reports*', (route) => {
+    // A group's tax is its own since ADR 0054, so the stub refuses without the session's token. The *rules* read above
+    // is deliberately unguarded: which rules are in force is the same answer for everybody.
+    if (!isSignedIn(route)) {
+      return route.fulfill(NOT_SIGNED_IN);
+    }
+
     reportRequests.push(new URL(route.request().url()).search);
 
     return route.fulfill({
@@ -214,6 +265,8 @@ export async function stubTaxApi(
       body: JSON.stringify(options.report ?? TAX_REPORT),
     });
   });
+
+  await signedInReader(page);
 
   return { reportRequests };
 }
@@ -334,6 +387,14 @@ export async function stubObligationsApi(
 
   await page.route('**/v1/obligations*', async (route) => {
     if (route.request().method() !== 'POST') {
+      // The list is a group's ledger, and since ADR 0054 it requires a member of the group - the same rule the write
+      // below has asked since ADR 0049.
+      if (!isSignedIn(route)) {
+        await route.fulfill(NOT_SIGNED_IN);
+
+        return;
+      }
+
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -472,6 +533,8 @@ export async function stubObligationsApi(
       body: JSON.stringify({ ...row, status: 'voided' as const }),
     });
   });
+
+  await signedInReader(page);
 
   return posted;
 }
@@ -616,6 +679,7 @@ export async function stubSettlementApi(
     readonly transfers?: readonly TransferStub[];
     readonly decision?: DecisionBehaviour;
     readonly cycles?: readonly CycleStub[];
+    readonly signedIn?: boolean;
   } = {},
 ): Promise<SettlementRecorder> {
   const posted: Record<string, unknown>[] = [];
@@ -629,40 +693,43 @@ export async function stubSettlementApi(
   );
 
   await page.route('**/v1/groups/*/members', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MEMBERS) }),
+    route.fulfill(isSignedIn(route)
+      ? { status: 200, contentType: 'application/json', body: JSON.stringify(MEMBERS) }
+      : NOT_SIGNED_IN),
   );
 
   await page.route('**/v1/groups/*/runs', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify([{ ...base, answers: withDates(answers) }, ...(options.runs ?? [])]),
-    }),
+    route.fulfill(isSignedIn(route)
+      ? {
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([{ ...base, answers: withDates(answers) }, ...(options.runs ?? [])]),
+        }
+      : NOT_SIGNED_IN),
   );
 
   // The cycles: read the list, and open one. A POST answers with the row it wrote and appends it to what the list
   // serves, so a test can watch the member's own request come back as a row - which is the whole point of the read.
   await page.route('**/v1/groups/*/cycles', async (route) => {
     if (route.request().method() === 'GET') {
+      // The read is a group's own since ADR 0054, and this comment used to say the opposite: "the read is untouched,
+      // which is the half of the gap this slice deliberately left alone". The gap is closed, so both halves of this route
+      // now answer 401 without the session's token.
+      if (!isSignedIn(route)) {
+        await route.fulfill(NOT_SIGNED_IN);
+
+        return;
+      }
+
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(cycles) });
 
       return;
     }
 
     // Closing a group's books is a member's act (ADR 0049): the stub refuses a write without the session's token, as
-    // the API does. The read is untouched, which is the half of the gap this slice deliberately left alone.
-    if (route.request().headers()['authorization'] !== `Bearer ${TOKEN_PAIR.accessToken}`) {
-      return route.fulfill({
-        status: 401,
-        contentType: 'application/problem+json',
-        body: JSON.stringify({
-          type: 'about:blank',
-          title: 'Unauthorized',
-          status: 401,
-          detail: 'stubbed refusal',
-          code: 'api.not_signed_in',
-        }),
-      });
+    // the API does.
+    if (!isSignedIn(route)) {
+      return route.fulfill(NOT_SIGNED_IN);
     }
 
     const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
@@ -689,11 +756,14 @@ export async function stubSettlementApi(
     const path = new URL(route.request().url()).pathname;
 
     if (path.endsWith('/transfers')) {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(options.transfers ?? RUN_TRANSFERS),
-      });
+      // The instruction list is the most sensitive part of the plan, and since ADR 0054 it needs a member's session.
+      await route.fulfill(isSignedIn(route)
+        ? {
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(options.transfers ?? RUN_TRANSFERS),
+          }
+        : NOT_SIGNED_IN);
 
       return;
     }
@@ -702,18 +772,8 @@ export async function stubSettlementApi(
       // The answering member is the caller since ADR 0053, so the stub refuses a write without the session's token
       // exactly as the API does. Two things a spec proves by getting past here: the client sends its token, and the
       // body it sends names nobody - which is what the assertion on `posted` is for.
-      if (route.request().headers()['authorization'] !== `Bearer ${TOKEN_PAIR.accessToken}`) {
-        await route.fulfill({
-          status: 401,
-          contentType: 'application/problem+json',
-          body: JSON.stringify({
-            type: 'about:blank',
-            title: 'Unauthorized',
-            status: 401,
-            detail: 'stubbed refusal',
-            code: 'api.not_signed_in',
-          }),
-        });
+      if (!isSignedIn(route)) {
+        await route.fulfill(NOT_SIGNED_IN);
 
         return;
       }
@@ -760,12 +820,18 @@ export async function stubSettlementApi(
       return;
     }
 
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ ...base, answers: withDates(answers) }),
-    });
+    await route.fulfill(isSignedIn(route)
+      ? {
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ ...base, answers: withDates(answers) }),
+        }
+      : NOT_SIGNED_IN);
   });
+
+  if (options.signedIn !== false) {
+    await signedInReader(page);
+  }
 
   return { posted, answers, opened };
 }
@@ -786,13 +852,18 @@ export type MembersRecorder = {
 export async function stubMembersApi(
   page: Page,
   members: readonly Member[] = MEMBERS,
+  options: { readonly signedIn?: boolean } = {},
 ): Promise<MembersRecorder> {
   const recorded: Record<string, unknown>[] = [];
   const current: Member[] = [...members];
 
   await page.route('**/v1/groups/*/members', async (route) => {
     if (route.request().method() === 'GET') {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(current) });
+      // The read names people, and since ADR 0054 it requires a member of the group - the same rule the write below has
+      // asked since ADR 0048.
+      await route.fulfill(isSignedIn(route)
+        ? { status: 200, contentType: 'application/json', body: JSON.stringify(current) }
+        : NOT_SIGNED_IN);
 
       return;
     }
@@ -801,18 +872,8 @@ export async function stubMembersApi(
     // without the token exactly as the API does, so a spec that shows a member added has proved the token was sent.
     // The group's membership itself is not modelled here - that is the API's rule, and the tests that pin it are in
     // `AddMemberApiTest`, against a real database.
-    if (route.request().headers()['authorization'] !== `Bearer ${TOKEN_PAIR.accessToken}`) {
-      return route.fulfill({
-        status: 401,
-        contentType: 'application/problem+json',
-        body: JSON.stringify({
-          type: 'about:blank',
-          title: 'Unauthorized',
-          status: 401,
-          detail: 'stubbed refusal',
-          code: 'api.not_signed_in',
-        }),
-      });
+    if (!isSignedIn(route)) {
+      return route.fulfill(NOT_SIGNED_IN);
     }
 
     const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
@@ -829,6 +890,12 @@ export async function stubMembersApi(
 
     await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(written) });
   });
+
+  // A spec that is about the signed-out answer says so: the screen must render the refusal it gets from the read, and a
+  // signed-in page cannot produce that.
+  if (options.signedIn !== false) {
+    await signedInReader(page);
+  }
 
   return { recorded };
 }
@@ -856,6 +923,14 @@ export type InviteRecorder = {
 };
 
 /**
+ * The group a code in this suite joins.
+ *
+ * It is the id the preview names and the id the acceptance screen links to after joining, and it is the same group the
+ * other specs open by path (`3f7c1c1e-...`), so "the link goes to the group you joined" is a claim a test can follow.
+ */
+export const GROUP_WITH_A_CODE = '3f7c1c1e-0d2a-4a5e-9a6f-6c1d2f4b8e10';
+
+/**
  * The invite API: making a code, and spending one.
  *
  * The acceptance handler records the body it was asked, because the body *is* the recorded identity gap in action - the
@@ -865,9 +940,53 @@ export type InviteRecorder = {
  */
 export async function stubInvitesApi(
   page: Page,
-  options: { readonly refusal?: { readonly status: number; readonly code: string } } = {},
+  options: {
+    readonly refusal?: { readonly status: number; readonly code: string };
+    /**
+     * The group a code joins, as the preview answers it. Absent means the default: a group with a name, so the
+     * acceptance screen has something to show before anybody types anything. `name: null` is the other real state -
+     * a group that exists only as rows, whose preview has no name to show at all (ADR 0043).
+     */
+    readonly group?: { readonly id: string; readonly name?: string | null; readonly memberCount?: number };
+  } = {},
 ): Promise<InviteRecorder> {
   const acceptances: string[] = [];
+
+  // What a code is for, which is the read ADR 0054 added. It is registered first so the accept route below (which
+  // matches a more specific path) is unaffected, and it **does not check for a token**: the contract gives this
+  // operation `security: []`, because the person who asks it is the person who has not signed in yet. A stub that
+  // demanded a session here would be hiding the reason the operation exists.
+  await page.route('**/v1/invites/*', (route) => {
+    if (options.refusal !== undefined) {
+      return route.fulfill({
+        status: options.refusal.status,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'about:blank',
+          title: options.refusal.status === 410 ? 'Gone' : 'Not Found',
+          status: options.refusal.status,
+          detail: 'stubbed refusal',
+          code: options.refusal.code,
+        }),
+      });
+    }
+
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        code: INVITE.code,
+        expiresAt: INVITE.expiresAt,
+        group: {
+          id: options.group?.id ?? GROUP_WITH_A_CODE,
+          // `null` rather than `undefined` for a group with no name: JSON.stringify drops an undefined value, so the two
+          // cases would be one, and "this group has a name and it is Flat 3B" would be unassertable.
+          ...(options.group?.name === null ? {} : { name: options.group?.name ?? 'Flat 3B' }),
+          memberCount: options.group?.memberCount ?? 4,
+        },
+      }),
+    });
+  });
 
   await page.route('**/v1/groups/*/invites', (route) => {
     // A member of the group is who may create a code (ADR 0048): the stub refuses without the session's token, exactly
@@ -1086,6 +1205,7 @@ export function group(id: string, name: string, currency = 'INR', memberCount = 
 export async function stubGroupsApi(
   page: Page,
   groups: readonly GroupSummary[] = [],
+  options: { readonly signedIn?: boolean } = {},
 ): Promise<GroupsRecorder> {
   const created: { body: unknown; key: string | undefined }[] = [];
   const current = [...groups];
@@ -1127,18 +1247,8 @@ export async function stubGroupsApi(
     if (route.request().method() === 'GET') {
       // The session is required, and the stub enforces it. A stub that listed groups for anybody would make "the screen
       // sends the token" untestable - and the signed-out case, which is the ordinary first visit, unrepresentable.
-      if (route.request().headers()['authorization'] !== `Bearer ${TOKEN_PAIR.accessToken}`) {
-        return route.fulfill({
-          status: 401,
-          contentType: 'application/problem+json',
-          body: JSON.stringify({
-            type: 'about:blank',
-            title: 'Unauthorized',
-            status: 401,
-            detail: 'stubbed refusal',
-            code: 'api.not_signed_in',
-          }),
-        });
+      if (!isSignedIn(route)) {
+        return route.fulfill(NOT_SIGNED_IN);
       }
 
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(current) });
@@ -1155,6 +1265,10 @@ export async function stubGroupsApi(
 
     return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(made) });
   });
+
+  if (options.signedIn !== false) {
+    await signedInReader(page);
+  }
 
   return { created };
 }
@@ -1182,9 +1296,16 @@ export type ActivityRow = {
 export async function stubActivityApi(
   page: Page,
   events: readonly ActivityRow[],
-  options: { readonly forbidden?: boolean } = {},
+  options: { readonly forbidden?: boolean; readonly signedIn?: boolean } = {},
 ): Promise<void> {
   await page.route('**/v1/groups/*/activity**', (route) => {
+    // A feed names people, so this read has required a member since ADR 0044 - it was the one read that asked before the
+    // rest did. **The stub did not enforce it until ADR 0054**, which is the sort of gap this slice is about: the server
+    // refused a stranger and the browser suite could not tell, because the stub answered everybody.
+    if (!isSignedIn(route)) {
+      return route.fulfill(NOT_SIGNED_IN);
+    }
+
     if (options.forbidden === true) {
       return route.fulfill({
         status: 404,
@@ -1201,4 +1322,8 @@ export async function stubActivityApi(
 
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(events) });
   });
+
+  if (options.signedIn !== false) {
+    await signedInReader(page);
+  }
 }

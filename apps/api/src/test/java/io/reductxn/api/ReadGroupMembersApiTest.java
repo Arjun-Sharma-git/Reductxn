@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -32,6 +33,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * since ADR 0048 that write requires a member of the group, and a read test whose fixture had to join first would be
  * counting its fixture. The write has its own class against the same database, and what this read serves is the same rows
  * whoever wrote them.
+ *
+ * <p><strong>Since ADR 0054 the reader is one of those rows, and the fixture made that cheap rather than awkward.</strong>
+ * The caller signs in *as* {@code ASHA}: the same person the fixture writes into the group is the one whose session
+ * asks for the list, so no test's expected contents changed - and the assertions are the reason that mattered, because
+ * a read test that added a reader of its own would be counting its fixture again, one slice later. What did change is
+ * the case that cannot happen any more: a group with **no** members is a group nobody can read, so the test that used
+ * to assert an empty list asserts a refusal instead.
  */
 @SpringBootTest
 class ReadGroupMembersApiTest extends DatabaseTest {
@@ -42,22 +50,42 @@ class ReadGroupMembersApiTest extends DatabaseTest {
     private static final UUID ASHA = new UUID(0L, 101L);
     private static final UUID BHAVESH = new UUID(0L, 102L);
 
+    private static final String ASHA_PHONE = "+919812345684";
+
     @Autowired
     private WebApplicationContext context;
 
     private MockMvc mvc;
 
+    /** Asha's session: the caller is one of the group's members, so the lists below are the lists she reads. */
+    private String asha;
+
     @BeforeEach
     void buildMockMvc() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
+
+        asha = signedIn(ASHA_PHONE, ASHA);
     }
 
+    /** The caller's request: every group read needs a session and a membership since ADR 0054. */
+    private MockHttpServletRequestBuilder read(String path, Object groupId) {
+        return get(path, groupId).header("Authorization", "Bearer " + asha);
+    }
+
+    /**
+     * A group nobody is in is a group nobody can read - including the person asking about it.
+     *
+     * <p><strong>This test asserted an empty list until ADR 0054, and the empty list was the problem.</strong> "A
+     * group with no members" cannot be read by a member, because reading requires being one - so the only possible
+     * answers are a refusal, and the refusal is the same one a group that does not exist gives. A group with no
+     * memberships is still a state this build contains (dev data, and a group whose creator's membership was never
+     * written), which is why the code has to answer something rather than pretend the case cannot arise.
+     */
     @Test
-    void aGroupWithNoMembersAnswersAnEmptyListRatherThanAnError() throws Exception {
-        mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray())
-                .andExpect(jsonPath("$.length()").value(0));
+    void aGroupWithNoMembersIsUnreadableRatherThanAnEmptyList() throws Exception {
+        mvc.perform(read("/v1/groups/{groupId}/members", GROUP))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_group"));
     }
 
     @Test
@@ -65,7 +93,7 @@ class ReadGroupMembersApiTest extends DatabaseTest {
         record(GROUP, ASHA, "Asha");
         record(GROUP, BHAVESH, "Bhavesh", "admin");
 
-        mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
+        mvc.perform(read("/v1/groups/{groupId}/members", GROUP))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].userId").value(ASHA.toString()))
@@ -87,7 +115,7 @@ class ReadGroupMembersApiTest extends DatabaseTest {
         joinedAt(GROUP, BHAVESH, "Bhavesh", Instant.parse("2026-01-01T00:00:00Z"));
         joinedAt(GROUP, ASHA, "Asha", Instant.parse("2026-02-01T00:00:00Z"));
 
-        mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
+        mvc.perform(read("/v1/groups/{groupId}/members", GROUP))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].userId").value(BHAVESH.toString()))
@@ -104,7 +132,7 @@ class ReadGroupMembersApiTest extends DatabaseTest {
         joinedAt(GROUP, BHAVESH, "Bhavesh", together);
         joinedAt(GROUP, ASHA, "Asha", together);
 
-        mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
+        mvc.perform(read("/v1/groups/{groupId}/members", GROUP))
                 .andExpect(jsonPath("$[0].userId").value(ASHA.toString()))
                 .andExpect(jsonPath("$[1].userId").value(BHAVESH.toString()));
     }
@@ -114,7 +142,7 @@ class ReadGroupMembersApiTest extends DatabaseTest {
         record(GROUP, ASHA, "Asha");
         record(OTHER_GROUP, BHAVESH, "Bhavesh");
 
-        mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
+        mvc.perform(read("/v1/groups/{groupId}/members", GROUP))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].displayName").value("Asha"));
@@ -122,10 +150,32 @@ class ReadGroupMembersApiTest extends DatabaseTest {
 
     @Test
     void aMalformedGroupIdIsRefusedWithACode() throws Exception {
-        mvc.perform(get("/v1/groups/{groupId}/members", "not-a-uuid"))
+        mvc.perform(read("/v1/groups/{groupId}/members", "not-a-uuid"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("api.request_incomplete"))
                 .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("groupId")));
+    }
+
+    /**
+     * The names are the group's, and since ADR 0054 the read asks who wants them.
+     *
+     * <p>This is the read that names people - three screens in the client consume it - so it is where a stranger's
+     * request was most informative before this slice: it answered with the group's membership, or with an empty list
+     * that said the group existed and was empty. Neither is an answer to a question a non-member asked.
+     */
+    @Test
+    void theMembersAreTheGroupMembersOnly() throws Exception {
+        record(GROUP, ASHA, "Asha");
+
+        mvc.perform(get("/v1/groups/{groupId}/members", GROUP))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("api.not_signed_in"));
+
+        String stranger = signedIn("+919812345685", new UUID(0L, 103L));
+
+        mvc.perform(get("/v1/groups/{groupId}/members", GROUP).header("Authorization", "Bearer " + stranger))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_group"));
     }
 
     /**

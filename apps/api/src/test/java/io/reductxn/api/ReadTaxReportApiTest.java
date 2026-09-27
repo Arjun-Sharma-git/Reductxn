@@ -34,15 +34,27 @@ class ReadTaxReportApiTest extends DatabaseTest {
 
     private static final UUID GROUP = new UUID(0L, 1L);
 
+    /** A group with nothing in it that the caller *is* in, which is the only kind whose empty report is readable. */
+    private static final UUID EMPTY_GROUP = new UUID(0L, 999L);
+
+    private static final String MEMBER_PHONE = "+919812345686";
+
     @Autowired
     private WebApplicationContext context;
 
     private MockMvc mvc;
 
+    /** The caller: a member of both groups above, because a report is a group's own figures (ADR 0054). */
+    private String member;
+
     /** Built from the framework rather than annotated: Spring Boot 4 no longer ships {@code @AutoConfigureMockMvc}. */
     @BeforeEach
     void buildMockMvc() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
+
+        member = signedIn(MEMBER_PHONE, new UUID(0L, 86L));
+        memberRow(GROUP, user(MEMBER_PHONE), "Reader");
+        memberRow(EMPTY_GROUP, user(MEMBER_PHONE), "Reader");
     }
 
     @Test
@@ -157,7 +169,7 @@ class ReadTaxReportApiTest extends DatabaseTest {
 
     @Test
     void aGroupWithNoPlansHasAnEmptyReportRatherThanAnError() throws Exception {
-        report(new UUID(0L, 999L))
+        report(EMPTY_GROUP)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
     }
@@ -165,18 +177,46 @@ class ReadTaxReportApiTest extends DatabaseTest {
     @Test
     void frameworkErrorsAreProblemsToo() throws Exception {
         // `groupId` is required and is a UUID: either mistake is answered before any method here runs, with a problem
-        // body the contract's response list promises.
-        mvc.perform(get("/v1/tax/reports"))
+        // body the contract's response list promises. The missing one is Spring's own answer because a required request
+        // parameter is checked before the handler is entered - the caller is only the *first* thing the handler does.
+        mvc.perform(get("/v1/tax/reports").header("Authorization", "Bearer " + member))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
 
-        mvc.perform(get("/v1/tax/reports").param("groupId", "not-a-uuid"))
+        mvc.perform(get("/v1/tax/reports").param("groupId", "not-a-uuid")
+                        .header("Authorization", "Bearer " + member))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+                .andExpect(jsonPath("$.code").value("api.request_incomplete"));
+    }
+
+    /**
+     * A group's tax is the group's, and since ADR 0054 that is enforced.
+     *
+     * <p><strong>This is the read a rule about paths could not have found.</strong> Its group arrives as a query
+     * parameter, so no test that reads the route table would notice the missing check - the endpoint is
+     * {@code /v1/tax/reports} and says nothing about a group in its path. The three lines below are the three answers:
+     * no session is a `401`, a group the caller is not in is the same `404` a group that does not exist gives, and a
+     * member's request is the report it always was.
+     */
+    @Test
+    void aGroupsTaxIsTheGroupMembersOnly() throws Exception {
+        mvc.perform(get("/v1/tax/reports").param("groupId", GROUP.toString()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("api.not_signed_in"));
+
+        String stranger = signedIn("+919812345687", new UUID(0L, 87L));
+
+        mvc.perform(get("/v1/tax/reports").param("groupId", GROUP.toString())
+                        .header("Authorization", "Bearer " + stranger))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_group"));
+
+        report(EMPTY_GROUP).andExpect(status().isOk());
     }
 
     private ResultActions report(UUID groupId, String... params) throws Exception {
-        var request = get("/v1/tax/reports").param("groupId", groupId.toString());
+        var request = get("/v1/tax/reports").param("groupId", groupId.toString())
+                .header("Authorization", "Bearer " + member);
 
         for (String param : params) {
             String[] pair = param.split("=", 2);

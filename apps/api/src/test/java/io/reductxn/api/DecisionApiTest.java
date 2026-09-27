@@ -181,12 +181,12 @@ class DecisionApiTest extends DatabaseTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("api.no_such_group"));
+                .andExpect(jsonPath("$.code").value("api.no_such_run"));
 
         assertThat(countAnswersFor(runId))
-                .as("and nothing was written. The caller's membership is asked before the row, so a stranger's answer "
-                        + "never reaches the store - and the code is the one every group write answers with, so a "
-                        + "guessed run id cannot be tested for existence")
+                .as("and nothing was written. The reader this endpoint authorises with now narrows by membership "
+                        + "(ADR 0054), so a stranger's answer never reaches the store - and the code is the run-scoped "
+                        + "one, which names the id they sent rather than the group they were not told about.")
                 .isZero();
     }
 

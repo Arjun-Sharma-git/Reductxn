@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -84,20 +85,44 @@ class ReadObligationsApiTest extends DatabaseTest {
                 """, group, callerId);
     }
 
-    @Test
-    void answersAnEmptyListForAGroupWithNothingInItAndNotAnotherGroupsCommitments() throws Exception {
-        obligation(FIRST, GROUP, ASHA, BHAVESH, 125_000, "2026-09-01T00:00:00Z");
+    /**
+     * The caller's request, since ADR 0054: the list is a group's ledger, so a session is its first condition.
+     *
+     * <p>A builder rather than a performed request, so each test keeps its own {@code .param(...)} chain - the
+     * parameters are the subject of half these tests, and an argument list of seven strings would say less.
+     */
+    private MockHttpServletRequestBuilder list() {
+        return get("/v1/obligations").header("Authorization", "Bearer " + caller);
+    }
 
-        mvc.perform(get("/v1/obligations").param("groupId", OTHER_GROUP.toString()))
+    /**
+     * A group with nothing in it answers an empty page; a group the caller is not in is refused.
+     *
+     * <p><strong>The second half is new with ADR 0054 and the first is unchanged.</strong> The obligations list is the
+     * screen this interface is organised around, and it names both parties of every commitment - so until this slice the
+     * request that used to be answered with an empty array was a stranger's request being politely lied to. The refusal
+     * is the same `404` a group that does not exist gives, so neither answer tells a caller whether the group is real.
+     */
+    @Test
+    void anEmptyGroupAnswersAnEmptyPageAndAGroupThatIsNotTheCallersIsRefused() throws Exception {
+        obligation(FIRST, OTHER_GROUP, ASHA, BHAVESH, 125_000, "2026-09-01T00:00:00Z");
+
+        // The caller's own group, which has nothing recorded: an empty page rather than an error.
+        mvc.perform(list().param("groupId", GROUP.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(0));
+
+        // And a group with a commitment in it that the caller is not in: refused, because a page is a group's ledger.
+        mvc.perform(list().param("groupId", OTHER_GROUP.toString()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_group"));
     }
 
     @Test
     void servesWhatEachCommitmentIsAndWhoItIsBetween() throws Exception {
         obligation(FIRST, GROUP, ASHA, BHAVESH, 125_000, "2026-09-01T00:00:00Z");
 
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()))
+        mvc.perform(list().param("groupId", GROUP.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].id").value(FIRST.toString()))
@@ -116,11 +141,11 @@ class ReadObligationsApiTest extends DatabaseTest {
         obligation(FIRST, GROUP, ASHA, BHAVESH, 100, "2026-09-01T00:00:00Z");
         obligation(SECOND, GROUP, BHAVESH, ASHA, 200, "2026-09-02T00:00:00Z");
 
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()))
+        mvc.perform(list().param("groupId", GROUP.toString()))
                 .andExpect(jsonPath("$[0].id").value(SECOND.toString()))
                 .andExpect(jsonPath("$[1].id").value(FIRST.toString()));
 
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()).param("sort", "occurredAt"))
+        mvc.perform(list().param("groupId", GROUP.toString()).param("sort", "occurredAt"))
                 .andExpect(jsonPath("$[0].id").value(FIRST.toString()))
                 .andExpect(jsonPath("$[1].id").value(SECOND.toString()));
     }
@@ -130,14 +155,14 @@ class ReadObligationsApiTest extends DatabaseTest {
         obligation(FIRST, GROUP, ASHA, BHAVESH, 100, "2026-09-01T00:00:00Z");
         heldByARunThatIs(FIRST, "done");
 
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()))
+        mvc.perform(list().param("groupId", GROUP.toString()))
                 .andExpect(jsonPath("$[0].status").value("settled"));
 
         // And the filter reads the same value the row carries: one derivation, so a page cannot contain a row whose
         // status it would not display.
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()).param("status", "settled"))
+        mvc.perform(list().param("groupId", GROUP.toString()).param("status", "settled"))
                 .andExpect(jsonPath("$.length()").value(1));
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()).param("status", "open"))
+        mvc.perform(list().param("groupId", GROUP.toString()).param("status", "open"))
                 .andExpect(jsonPath("$.length()").value(0));
     }
 
@@ -146,7 +171,7 @@ class ReadObligationsApiTest extends DatabaseTest {
         obligation(FIRST, GROUP, ASHA, BHAVESH, 100, "2026-09-01T00:00:00Z");
         heldByARunThatIs(FIRST, "awaiting_approval");
 
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()))
+        mvc.perform(list().param("groupId", GROUP.toString()))
                 .andExpect(jsonPath("$[0].status").value("netted"));
     }
 
@@ -158,7 +183,7 @@ class ReadObligationsApiTest extends DatabaseTest {
         // the derivation lists the five holding states instead of treating "not done" as holding.
         heldByARunThatIs(FIRST, "failed");
 
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()))
+        mvc.perform(list().param("groupId", GROUP.toString()))
                 .andExpect(jsonPath("$[0].status").value("open"));
     }
 
@@ -168,10 +193,10 @@ class ReadObligationsApiTest extends DatabaseTest {
         obligation(SECOND, GROUP, BHAVESH, ASHA, 200, "2026-09-10T00:00:00Z");
 
         // A member reading their own ledger wants what they owe and what they are owed.
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()).param("memberId", ASHA.toString()))
+        mvc.perform(list().param("groupId", GROUP.toString()).param("memberId", ASHA.toString()))
                 .andExpect(jsonPath("$.length()").value(2));
 
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString())
+        mvc.perform(list().param("groupId", GROUP.toString())
                         .param("from", "2026-09-09").param("to", "2026-09-10"))
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].id").value(SECOND.toString()));
@@ -179,26 +204,26 @@ class ReadObligationsApiTest extends DatabaseTest {
 
     @Test
     void refusesAQueryItCannotReadWithACode() throws Exception {
-        mvc.perform(get("/v1/obligations"))
+        mvc.perform(list())
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("api.obligation_request_incomplete"))
                 .andExpect(jsonPath("$.detail").value(containsString("groupId")));
 
-        mvc.perform(get("/v1/obligations").param("groupId", "not-a-uuid"))
+        mvc.perform(list().param("groupId", "not-a-uuid"))
                 .andExpect(status().isBadRequest());
 
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()).param("status", "settling"))
+        mvc.perform(list().param("groupId", GROUP.toString()).param("status", "settling"))
                 .andExpect(jsonPath("$.detail").value(containsString("settled")));
 
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()).param("from", "yesterday"))
+        mvc.perform(list().param("groupId", GROUP.toString()).param("from", "yesterday"))
                 .andExpect(jsonPath("$.detail").value(containsString("yyyy-MM-dd")));
 
         // A sort this build does not order by is refused rather than ignored, because a silently ignored sort
         // answers a different question from the one that was asked.
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()).param("sort", "amount"))
+        mvc.perform(list().param("groupId", GROUP.toString()).param("sort", "amount"))
                 .andExpect(jsonPath("$.detail").value(containsString("-occurredAt")));
 
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()).param("limit", "many"))
+        mvc.perform(list().param("groupId", GROUP.toString()).param("limit", "many"))
                 .andExpect(jsonPath("$.detail").value(containsString("whole number")));
     }
 
@@ -207,16 +232,16 @@ class ReadObligationsApiTest extends DatabaseTest {
         obligation(FIRST, GROUP, ASHA, BHAVESH, 100, "2026-09-01T00:00:00Z");
         obligation(SECOND, GROUP, ASHA, BHAVESH, 200, "2026-09-02T00:00:00Z");
 
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()).param("limit", "1"))
+        mvc.perform(list().param("groupId", GROUP.toString()).param("limit", "1"))
                 .andExpect(jsonPath("$.length()").value(1));
 
         // A limit past the maximum is clamped rather than refused - the request is answerable, it is just bigger than
         // this endpoint serves - and a limit of zero is not a limit, so it takes the default instead of answering
         // with no rows.
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()).param("limit", "9999"))
+        mvc.perform(list().param("groupId", GROUP.toString()).param("limit", "9999"))
                 .andExpect(jsonPath("$.length()").value(2));
 
-        mvc.perform(get("/v1/obligations").param("groupId", GROUP.toString()).param("limit", "0"))
+        mvc.perform(list().param("groupId", GROUP.toString()).param("limit", "0"))
                 .andExpect(jsonPath("$.length()").value(2));
     }
 

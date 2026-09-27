@@ -1,14 +1,12 @@
 package io.reductxn.api.application.decisions;
 
 import io.reductxn.api.port.in.DecisionRefusals;
-import io.reductxn.api.port.in.GroupRefusals;
 import io.reductxn.api.port.in.ReadRun;
 import io.reductxn.api.port.in.RecordDecision;
 import io.reductxn.api.port.in.NewDecision;
 import io.reductxn.api.port.in.RecordedDecision;
 import io.reductxn.api.port.in.RunReport;
 import io.reductxn.api.port.out.Decisions;
-import io.reductxn.api.port.out.Groups;
 import io.reductxn.kernel.api.Result;
 
 import org.springframework.stereotype.Service;
@@ -52,12 +50,10 @@ public class RecordDecisionService implements RecordDecision {
 
     private final ReadRun readRun;
     private final Decisions decisions;
-    private final Groups groups;
 
-    public RecordDecisionService(ReadRun readRun, Decisions decisions, Groups groups) {
+    public RecordDecisionService(ReadRun readRun, Decisions decisions) {
         this.readRun = Objects.requireNonNull(readRun, "readRun");
         this.decisions = Objects.requireNonNull(decisions, "decisions");
-        this.groups = Objects.requireNonNull(groups, "groups");
     }
 
     @Override
@@ -68,22 +64,19 @@ public class RecordDecisionService implements RecordDecision {
 
         UUID runId = decision.runId();
 
-        // The run, then its group, then the write - the order the sibling `execute` endpoint uses, and for its
-        // reason: a stranger holding a run id must not be able to tell a run that exists from one that does not, so
-        // both answer the same 404. The reader is shared rather than a second "which group is this run's" query,
-        // which is one row read one way.
-        Result<RunReport> found = readRun.read(runId);
+        // The run, and the caller's right to answer it, in one read - since ADR 0054 the store narrows by membership, so
+        // a run in a group this caller is not in is not a row and answers `no_such_run`. The order is unchanged: the run
+        // first, then the write, and a stranger learns nothing about whether the id they sent is real.
+        //
+        // **The refusal is now `no_such_run` where ADR 0053 chose `no_such_group`, and that is a correction the narrowed
+        // read made rather than a change of guard.** Both are `404` and both refuse a stranger, but `no_such_group`'s
+        // message names the group id it could not find - so an unauthenticated request holding any run uuid was handed
+        // the group that run belongs to, in the refusal's own prose. A run-scoped route answers a run-scoped code, which
+        // names only the id the caller sent.
+        Result<RunReport> found = readRun.read(callerId, runId);
 
         if (found instanceof Result.Failure<RunReport> refused) {
             return Result.fail(refused.error());
-        }
-
-        UUID groupId = ((Result.Ok<RunReport>) found).value().groupId();
-
-        // The same fact and the same refusal every other group write asks (ADR 0049), which is why it is this call
-        // and not a second implementation of "may this person write here".
-        if (!groups.isMember(groupId, callerId)) {
-            return Result.fail(new GroupRefusals.NoSuchGroup(groupId));
         }
 
         Decisions.Written written = decisions.record(callerId, decision);

@@ -103,6 +103,17 @@ is the debt's party rather than its author, and no session decides who owes whom
 stored since `V103` and `libs/fx`'s quote tables - and it is why rate ingestion exists (ADR 0027), because a conversion
 with no rate is refused rather than guessed.
 
+**Every read of a group's books needs a member of it, and that is new (ADR 0054).** This section used to say, correctly
+at the time, that "every read is open to anybody holding a group's id" - nine of them were: balances, the netting
+preview, the obligations list, the cycles and runs lists, the members list, a run, its transfers and the tax report. Each
+resolves a caller now, asks `Groups.isMember` before reading anything, and refuses with the `no_such_group` `404` ADR 0043
+gave the group read. Their replacements are not a rule about paths: `GET /tax/reports` takes its group as a **query
+parameter**, so it is the one a path-shaped check would have missed, and the ADR records that as a finding. What is
+deliberately still open, in the same list: who may hand a code out (the `admin` role is recorded and nothing reads it, so
+a group cannot make its invitations admin-only the way ADR 0048 declined to), and whether a group can share a *read* with
+somebody who must not become a member - a capability link, which needs a principal that is not a user and is therefore a
+feature rather than a permission. Nothing still decides when a cycle is due: a group has no schedule.
+
 The sentence this paragraph used to carry - that a cross-currency obligation could not be stored because
 `obligations` had no quote columns - outlived the columns by several slices. Recorded here rather than quietly
 deleted: a README that says what is missing is only useful while somebody compares it against the schema, and this
@@ -179,11 +190,13 @@ named rather than implied. And **`bearerFormat: JWT` is gone**: the token is opa
 the row - both tokens, in one conditional update, without moving the session's end, so a replayed refresh token finds
 nothing and the old access token dies with it.
 
-The one thing that slice deliberately did not do is require a token anywhere except `/me`. Five slices later, the
+The one thing that slice deliberately did not do is require a token anywhere except `/me`. Eight slices later, the
 boundaries that read a caller are `GET /me`, the three group operations, the void, the activity feed, the acceptance of
-an invitation, the two group-management writes and the two writes to a group's books (ADR 0043, 0045, 0047, 0048, 0049)
-- the last four require a **member of the group**, asked of `Groups.isMember` in the use case rather than in the
-controller. Recording an obligation also attributes it: the caller travels to the ledger as the entry's `createdBy`,
+an invitation, the two group-management writes, the two writes to a group's books (ADR 0043, 0045, 0047, 0048, 0049) and
+**every read of a group's books since ADR 0054** - the last four and the nine reads require a **member of the group**,
+asked of `Groups.isMember` in the use case rather than in the controller, except for the two run-scoped routes, where the
+membership is a clause of the query itself (`SettlementRuns.findFor`) because a run's group is only knowable from the
+run. Recording an obligation also attributes it: the caller travels to the ledger as the entry's `createdBy`,
 which the entry hash covers. `POST /runs/{runId}/execute` joined them in ADR 0050, and it is the one boundary whose
 *work* happens in the other deployable: the API writes a request onto the run's own row
 (`settlement_runs.execute_requested_at`) and the settlement worker's driver honours it on its next pass, because calling

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -61,9 +62,20 @@ class ReadRunApiTest extends DatabaseTest {
 
     private MockMvc mvc;
 
+    /** The caller: one of the run's own participants, because a run is read by a member of its group (ADR 0054). */
+    private String alice;
+
     @BeforeEach
     void buildMockMvc() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
+
+        alice = signedIn("+919812345690", ALICE);
+        memberRow(GROUP, ALICE, "Alice");
+    }
+
+    /** The caller's request: every run read needs a session and a membership since ADR 0054. */
+    private MockHttpServletRequestBuilder read(String path, Object runId) {
+        return get(path, runId).header("Authorization", "Bearer " + alice);
     }
 
     @Test
@@ -74,7 +86,7 @@ class ReadRunApiTest extends DatabaseTest {
         transfer(runId, "INR", ALICE, BORIS, 1_000L, "run:" + runId + ":inr:1");
         answer(runId, ALICE, "approve", AS_OF);
 
-        mvc.perform(get("/v1/runs/{runId}", runId))
+        mvc.perform(read("/v1/runs/{runId}", runId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(runId.toString()))
                 .andExpect(jsonPath("$.groupId").value(GROUP.toString()))
@@ -113,7 +125,7 @@ class ReadRunApiTest extends DatabaseTest {
         // columns.
         gates(runId, "awaiting_approval", false, 1, 3, 2, true, AS_OF);
 
-        mvc.perform(get("/v1/runs/{runId}", runId))
+        mvc.perform(read("/v1/runs/{runId}", runId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.gates.quorum.met").value(false))
                 .andExpect(jsonPath("$.gates.quorum.counted").value(1))
@@ -134,7 +146,7 @@ class ReadRunApiTest extends DatabaseTest {
         shortfall(runId, "INR", 2, 12_500L);
         shortfall(runId, "JPY", 0, 224L);
 
-        mvc.perform(get("/v1/runs/{runId}", runId))
+        mvc.perform(read("/v1/runs/{runId}", runId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.gates.funding.satisfied").value(false))
                 .andExpect(jsonPath("$.gates.funding.outstanding", hasSize(2)))
@@ -151,7 +163,7 @@ class ReadRunApiTest extends DatabaseTest {
     void aRunTheWorkerHasNotLookedAtYetHasNoGatesRatherThanAnInventedVerdict() throws Exception {
         UUID runId = run("awaiting_approval");
 
-        mvc.perform(get("/v1/runs/{runId}", runId))
+        mvc.perform(read("/v1/runs/{runId}", runId))
                 .andExpect(status().isOk())
                 // Absent until the worker concludes something: "nobody has looked" and "the gates are satisfied"
                 // are different facts, and answering the first with the second would be inventing a verdict.
@@ -172,7 +184,7 @@ class ReadRunApiTest extends DatabaseTest {
                 "rail rejects this account");
         transfer(runId, "INR", ALICE, BORIS, 300_000L, "run:" + runId + ":inr:mm");
 
-        mvc.perform(get("/v1/runs/{runId}/transfers", runId))
+        mvc.perform(read("/v1/runs/{runId}/transfers", runId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(3)))
                 .andExpect(jsonPath("$[*].railRef", contains(
@@ -198,13 +210,13 @@ class ReadRunApiTest extends DatabaseTest {
     void aRunStillBeingComputedReadsBackEmptyRatherThanBroken() throws Exception {
         UUID runId = run("computing");
 
-        mvc.perform(get("/v1/runs/{runId}", runId))
+        mvc.perform(read("/v1/runs/{runId}", runId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("computing"))
                 .andExpect(jsonPath("$.partitions", hasSize(0)))
                 .andExpect(jsonPath("$.answers", hasSize(0)));
 
-        mvc.perform(get("/v1/runs/{runId}/transfers", runId))
+        mvc.perform(read("/v1/runs/{runId}/transfers", runId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
     }
@@ -213,18 +225,51 @@ class ReadRunApiTest extends DatabaseTest {
     void aRunThatDoesNotExistIsNotFoundOnBothEndpoints() throws Exception {
         UUID unknown = UUID.randomUUID();
 
-        mvc.perform(get("/v1/runs/{runId}", unknown))
+        mvc.perform(read("/v1/runs/{runId}", unknown))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("api.no_such_run"));
 
-        mvc.perform(get("/v1/runs/{runId}/transfers", unknown))
+        mvc.perform(read("/v1/runs/{runId}/transfers", unknown))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_run"));
+    }
+
+    /**
+     * A run in a group the caller is not in answers what a run id that matches nothing answers (ADR 0054).
+     *
+     * <p><strong>One code for two conditions, and the reason is that the alternative is an oracle.</strong> A second
+     * code for "not yours" would let a caller holding a run uuid learn that the run exists - and this read names the
+     * plan, its amounts and its answers, which is the most a run id can be worth to somebody outside the group. The
+     * refusal is `api.no_such_run` rather than `api.no_such_group`, which is the mirror of what the group reads do and
+     * is deliberate: the code a run-scoped route answers names the id the caller sent and nothing else.
+     *
+     * <p>The write endpoints that read a run first get this answer too, since they share this reader - which is why
+     * `POST /runs/{runId}/decisions` and `.../execute` refuse a stranger with `no_such_run` where ADR 0053 chose
+     * `no_such_group`: that refusal's own prose named the group id it could not find, so an unauthenticated request
+     * holding a run uuid was told which group the run belonged to.
+     */
+    @Test
+    void aRunInAGroupThatIsNotTheCallersIsNotFound() throws Exception {
+        UUID runId = run("awaiting_approval");
+
+        mvc.perform(get("/v1/runs/{runId}", runId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("api.not_signed_in"));
+
+        String stranger = signedIn("+919812345691", new UUID(0L, 91L));
+
+        mvc.perform(get("/v1/runs/{runId}", runId).header("Authorization", "Bearer " + stranger))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("api.no_such_run"));
+
+        mvc.perform(get("/v1/runs/{runId}/transfers", runId).header("Authorization", "Bearer " + stranger))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("api.no_such_run"));
     }
 
     @Test
     void anIdThatIsNotAnIdIsRefusedRatherThanLookedUp() throws Exception {
-        mvc.perform(get("/v1/runs/{runId}", "not-a-uuid"))
+        mvc.perform(read("/v1/runs/{runId}", "not-a-uuid"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("api.request_incomplete"));
     }

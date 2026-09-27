@@ -132,15 +132,23 @@ p {
   color: var(--rn-text-muted);
 }
 
-/* A button that reads as a link, because signing out is not a form submission. */
+/* A button that reads as a link, because signing out is not a form submission.
+   Its colour is a text token rather than `--rn-accent`, which `tokens.css` documents as "kept for fills": the accent is
+   #22c55e, which on `--rn-surface` is about 1.9:1 - a real contrast failure in this shell since the account area was
+   added, invisible to the suite until ADR 0054 because only a **signed-in** page renders this button and no axe run had
+   ever been signed in. The muted/`--rn-text` pair is the one the group navigation uses for the same kind of target. */
 .rn-app-account-action {
   font: inherit;
-  color: var(--rn-accent);
+  color: var(--rn-text-muted);
   background: none;
   border: 0;
   padding: 0;
   cursor: pointer;
   text-decoration: underline;
+}
+
+.rn-app-account-action:hover {
+  color: var(--rn-text);
 }
 
 .rn-app-brand {

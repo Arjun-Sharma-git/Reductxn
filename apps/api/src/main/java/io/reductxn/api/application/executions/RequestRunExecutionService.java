@@ -1,12 +1,10 @@
 package io.reductxn.api.application.executions;
 
-import io.reductxn.api.port.in.GroupRefusals;
 import io.reductxn.api.port.in.ReadRun;
 import io.reductxn.api.port.in.RequestRunExecution;
 import io.reductxn.api.port.in.RequestedExecution;
 import io.reductxn.api.port.in.RunRefusals;
 import io.reductxn.api.port.in.RunReport;
-import io.reductxn.api.port.out.Groups;
 import io.reductxn.api.port.out.RunExecutionRequests;
 import io.reductxn.kernel.api.Result;
 
@@ -35,13 +33,11 @@ import java.util.UUID;
 public class RequestRunExecutionService implements RequestRunExecution {
 
     private final ReadRun readRun;
-    private final Groups groups;
     private final RunExecutionRequests requests;
     private final Clock clock;
 
-    public RequestRunExecutionService(ReadRun readRun, Groups groups, RunExecutionRequests requests, Clock clock) {
+    public RequestRunExecutionService(ReadRun readRun, RunExecutionRequests requests, Clock clock) {
         this.readRun = Objects.requireNonNull(readRun, "readRun");
-        this.groups = Objects.requireNonNull(groups, "groups");
         this.requests = Objects.requireNonNull(requests, "requests");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
@@ -51,17 +47,18 @@ public class RequestRunExecutionService implements RequestRunExecution {
         Objects.requireNonNull(callerId, "callerId");
         Objects.requireNonNull(runId, "runId");
 
-        Result<RunReport> found = readRun.read(runId);
+        // The run, and the caller's right to ask about it, in one read - the store narrows by membership since
+        // ADR 0054, so a run in a group this caller is not in is not a row. That is why the `groups.isMember` call this
+        // method used to make is gone rather than moved: it was asking the same question one statement later, and the
+        // refusal it answered with (`no_such_group`) named the group id in its prose - so an unauthenticated request
+        // holding any run uuid learned which group that run belonged to. `no_such_run` names only the id the caller sent.
+        Result<RunReport> found = readRun.read(callerId, runId);
 
         if (found instanceof Result.Failure<RunReport> refused) {
             return Result.fail(refused.error());
         }
 
         RunReport run = ((Result.Ok<RunReport>) found).value();
-
-        if (!groups.isMember(run.groupId(), callerId)) {
-            return Result.fail(new GroupRefusals.NoSuchGroup(run.groupId()));
-        }
 
         if (!canStillMove(run)) {
             return Result.fail(new RunRefusals.NotReadyToExecute(runId, run.status()));

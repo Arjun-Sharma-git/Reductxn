@@ -100,6 +100,23 @@ public class JooqSettlementRuns implements SettlementRuns {
     private static final Field<Boolean> GATE_FUNDING_SATISFIED = DSL.field("funding_satisfied", Boolean.class);
     private static final Field<OffsetDateTime> GATE_CONCLUDED = DSL.field("concluded_at", OffsetDateTime.class);
 
+    /**
+     * The membership the run read narrows by, aliased and qualified.
+     *
+     * <p>Qualified on both sides because a join would otherwise be ambiguous at runtime rather than at compile time:
+     * {@code settlement_runs} and {@code group_members} both have a {@code group_id}, and jOOQ renders an unqualified
+     * {@code field("group_id")} as a bare column name for the database to resolve (the failure {@code JooqCycles} and
+     * {@code JooqGroups} both document). The subquery is correlated on the run's group, so the outer reference is
+     * spelled with the table's real name.
+     */
+    private static final Table<Record> MEMBERSHIPS = DSL.table("group_members").as("mine");
+    private static final Field<UUID> MEMBERSHIP_GROUP = DSL.field(DSL.name("mine", "group_id"), UUID.class);
+    private static final Field<UUID> MEMBERSHIP_USER = DSL.field(DSL.name("mine", "user_id"), UUID.class);
+
+    /** The run's group as the correlated subquery refers to it: qualified, because the subquery joins another table. */
+    private static final Field<UUID> RUN_GROUP_QUALIFIED =
+            DSL.field(DSL.name("settlement_runs", "group_id"), UUID.class);
+
     private static final Table<Record> GATE_SHORTFALLS = DSL.table("settlement_run_gate_shortfalls");
     private static final Field<UUID> SHORTFALL_RUN = DSL.field("run_id", UUID.class);
     private static final Field<String> SHORTFALL_CURRENCY = DSL.field("currency_code", String.class);
@@ -113,12 +130,26 @@ public class JooqSettlementRuns implements SettlementRuns {
     }
 
     @Override
-    public Optional<RunReport> findById(UUID runId) {
+    public Optional<RunReport> findFor(UUID runId, UUID callerId) {
         Objects.requireNonNull(runId, "runId");
+        Objects.requireNonNull(callerId, "callerId");
 
+        // The membership is a condition of the statement rather than a check after it, so a run in a group this caller
+        // is not in is not a row at all - the same narrowing JooqGroups.forMember does for a group, and for the same
+        // reason: "is this run yours" is not something a future caller can forget to ask, because the store cannot
+        // answer without being told who is asking (ADR 0054).
+        //
+        // `exists` rather than a join: the run's own row is what is being selected, and a join would put a second
+        // `group_id` in scope for a query whose other five columns are read unqualified. One membership row per person
+        // per group means the two are the same answer either way, and the index on `(group_id, user_id)` is the pair
+        // this asks for.
         Record run = dsl.select(RUN_ID, RUN_GROUP, RUN_CYCLE, RUN_STATUS, RUN_COMPUTED_AT)
                 .from(RUNS)
                 .where(RUN_ID.eq(runId))
+                .and(DSL.exists(dsl.selectOne()
+                        .from(MEMBERSHIPS)
+                        .where(MEMBERSHIP_GROUP.eq(RUN_GROUP_QUALIFIED))
+                        .and(MEMBERSHIP_USER.eq(callerId))))
                 .fetchOne();
 
         if (run == null) {
