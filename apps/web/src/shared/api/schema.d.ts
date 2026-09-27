@@ -484,8 +484,13 @@ export interface paths {
          *     so a name is a fact the group agreed on. `role` is recorded and nothing consults it yet, which the schema
          *     says rather than hides.
          *
-         *     There is no `404` for a group nobody has heard of, for the reason the runs and cycles lists give: groups
-         *     are not tables, so the empty array is true of a group with no members and of a group that does not exist.
+         *     **Membership is the condition, since ADR 0054** - a group the caller is not in is a `404` with the same code
+         *     and the same reasoning as the group read (ADR 0043): telling "no such group" and "not yours" apart would let
+         *     anybody holding a guess learn which ids are real. This read served a bare uuid until then, and the paragraph
+         *     that used to be here said so: "groups are not tables, so the empty array is true of a group with no members
+         *     and of a group that does not exist". The second half of that was true when it was written and has been false
+         *     since ADR 0043 gave groups a table - and a read that answers an empty list for a group it will not name is a
+         *     read that cannot be told apart from a working one.
          */
         get: {
             parameters: {
@@ -508,6 +513,8 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
             };
         };
         put?: never;
@@ -723,6 +730,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/invites/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What an invite code is for, before accepting it
+         * @description The group a code joins somebody to, and whether the code still works.
+         *
+         *     **This is the read that makes the code the thing a group shares** (ADR 0054). Until it existed, a code could
+         *     only be *spent*: the acceptance answered with the membership it created, so the person following a link had to
+         *     type their name into an operation that named no group, and a group with something to share had nothing to send
+         *     but an id. A code was already the only credential this product hands out - eight characters from a
+         *     thirty-two-symbol alphabet, with a window and optionally a use limit - so what was missing was not a
+         *     mechanism but a *screen's worth of facts*: which group, how many people are in it, and whether the invitation
+         *     has run out.
+         *
+         *     **No session, and that is the operation rather than an omission.** This is the one read in the document with
+         *     `security: []`, and the reason is who asks it: a person who followed a link and has not signed in yet. The
+         *     code *is* the capability - it is unguessable, it expires, and the group chose to hand it out - so a preview
+         *     readable by whoever holds the code is exactly as private as the link itself. What that buys is the flow the
+         *     acceptance cannot provide: somebody can see what they are being asked to join, and decide, before creating a
+         *     session. Everything a *member* can read is still behind membership (ADR 0044, 0054), and this operation reads
+         *     nothing beyond the group's name and its member count.
+         *
+         *     **What is deliberately not here.** No amounts, no member names, no commitments, no activity: a code says "you
+         *     are invited to this group", and an invitation that disclosed the group's ledger before somebody joined would
+         *     be a disclosure the group did not make. `memberCount` is the one number, because "which group is this" is
+         *     unanswerable when three groups are called `Flat 3B` - and because the group's own list screen shows its
+         *     members that number already.
+         *
+         *     **`group.name` is absent for a group that exists only as rows.** `group_members` and `invitations` write a
+         *     bare uuid, and a group with members and commitments and no `groups` row of its own is a state this build
+         *     contains (ADR 0043, which added the table rather than migrating the data). Its invitations are real, so they
+         *     preview: the `id` is always present and the `name` is the field that may be missing, which is what the client
+         *     shows - the same fallback its group layout makes for the same reason.
+         *
+         *     **Nothing about who created the code.** `invitations` has no creator column, deliberately (ADR 0041), so the
+         *     "who invited you" a joiner might expect is not a fact this deployment holds - and this document says so rather
+         *     than leaving a client to wonder why the field is missing.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The invitation's code, as it was created. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The invitation, and the group it joins somebody to */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["InvitePreview"];
+                    };
+                };
+                400: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
+                410: components["responses"]["Problem"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/groups/{groupId}/balances": {
         parameters: {
             query?: never;
@@ -759,9 +843,11 @@ export interface paths {
          *     the two apart yet, which is recorded as a gap rather than papered over: a client shows the identifier for it,
          *     the same way it shows one for a member it has no name for.
          *
-         *     There is no `404` for a group nobody has heard of, for the reason the members, runs and cycles lists give:
-         *     groups are not tables in this build, so an empty array is true of a group with nothing open and of a group
-         *     that does not exist.
+         *     **Membership is the condition, since ADR 0054** - a group the caller is not in is a `404` with the same code
+         *     and the same reasoning as the group read (ADR 0043): telling "no such group" and "not yours" apart would let
+         *     anybody holding a guess learn which ids are real. Balances are the most sensitive read in this document -
+         *     every member, every amount, and who owes whom - so this endpoint holding a bare uuid was the widest of the
+         *     nine reads ADR 0054 closed, and it was reachable from the client by pasting an id.
          */
         get: {
             parameters: {
@@ -784,6 +870,8 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
             };
         };
         put?: never;
@@ -897,12 +985,20 @@ export interface paths {
          *     told two things. The filter is applied to the same expression the response carries, so a page cannot contain
          *     a row whose status it would not display.
          *
-         *     **The dates are UTC days**, and that is a stand-in: a group's settlement timezone is a property of a group
-         *     and no group exists in this build, so `from` is that day's midnight UTC and `to` is inclusive of the whole of
-         *     its day.
+         *     **The dates are UTC days.** `from` is that day's midnight UTC and `to` is inclusive of the whole of its day,
+         *     which is a stand-in of a real kind: the day belongs to the group, and a group's `settlementTimezone` is
+         *     nullable, so a group that has not chosen one has no day to evaluate a bound in (ADR 0043). This paragraph used
+         *     to say that no group exists in this build, which was true when it was written and false from the moment groups
+         *     became a table.
          *
          *     **`memberId` means either side.** A member reading their own ledger wants what they owe and what they are
          *     owed, which is why the parameter is not called `debtorId`.
+         *
+         *     **Membership is the condition, since ADR 0054** - a group the caller is not in is a `404` with the same code
+         *     and the same reasoning as the group read (ADR 0043): telling "no such group" and "not yours" apart would let
+         *     anybody holding a guess learn which ids are real. The obligations list is the screen this interface is
+         *     organised around, and it names both parties of every commitment, so until then a group's whole ledger was
+         *     readable by anybody who had its id.
          *
          *     **`cursor` is gone and `limit` is here.** The document promised a cursor and no limit, which is a promise to
          *     answer with every obligation a group has ever recorded; a page is what a screen can render, the clamp is the
@@ -944,6 +1040,8 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
             };
         };
         put?: never;
@@ -1127,10 +1225,32 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** What-if netting over currently open obligations */
+        /**
+         * What-if netting over currently open obligations
+         * @description What this group's open commitments would settle as, if they settled at an instant, and what netting saves
+         *     against paying every pair directly.
+         *
+         *     **This operation was the only one in the document with no description at all**, and the reason is worth
+         *     recording rather than quietly fixing: it was written in the first slice of the client (ADR 0028), when the plan
+         *     over a group's obligations was the whole product and a summary and a `200` looked like enough. Everything the
+         *     other reads now say about themselves - which obligations are in it, what a partition is, what the saving is
+         *     measured against - is in `netting.md` and reaches a client through the response schema, so the sentence this
+         *     paragraph adds is the one a reader of *this document* could not have guessed: **what it means for the answer
+         *     to be a group's**, which is a question about who may ask.
+         *
+         *     **Membership is the condition, since ADR 0054.** A group the caller is not in is a `404` with the same code and
+         *     the same reasoning as the group read (ADR 0043): telling "no such group" and "not yours" apart would let
+         *     anybody holding a guess learn which ids are real. A preview is the plan a group is about to execute, with every
+         *     party and amount in it, so this is not a read that could be public.
+         */
         get: {
             parameters: {
                 query?: {
+                    /**
+                     * @description The instant to plan as of. Optional, and absent means now - the one place in this document where "now" is
+                     *     the default, because a preview of a past instant is the same computation with a different cut-off rather
+                     *     than a different operation.
+                     */
                     asOf?: string;
                 };
                 header?: never;
@@ -1150,6 +1270,9 @@ export interface paths {
                         "application/json": components["schemas"]["NettingPreview"];
                     };
                 };
+                400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
             };
         };
         put?: never;
@@ -1190,10 +1313,12 @@ export interface paths {
          *     instant has passed and whose plan never appears is a visible anomaly in a list ordered by when it was
          *     asked, which is the honest way to report a situation this API cannot decide.
          *
-         *     There is no `404` for a group nobody has heard of, for the reason the runs list gives: groups are not
-         *     tables in this build, so the empty array is true of both. Nor is there a filter by "waiting" - it would be
-         *     a second ordering guarantee for a query whose only interesting question is "did my request become a plan",
-         *     which the first page answers.
+         *     **Membership is the condition, since ADR 0054** - a group the caller is not in is a `404` with the same code
+         *     and the same reasoning as the group read (ADR 0043): telling "no such group" and "not yours" apart would let
+         *     anybody holding a guess learn which ids are real. The paragraph that used to be here said the opposite, on the
+         *     ground that groups are not tables in this build - true when it was written, and false since ADR 0043. What is
+         *     still not here is a filter by "waiting": it would be a second ordering guarantee for a query whose only
+         *     interesting question is "did my request become a plan", which the first page answers.
          */
         get: {
             parameters: {
@@ -1223,6 +1348,8 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
             };
         };
         put?: never;
@@ -1334,10 +1461,13 @@ export interface paths {
          *     two ways to describe one run is the second implementation of "what a run is" that ADR 0021
          *     refuses, and the two would drift the first time a figure was added.
          *
-         *     There is no `404` for a group nobody has heard of. Groups are not tables in this build, so "no
-         *     such group" and "a group with no runs" cannot be told apart here; the empty array is true of
-         *     both. Nor is there a `status` filter: newest-first puts what needs answering at the top of any
-         *     page, and a filtered query would need its own ordering guarantee. Both are recorded as gaps.
+         *     **Membership is the condition, since ADR 0054** - a group the caller is not in is a `404` with the same code
+         *     and the same reasoning as the group read (ADR 0043): telling "no such group" and "not yours" apart would let
+         *     anybody holding a guess learn which ids are real. Two paragraphs left this description with the change. The
+         *     first said there is no `404` because "groups are not tables in this build" - true when it was written and false
+         *     since ADR 0043. The second said there is no `status` filter: **that one still stands**, because newest-first
+         *     puts what needs answering at the top of any page and a filtered query would need its own ordering guarantee.
+         *     It is one gap rather than two now, and the plan records it as one.
          */
         get: {
             parameters: {
@@ -1368,6 +1498,8 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
             };
         };
         put?: never;
@@ -1398,6 +1530,14 @@ export interface paths {
          *
          *     `answers` carries every stored answer, including any that cannot count; whether one counted is the
          *     run's judgement, not this response's.
+         *
+         *     **Membership is the condition, since ADR 0054, and the refusal stays `no_such_run`.** A run belongs to a
+         *     group, so reading one is reading that group's books - and the caller must be a member of the group the run
+         *     settles. What is deliberately *not* changed is the code: a run that exists in a group the caller is not in
+         *     answers exactly what a run id that matches nothing answers (`api.no_such_run`, `404`), because a second code
+         *     for "not yours" would make this endpoint an oracle for which run ids are real - the same enumeration the group
+         *     reads close with one answer for "no such group" and "not yours" (ADR 0043, 0044). The refusal's own message
+         *     says both cases, because the code covers both.
          */
         get: {
             parameters: {
@@ -1420,6 +1560,7 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
                 404: components["responses"]["Problem"];
             };
         };
@@ -1595,7 +1736,11 @@ export interface paths {
          *     are the same.
          *
          *     Served from the same read as `GET /runs/{runId}`, so the two endpoints cannot disagree about one
-         *     plan.
+         *     plan - **including about who may read it.** Since ADR 0054 the caller must be a member of the group the run
+         *     settles, and the refusal is the same `api.no_such_run` that read answers with: this endpoint serves the most
+         *     sensitive part of the plan (who pays whom, and how much), so it is the last place that should be reachable by
+         *     holding an id, and the one answer for a missing run and a stranger's run is what keeps run ids from being
+         *     probed (ADR 0044).
          */
         get: {
             parameters: {
@@ -1618,6 +1763,7 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
                 404: components["responses"]["Problem"];
             };
         };
@@ -1658,8 +1804,15 @@ export interface paths {
          *     cycle's `as_of` rather than the run's creation: `as_of` is the instant the books were closed and the instant
          *     every rate and tax rule was resolved at (`docs/specs/tax-rules.md` section 4), so it is the date a tax
          *     belongs to. Both are optional, and omitting them reports everything the group has ever planned. The days are
-         *     UTC, which is a stand-in of the same kind the obligations list records - the cycle end date should be
-         *     evaluated in the group's settlement timezone and no group exists as a table in this build.
+         *     UTC, and the same stand-in the obligations list records applies here: the day belongs to the group, and a
+         *     group's settlement timezone is nullable - the paragraph that used to be here said no group exists as a table
+         *     in this build, which was true when it was written and false since ADR 0043.
+         *
+         *     **Membership is the condition, since ADR 0054**, and this read is the one where the check had to be added
+         *     rather than looked for: `groupId` arrives as a **query parameter** rather than as a path segment, so no rule
+         *     about paths could have found it and no reader of the path list would have noticed it was missing. A group the
+         *     caller is not in is a `404` with the same code and the same reasoning as the group read (ADR 0043): telling
+         *     "no such group" and "not yours" apart would let anybody holding a guess learn which ids are real.
          *
          *     **There is no headline figure, and the parameter list is why.** A single "tax owed" would have to be
          *     expressed in some currency, and adding rupees to yen is not addition (ADR 0012). The contract gives this
@@ -1693,6 +1846,8 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["Problem"];
+                401: components["responses"]["Problem"];
+                404: components["responses"]["Problem"];
             };
         };
         put?: never;
@@ -2306,6 +2461,38 @@ export interface components {
             /** Format: date-time */
             expiresAt: string;
             maxUses?: number;
+        };
+        /**
+         * @description What an invite code is for: the group it joins somebody to, and the code's own terms.
+         *
+         *     It carries no member names, no amounts and no commitments - a code says "you are invited to this group", and a
+         *     preview that disclosed more than that would disclose a ledger nobody has joined yet (ADR 0054). It is also the
+         *     one response in this document a **signed-out** caller can read, which is what makes the link flow work: the
+         *     code is the capability, and the group chose to hand it out.
+         */
+        InvitePreview: {
+            code: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /**
+             * @description How many times the code may be spent, or absent for no limit - the same absent-means-unlimited reading
+             *     `Invite.maxUses` requires.
+             */
+            maxUses?: number;
+            /** @description The group the code joins somebody to, as much of it as somebody who has not joined is entitled to know. */
+            group: {
+                /** Format: uuid */
+                id: string;
+                /**
+                 * @description The group's name, or absent for a group that exists only as rows: `group_members` and `invitations`
+                 *     write a bare uuid, and a group with members and no `groups` row of its own is a state this build
+                 *     contains (ADR 0043). A client shows the id instead, which is the fallback its group layout makes for
+                 *     the same reason.
+                 */
+                name?: string;
+                /** @description How many members the group has now, including anybody who joined with this same code. */
+                memberCount: number;
+            };
         };
         /**
          * @description What somebody joining supplies, which is now only what the group will call them.
